@@ -1,0 +1,39 @@
+# Ignore Python bytecode and cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore virtual environments
+.venv/
+.env/
+
+# Ignore system-specific files
+.DS_Store
+Thumbs.db
+*.log
+
+# Ignore temporary or editor-specific files
+*.swp
+*.swo
+*.tmp
+.idea/
+*.bak
+.vscode/
+*.code-workspace
+
+# Ignore model files and large data files
+*.pkl
+*.h5
+*.csv
+*.json
+
+
+# Ignore sensitive or environment-specific configurations
+.env
+*.key
+*.pem
+
+# Ignore generated files or build outputs
+build/
+dist/
+*.egg-info/
