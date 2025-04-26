@@ -1,62 +1,26 @@
-from datetime import datetime
-from DB import dataschema
 from dotenv import load_dotenv
-import featuretools as ft
-from feature_engine import transformation as vt
-from fuzzywuzzy import fuzz
-from glob import glob
-from hdbscan import HDBSCAN
-import heapq
+load_dotenv()
+from DB import engine, SessionLocal
 import helper
 import json
 import logging
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
-from mlxtend.plotting import plot_pca_correlation_graph
-from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import os
 os.environ["MPLBACKEND"] = "TkAgg"
 import pandas as pd
-import questionary
+from pathlib import Path
 from rapidfuzz import process, fuzz
-from scipy import stats
-from scipy.cluster.hierarchy import dendrogram, ward
-from scipy.spatial.distance import cdist
 import seaborn as sns
-from sklearn import datasets, manifold, mixture
 from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
-from sklearn.datasets import load_digits
-from sklearn.decomposition import PCA
-from sklearn.ensemble import (
-    ExtraTreesRegressor,
-    IsolationForest,
-    RandomForestClassifier,
-)
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.feature_selection import f_classif, SelectKBest, VarianceThreshold
-from sklearn.impute import SimpleImputer
-from sklearn.inspection import permutation_importance
-from sklearn.linear_model import BayesianRidge, LogisticRegression
-from sklearn.manifold import MDS
-from sklearn.metrics import silhouette_score
-from sklearn.model_selection import train_test_split
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.preprocessing import (
-    LabelEncoder,
-    MinMaxScaler,
-    PolynomialFeatures,
-    QuantileTransformer,
-    RobustScaler,
-)
+from sqlalchemy import select, text
 import sys
-import tabulate
-import zipfile
-
+HERE = Path(__file__).resolve().parent
+JSON_DIR = HERE / "JSON"
+PALETTES_FILE = JSON_DIR / "palettes.json"
 os.environ.pop("FLASK_APP", None)
-load_dotenv()
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -72,57 +36,61 @@ pd.set_option("display.max_columns", None)
 pd.options.display.float_format = "{: .2f}".format
 
 # %% display options for a specific style
-with open("palettes.json", "r") as file:
-    custom_palettes = json.load(file)["palettes"]
+with PALETTES_FILE.open("r", encoding="utf-8") as fh:
+    custom_palettes = json.load(fh)["palettes"]
 custom_colors = helper.register_custom_palette("colorpalette_5", custom_palettes)
 sns.set_style(style="whitegrid")
 sns.set_palette(sns.color_palette(custom_colors))
 cmap = sns.diverging_palette(220, 10, as_cmap=True)
 
-# %% Step 1: Load the data
+# %% Step 1: Loading the data from the latest parquet file
 print("===========================================")
-print("Welcome to the MyLifeInData EDA workflow!")
+print("Welcome to the CanonFodder data profiling workflow!")
 print("We'll load your scrobble data, apply any previously saved artist name unifications,")
 print("then explore on forward.")
 print("===========================================\n")
 logging.info("I am happy for you being here!")
-print("Step 1: Loading and cleaning your CSV data. Please wait...")
-csv_dir = r"C:\Users\jurda\PycharmProjects\MyLifeInData\CSV"
-latest_csv_file = helper.get_latest_csv(csv_dir)
-data = pd.read_csv(latest_csv_file)
-
-# Name the columns
-data.columns = ["Artist", "Album", "Song", "Datetime"]
-
-# Clean up semicolons from Datetime
-data["Datetime"] = data["Datetime"].str.replace(";", "", regex=False)
-data["Datetime"] = pd.to_datetime(data["Datetime"], format="%d %b %Y %H:%M", errors="coerce")
+print("Step 1: Loading and cleaning your scrobble data. Please wait...")
+data, latest_filename = helper.load_latest_parquet_in_pq()
+if data is None or data.empty:
+    print("No DataFrame was loaded; cannot proceed with EDA.")
+    sys.exit()
+# Naming the columns
+data.columns = ["Artist", "Album", "Song", "Datetime", "Country"]
+data.info()
+helper.missing_value_ratio(data)
 data.dropna(subset=["Datetime"], inplace=True)
-data["Datetime"] = data["Datetime"].dt.strftime("%Y-%m-%d %H:%M")
 
-# %% Step 2: Connect to the DB and apply previously stored unifications/canonizations
-conn = dataschema.get_db("DB/artist_unification.db")
-print("\n--- Connecting to the database for previously stored canonical names ---")
-cursor = conn.cursor()
-logging.info("Fetching all previously handled groups (where canonical_name != '__SKIP__')...")
-rows = cursor.execute("""
-    SELECT group_signature, canonical_name 
-    FROM groups_handled
-    WHERE canonical_name != '__SKIP__'
-""").fetchall()
-for group_sig, canonical_name in rows:
-    # Convert the signature back to a list of old names
+# %% Step 2: Checking for duplicates
+before_count = len(data)
+data = data.drop_duplicates(subset=["Artist", "Album", "Song", "Datetime"], keep="first")
+after_count = len(data)
+removed_count = before_count - after_count
+logging.info(f"Removed {removed_count} duplicate rows.")
+
+# %% Step 3: Connect to the DB and apply previously stored unifications/canonizations
+with SessionLocal() as sess:
+    logging.info("Fetching all previously handled groups …")
+    handled = sess.execute(
+        text("""
+             SELECT group_signature, canonical_name
+             FROM groups_handled
+             WHERE canonical_name != '__SKIP__'
+        """)
+    ).all()
+for group_sig, canonical_name in handled:
+    # Converting the signature back to a list of old names
     old_names = group_sig.split("|")
     for old_name in old_names:
         if old_name != canonical_name:
             data.loc[data["Artist"] == old_name, "Artist"] = canonical_name
 
-# %% Step 3: Now do EDA tasks on the already-updated data
+# %% Step 4: Now do EDA tasks on the already-updated data
 artist_counts = data["Artist"].value_counts()
 top_artists = artist_counts.head(10)
 print(top_artists)
-with open("palettes.json", "r") as file:
-    custom_palettes = json.load(file)["palettes"]
+with PALETTES_FILE.open("r", encoding="utf-8") as fh:
+    custom_palettes = json.load(fh)["palettes"]
 custom_colors_10 = helper.register_custom_palette("colorpalette_10", custom_palettes)
 sns.set_style(style="whitegrid")
 sns.set_palette(sns.color_palette(custom_colors_10))
@@ -161,13 +129,13 @@ for i in range(n):
         similarity_matrix[i, j] = (
             fuzz.token_sort_ratio(artist_names[i], artist_names[j]) / 100
         )
-# bohren_indices = [i for i, name in enumerate(artist_names) if "bohren" in name]
-# for eps in np.arange(0.01, 1.0, 0.01):
-#     dbscan = DBSCAN(eps=eps, min_samples=2, metric="precomputed")
-#     labels = dbscan.fit_predict(1 - similarity_matrix)
-#     if labels[bohren_indices[0]] == labels[bohren_indices[1]] and labels[bohren_indices[0]] != -1:
-#         print(f"Bohren occurrences are grouped together at epsilon: {eps}")
-#         break
+bohren_indices = [i for i, name in enumerate(artist_names) if "bohren" in name]
+for eps in np.arange(0.01, 1.0, 0.01):
+    dbscan = DBSCAN(eps=eps, min_samples=2, metric="precomputed")
+    labels = dbscan.fit_predict(1 - similarity_matrix)
+    if labels[bohren_indices[0]] == labels[bohren_indices[1]] and labels[bohren_indices[0]] != -1:
+        print(f"Bohren occurrences are grouped together at epsilon: {eps}")
+        break
 print("\n--- Running DBSCAN to find new clusters of similar artists ---")
 dbscan = DBSCAN(eps=0.12, min_samples=2, metric="precomputed")
 labels = dbscan.fit_predict(1 - similarity_matrix)
@@ -180,21 +148,21 @@ print(f"Number of groups identified: {len(similar_artist_groups)}")
 
 # %%
 # DBing artist name canonization
-db_path = "DB/artist_unification.db"
-conn = dataschema.get_db("DB/artist_unification.db")
-unhandled_count = 0
-for group in similar_artist_groups:
-    if len(group) <= 1:
-        continue
-    group_signature = "|".join(sorted(group))
-    row = conn.execute(
-        "SELECT canonical_name FROM groups_handled WHERE group_signature = ?",
-        (group_signature,)
-    ).fetchone()
-    if row is None:
-        unhandled_count += 1
+with SessionLocal() as sess:
+    unhandled = 0
+    for group in similar_artist_groups:
+        if len(group) <= 1:
+            continue
+        sig = "|".join(sorted(group))
+        row = sess.execute(
+            text("SELECT 1 FROM groups_handled WHERE group_signature = :sig"),
+            {"sig": sig},
+        ).first()
+        if row is None:
+            unhandled += 1
+
 print(f"Number of groups identified by DBSCAN: {len(similar_artist_groups)}")
-print(f"Number of groups NOT yet handled by user: {unhandled_count}")
+print(f"Number of groups NOT yet handled by user: {unhandled}")
 
 # %%
 # CLI for picking canonical names for similar artist names
@@ -202,73 +170,13 @@ data, fltrd_artcount = helper.unify_artist_names_cli(
     data=data,
     fltrd_artcount=fltrd_artcount,
     similar_artist_groups=similar_artist_groups,
-    conn=conn
 )
-conn.close()
 print("Done unifying. Next steps coming later. Now exiting...")
 
 # gender_values = data.Gender.value_counts().sort_values(ascending=False).to_frame()
 # gender_values = gender_values.rename(columns={"Gender": "count"})
 # print(gender_values)
 sys.exit()
-
-# %%
-# Cleaning Gender column
-data.Gender = data.Gender.str.lower()
-# noinspection SpellCheckingInspection
-male = [
-    "male",
-    "m",
-    "male-ish",
-    "maile",
-    "mal",
-    "male (cis)",
-    "make",
-    "male ",
-    "man",
-    "msle",
-    "mail",
-    "malr",
-    "cis man",
-    "cis male",
-]
-# noinspection SpellCheckingInspection
-female = [
-    "cis female",
-    "f",
-    "female",
-    "woman",
-    "femake",
-    "female ",
-    "cis-female/femme",
-    "female (cis)",
-    "femail",
-]
-other = [
-    "trans-female",
-    "something kinda male?",
-    "queer/she/they",
-    "non-binary",
-    "nah",
-    "enby",
-    "fluid",
-    "genderqueer",
-    "androgyne",
-    "agender",
-    "male leaning androgynous",
-    "guy (-ish) ^_^",
-    "trans woman",
-    "neuter",
-    "female (trans)",
-    "queer",
-    "ostensibly male, unsure what that really means",
-]
-data.loc[data.Gender.isin(male), "Gender"] = "male"
-data.loc[data.Gender.isin(female), "Gender"] = "female"
-data.loc[data.Gender.isin(other), "Gender"] = "other"
-gender_values = data.Gender.value_counts().sort_values(ascending=False).to_frame()
-gender_values = gender_values.rename(columns={"Gender": "count"})
-print(gender_values)
 
 # %%
 # EDA of Country column
@@ -303,66 +211,6 @@ plt.tight_layout()
 plt.show()
 plt.close()
 
-# %%
-# Transforming "Country" column
-Africa = ["South Africa", "Nigeria"]
-Americas = [
-    "United States",
-    "Canada",
-    "Mexico",
-    "Brazil",
-    "Costa Rica",
-    "Colombia",
-    "Uruguay",
-]
-Asia = [
-    "Russia",
-    "India",
-    "Israel",
-    "Singapore",
-    "Japan",
-    "Thailand",
-    "China",
-    "Philippines",
-]
-AustraliaandOceania = ["Australia", "New Zealand"]
-Europe = [
-    "France",
-    "United Kingdom",
-    "Portugal",
-    "Netherlands",
-    "Switzerland",
-    "Poland",
-    "Germany",
-    "Slovenia",
-    "Austria",
-    "Ireland",
-    "Italy",
-    "Bulgaria",
-    "Sweden",
-    "Latvia",
-    "Romania",
-    "Belgium",
-    "Spain",
-    "Finland",
-    "Bosnia and Herzegovina",
-    "Hungary",
-    "Croatia",
-    "Norway",
-    "Denmark",
-    "Greece",
-    "Moldova",
-    "Georgia",
-    "Czech Republic",
-]
-data.loc[data.Country.isin(Africa), "Country"] = "Africa"
-data.loc[data.Country.isin(Americas), "Country"] = "Americas"
-data.loc[data.Country.isin(Asia), "Country"] = "Asia"
-data.loc[data.Country.isin(AustraliaandOceania), "Country"] = "Australia and Oceania"
-data.loc[data.Country.isin(Europe), "Country"] = "Europe"
-country_values = data.Country.value_counts().sort_values(ascending=False).to_frame()
-country_values = country_values.rename(columns={"Country": "count"})
-print(country_values)
 
 # %%
 # Calculating and visualizing Cramér's V
@@ -1346,5 +1194,22 @@ for feature in features:
 plt.close()
 
 # %%
-if __name__ == "__main__":
-    print("works like a PyCharm")
+# User can choose to query filtering per country they lived in
+with get_session() as s:
+    current_country = (
+        s.scalars(
+            select(UserCountry)
+            .where(UserCountry.end_date.is_(None))
+        )
+        .first()
+    )
+    if current_country:
+        tracks = s.scalars(
+            select(Scrobble)
+            .where(
+                Scrobble.play_time >= current_country.start_date,
+                # Any "end_date" check only if it's not NULL:
+                current_country.end_date.is_(None)
+                | (Scrobble.play_time < current_country.end_date)
+            )
+        ).all()

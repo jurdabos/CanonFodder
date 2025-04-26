@@ -11,7 +11,11 @@ For further elaboration, you can contact balazs.torda@iu-study.org.
 
 ## The basic building blocks
 
-It is a project developed in PyCharm incorporating different languages and db connections.<br>
+It is a project developed in PyCharm incorporating Python scripts and SQL-based db connections.<br>
+As an example for fetching scrobble data in CSV, I am using https://benjaminbenben.com/lastfm-to-csv/.<br>
+You can look at Ben Foxall's code at https://github.com/benfoxall/lastfm-to-csv.<br>
+For correct data retrieval, I am using the last.fm API.<br>
+The terms of use can be checked at https://www.last.fm/api.<br>
 
 ## Installation
 
@@ -39,8 +43,8 @@ pip install .
 ```
 
 ## How to use it?
-Probably command
+Command
 ```shell
 python main.py
 ```
-But inspect the files provided, and decide on what you want to achieve. More info on the way.
+And go through the menu options.

@@ -1,0 +1,104 @@
+alembic\env.py
+    run_migrations_offline()
+    run_migrations_online()
+
+alembic\versions\8307188288d4_initial_schema.py
+    upgrade()
+    downgrade()
+
+CSV\autofetch.py
+    fetch_scrobbles_csv()
+
+DB\__init__.py
+    get_engine()
+    get_session()
+
+DB\common.py
+    make_sessionmaker()
+
+DB\guard_intervals.py
+    _overlap_clause()
+    no_overlapping_user_countries()
+
+DB\models.py
+    Base
+    ArtistVariantsCanonized
+    Scrobble
+    ArtistCountry
+    UserCountry
+
+DB\mysql.py
+    create_scrobble_table()
+    enrich_scrobbles_with_country()
+    fetch_latest_scrobble_data_from_db()
+    get_mysql_engine()
+    get_session()
+    import_csv_to_db()
+    store_recent_tracks_in_db()
+
+DB\ops.py
+    get_engine()
+    get_session()
+    bulk_insert_scrobbles_to_sqlite()
+    bulk_insert_scrobbles_to_mysql()
+    save_group()
+    latest_scrobble_df()
+    store_recent_tracks()
+
+DB\sqlite.py
+    get_session()
+    get_sqlite_engine()
+
+helper.py
+    get_db_session()
+    _apply_canonical()
+    _clf_scorer()
+    _remember()
+    ask()
+    automated_feature_engineering_and_clustering()
+    calculate_clustering_metrics()
+    choose_lastfm_user()
+    clf_proba()
+    cramers_v()
+    drop_high_corr_features()
+    fuzzy_scores()
+    get_latest_csv()
+    iterative_correlation_dropper()
+    load_latest_parquet_in_pq()
+    missing_value_ratio()
+    most_similar()
+    register_custom_palette()
+    safe_parse()
+    save_as_word_table()
+    top_10_largest_ranges()
+    unify_artist_names_cli()
+    variance_testing()
+    verify_volcano_name()
+    winsorization_outliers()
+    yes_no()
+
+HTTP\client.py
+    make_request()
+
+lfAPI.py
+    fetch_misc_data_from_lastfmapi()
+    fetch_recent_tracks_all_pages()
+    generate_lastfm_signature()
+    lastfm_request()
+
+LLM.py
+    train_llm_and_enrich_data()
+
+main.py
+    newest_csv_for()
+    main()
+
+mbAPI.py
+    fetch_country()
+    musicbrainz_request()
+
+scripts\bootstrap_db.py
+    main()
+
+scripts\list_symbols.py
+    list_defs()

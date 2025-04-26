@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.pyo
+.Python
 
 # Ignore virtual environments
 .venv/
@@ -27,7 +28,6 @@ Thumbs.db
 *.csv
 *.json
 
-
 # Ignore sensitive or environment-specific configurations
 .env
 *.key
@@ -37,3 +37,7 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+.eggs/
+
+# Alembic caches
+alembic/versions/__pycache__/
