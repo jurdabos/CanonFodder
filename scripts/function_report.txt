@@ -2,9 +2,14 @@ alembic\env.py
     run_migrations_offline()
     run_migrations_online()
 
-alembic\versions\8307188288d4_initial_schema.py
-    upgrade()
-    downgrade()
+corefunc\canonizer.py
+    _split()
+    apply_previous()
+    minimal_epsilon()
+
+corefunc\dataprofiler.py
+    quick_viz()
+    run_profiling()
 
 CSV\autofetch.py
     fetch_scrobbles_csv()
@@ -26,79 +31,92 @@ DB\models.py
     Scrobble
     ArtistCountry
     UserCountry
-
-DB\mysql.py
-    create_scrobble_table()
-    enrich_scrobbles_with_country()
-    fetch_latest_scrobble_data_from_db()
-    get_mysql_engine()
-    get_session()
-    import_csv_to_db()
-    store_recent_tracks_in_db()
+    AsciiChar
 
 DB\ops.py
-    get_engine()
-    get_session()
+    _prepare_scrobble_rows()
+    ascii_freq()
+    bulk_insert_scrobbles()
     bulk_insert_scrobbles_to_sqlite()
     bulk_insert_scrobbles_to_mysql()
     save_group()
-    latest_scrobble_df()
-    store_recent_tracks()
+    latest_scrobble_table_to_df()
+    seed_ascii_chars()
 
-DB\sqlite.py
-    get_session()
-    get_sqlite_engine()
+dev_canon.py
+    _split_variants()
 
-helper.py
-    get_db_session()
+dev_profile.py
+    MBXMLFilter
+    _split_variants()
+    _country_for_series()
+
+enrich.py
+    enrich_artist_country()
+
+helpers\cli.py
     _apply_canonical()
-    _clf_scorer()
     _remember()
     ask()
-    automated_feature_engineering_and_clustering()
-    calculate_clustering_metrics()
     choose_lastfm_user()
+    unify_artist_names_cli()
+    verify_commas()
+    yes_no()
+
+helpers\cluster.py
+    _clf_scorer()
     clf_proba()
+    calculate_clustering_metrics()
+    fuzzy_scores()
+    most_similar()
+
+helpers\io.py
+    _parquet_name()
+    dump_parquet()
+    latest_csv()
+    latest_parquet()
+    dump_latest_table_to_parquet()
+    register_custom_palette()
+    save_as_word_table()
+
+helpers\stats.py
     cramers_v()
     drop_high_corr_features()
-    fuzzy_scores()
-    get_latest_csv()
     iterative_correlation_dropper()
-    load_latest_parquet_in_pq()
     missing_value_ratio()
-    most_similar()
-    register_custom_palette()
-    safe_parse()
-    save_as_word_table()
-    top_10_largest_ranges()
-    unify_artist_names_cli()
     variance_testing()
-    verify_volcano_name()
     winsorization_outliers()
-    yes_no()
 
 HTTP\client.py
     make_request()
 
 lfAPI.py
+    _clean_track()
     fetch_misc_data_from_lastfmapi()
     fetch_recent_tracks_all_pages()
     generate_lastfm_signature()
     lastfm_request()
+    LastFMError
 
 LLM.py
     train_llm_and_enrich_data()
 
 main.py
-    newest_csv_for()
     main()
 
 mbAPI.py
+    MBArtistCache
+    safe_mb_call()
+    _rate_limited()
+    _retryable()
+    init()
+    search_artist()
+    _get_session()
+    lookup_artist()
     fetch_country()
-    musicbrainz_request()
-
-scripts\bootstrap_db.py
-    main()
+    _cache_artist()
+    add_alias()
+    _get_cached()
 
 scripts\list_symbols.py
     list_defs()

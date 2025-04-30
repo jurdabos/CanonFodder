@@ -1,13 +1,14 @@
 from dotenv import load_dotenv
 load_dotenv()
-from DB import engine, SessionLocal
 import hashlib
 from HTTP.client import make_request, USER_AGENT
 import logging
 import os
 import pandas as pd
 from pathlib import Path
+from typing import Any, Dict, Optional
 
+ENDPOINT = "https://ws.audioscrobbler.com/2.0/"
 HERE = Path(__file__).resolve().parent
 # Constants
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY")
@@ -20,15 +21,15 @@ if not LASTFM_API_KEY:
 
 def _clean_track(rec: object) -> dict | None:
     """Returns a normalised track‐dict or None."""
-    if not isinstance(rec, dict):          # ← to guard against plain strings
+    if not isinstance(rec, dict):  # ← to guard against plain strings
         return None
     # rows for the *currently playing* track having no 'date'
     uts = int(rec.get("date", {}).get("uts", 0) or 0)
     return {
-        "artist_name":   rec["artist"]["#text"],
-        "album_title":   rec["album"]["#text"],
-        "track_title":   rec["name"],
-        "uts":           uts,
+        "artist_name": rec["artist"]["#text"],
+        "album_title": rec["album"]["#text"],
+        "track_title": rec["name"],
+        "uts": uts,
     }
 
 
@@ -43,35 +44,36 @@ def fetch_misc_data_from_lastfmapi(user: str | None = None) -> None:
     if not user:
         user = input("Enter your Last.fm username: ").strip()
     # ── API calls ───────────────────────────────────────────────────────────────
-    top_artists = lastfm_request("user.gettopartists", user=user)
-    top_albums = lastfm_request("user.gettopalbums", user=user)
-    top_tracks = lastfm_request("user.gettoptracks", user=user)
-    friends = lastfm_request("user.getfriends", user=user)
-    infos = lastfm_request("user.getinfo", user=user)
-    lovedtracks = lastfm_request("user.getlovedtracks", user=user)
+    top_artists = lastfm_request("user.getTopArtists", user=user)
+    top_albums = lastfm_request("user.getTopAlbums", user=user)
+    top_tracks = lastfm_request("user.getTopTracks", user=user)
+    try:
+        friends = lastfm_request("user.getFriends", user=user)
+    except LastFMError as exc:  # own wrapper around RuntimeError
+        if exc.code == 6:  # -> not fatal, continue workflow
+            logging.info("Friend list private – skipping")
+            friends = []
+        else:
+            raise  # re-raise unknown problems
+    infos = lastfm_request("user.getInfo", user=user)
+    lovedtracks = lastfm_request("user.getLovedTracks", user=user)
     # ── Top artists ────────────────────────────────────────────────────────────
     if top_artists and "topartists" in top_artists:
         print("Top Artists:")
-        for artist in top_artists["topartists"]["artist"][:3]:
+        for artist in top_artists["topartists"]["artist"][:2]:
             print("   ", artist.get("name", "N/A"))
     # ── Top albums (title  +  “by ‹artist›”) ───────────────────────────────────
     if top_albums and "topalbums" in top_albums:
         print("\nTop Albums:")
-        for album in top_albums["topalbums"]["album"][:3]:
+        for album in top_albums["topalbums"]["album"][:2]:
             print(f"   {album.get('name', 'N/A')}  by {album.get('artist', {}).get('name', '?')}")
     # ── Top tracks (title  +  “by ‹artist›”) ───────────────────────────────────
     if top_tracks and "toptracks" in top_tracks:
         print("\nTop Tracks:")
-        for track in top_tracks["toptracks"]["track"][:3]:
+        for track in top_tracks["toptracks"]["track"][:2]:
             title = track.get("name", "N/A")
             artist = track.get("artist", {}).get("name", "N/A")
             print(f"   {title} by {artist}")
-    # ── Friends ────────────────────────────────────────────────────────────────
-    if friends and "friends" in friends:
-        print("\n3 friends:")
-        for friend in friends["friends"]["user"][:3]:
-            print("   ", friend.get("name", "N/A"),
-                  "=", friend.get("realname", "N/A"))
     # ── User info ──────────────────────────────────────────────────────────────
     if infos and "user" in infos:
         u = infos["user"]
@@ -81,8 +83,8 @@ def fetch_misc_data_from_lastfmapi(user: str | None = None) -> None:
         print("   Playcount:", u.get("playcount", "N/A"))
     # ── Loved tracks ───────────────────────────────────────────────────────────
     if lovedtracks and "lovedtracks" in lovedtracks:
-        print("\n3 loved tracks:")
-        for lt in lovedtracks["lovedtracks"]["track"][:3]:
+        print("\n2 loved tracks:")
+        for lt in lovedtracks["lovedtracks"]["track"][:2]:
             title = lt.get("name", "N/A")
             artist = lt.get("artist", {}).get("name", "N/A")
             print(f"   {title} by {artist}")
@@ -103,7 +105,7 @@ def fetch_recent_tracks_all_pages(user: str) -> pd.DataFrame:
             break
         raw = rsp["recenttracks"].get("track", [])
         batch = [_clean_track(t) for t in raw]
-        batch = [b for b in batch if b]           # to drop Nones
+        batch = [b for b in batch if b]  # to drop Nones
         bag.extend(batch)
         # Are we on the last page?
         meta = rsp["recenttracks"].get("@attr", {})
@@ -128,38 +130,83 @@ def generate_lastfm_signature(params, secret):
 # --------------------------------------------------------------
 # Thin last.fm-specific wrapper around HTTP.client's make_request
 # --------------------------------------------------------------
-def lastfm_request(method: str,
-                   *,
-                   user: str | None = None,
-                   page: int | None = None,
-                   limit: int | None = None):
-    url = "https://ws.audioscrobbler.com/2.0/"
-    params = {
+def lastfm_request(
+        method: str,
+        *,
+        authed: bool = False,
+        user: Optional[str] = None,
+        page: Optional[int] = None,
+        limit: Optional[int] = None,
+        timeout: int = 10,
+) -> Dict[str, Any]:
+    """
+    Thin wrapper around the Last.fm REST endpoint.
+    Raises
+    ------
+    LastFMError   for HTTP failures or Last.fm JSON errors
+    """
+    # ---------- query construction ------------------------------------------------
+    q: dict[str, Any] = {
         "method": method,
-        "api_key": LASTFM_API_KEY,
         "format": "json",
     }
-    if user:
-        params["user"] = user
-    if page:
-        params["page"] = page
-    if limit:
-        params["limit"] = limit
-    rsp = make_request(url, params=params,
-                       headers={"User-Agent": USER_AGENT},
-                       max_retries=10)
-    if rsp is None:
-        raise RuntimeError("Last.fm: empty HTTP response")
+    # auth — either API key or `sk` (session key) for write-calls
+    if authed:
+        if not LASTFM_SESSION_KEY:
+            raise LastFMError(-2, "No SESSION KEY in env", ENDPOINT)
+        q["sk"] = LASTFM_SESSION_KEY
+    else:
+        if not LASTFM_API_KEY:
+            raise LastFMError(-3, "No API KEY in env", ENDPOINT)
+        q["api_key"] = LASTFM_API_KEY
+    # optional parameters ----------------------------------------------------------
+    if user is not None:
+        q["user"] = user
+    if page is not None:
+        q["page"] = page
+    if limit is not None:
+        q["limit"] = limit
+    # --- HTTP request ---------------------------------------------------------
+    r = make_request(url=ENDPOINT,
+                     params=q,
+                     headers={"User-Agent": USER_AGENT},
+                     max_retries=10)
+    if r is None:  # network totally failed
+        raise LastFMError(-1, "empty HTTP response", ENDPOINT)
+    # Try JSON decoding no matter what the status code was
+    json_body: Any | None = None
     try:
-        data = rsp.json()
+        json_body = r.json()
     except ValueError:
-        raise RuntimeError("Last.fm: response is not JSON")
-    # ── reject anything that is not a JSON *object* ─────────────────
-    if not isinstance(data, dict):
-        # log ‘data’ for diagnostics, then
-        return None  # signal to the caller → stop
-    if "error" in data:  # real API-level error
-        raise RuntimeError(
-            f"Last.fm API error {data['error']}: {data['message']}"
-        )
-    return data
+        pass  # not JSON → leave at None
+    # Transport layer error?
+    if r.status_code != 200:
+        # Did Last.fm still give us a structured error?
+        if isinstance(json_body, dict) and "error" in json_body:
+            raise LastFMError(json_body["error"],
+                              json_body.get("message", "No message"),
+                              r.url)
+        raise LastFMError(-1, f"HTTP {r.status_code}", r.url)
+    # 200 OK but application-level error?
+    if isinstance(json_body, dict) and "error" in json_body:
+        raise LastFMError(json_body["error"],
+                          json_body.get("message", "No message"),
+                          r.url)
+    return json_body  # type: ignore[return-value]
+
+
+class LastFMError(RuntimeError):
+    """
+    Raised for any non-200 response from the Last.fm API.
+    Attributes
+    ----------
+    code        Last.fm numeric error code (int)
+    message     Last.fm error message (str)
+    url         full request URL (str) – handy when debugging
+    """
+
+    def __init__(self, code: int, message: str, url: str):
+        super().__init__(f"Last.fm API error {code}: {message}\n{url}")
+        self.code = code
+        self.message = message
+        self.url = url

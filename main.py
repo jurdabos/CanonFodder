@@ -1,151 +1,159 @@
 from __future__ import annotations
-
 """
 Main entry-point for CanonFodder.
 The script walks the operator through a *linear* workflow:
     1) decide which Last.fm user we are working with
     2) obtain a CSV (fresh download or reuse newest local one)
-    3) verify CSV quirks (commas stripped etc.) – show a preview
+    3) verify CSV quirks (commas stripped)
     4) fetch recent scrobbles via the Last.fm API and load into the DB
-    5) (placeholder) canonisation / MusicBrainz enrichment / EDA steps (to be filled out later when developed)
+    5) guide operator to further notebook-style workflows in dev_profile.py and dev_canon.py
 """
-import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+import logging
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()],
+    force=True
+)
+logging.getLogger("musicbrainzngs").setLevel(logging.WARNING)
+# All DB plumbing resolved by DB.__init__
+from DB import engine, SessionLocal  # noqa: I202
+from DB.ops import ascii_freq, bulk_insert_scrobbles, latest_scrobble_table_to_df, seed_ascii_chars
+from DB.models import Base
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import json
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
+import os
 import pandas as pd
+import seaborn as sns
 from dotenv import load_dotenv
 
 load_dotenv()
-# All DB plumbing is resolved by DB.__init__
-from DB import engine, SessionLocal                     # noqa: I202
-from DB.ops import bulk_insert_scrobbles, latest_scrobble_df
+from corefunc import dataprofiler as dp, canonizer as cz
 from CSV.autofetch import fetch_scrobbles_csv
-import helper
+from enrich import enrich_artist_country
+from helpers.io import (CSV_DIR,
+                        latest_csv,
+                        latest_parquet,
+                        dump_parquet,
+                        register_custom_palette)
+from helpers.cli import (choose_lastfm_user,
+                         verify_commas,
+                         yes_no)
 import lfAPI
 import mbAPI
-
-# ------------------------------------------------------------
-
-pd.set_option("display.max_columns", None)
+mbAPI.init()
+# Display options and directory setting
+pd.options.display.max_columns = None
+pd.options.display.max_rows = None
 pd.set_option("display.width", 200)
-
+pd.set_option("display.max_colwidth", 100)
+pd.set_option("display.max_columns", None)
+pd.options.display.float_format = "{: .2f}".format
 HERE = Path(__file__).resolve().parent
-CSV_DIR = HERE / "CSV"
-PQ_DIR = HERE / "PQ"
-PQ_DIR.mkdir(exist_ok=True)
-
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-def newest_csv_for(user: str) -> Optional[Path]:
-    """Return the most recent CSV for *user* inside CSV_DIR, else None."""
-    pattern = f"{user}_*.csv"
-    found   = sorted(CSV_DIR.glob(pattern), reverse=True)
-    return found[0] if found else None
-
-
-def newest_parquet() -> Optional[Path]:
-    """Return the newest parquet snapshot inside PQ_DIR (or *None*)."""
-    files = sorted(PQ_DIR.glob("scrobbles_*.parquet"), reverse=True)
-    return files[0] if files else None
-
-
-def dump_latest_table_to_parquet() -> None:
-    """Find the most recent scrobbles table,
-    materialise it into PQ_DIR / scrobbles_YYYYMMDD_HHMMSS.parquet
-    and announce the path."""
-    df_db, latest_tbl = latest_scrobble_df(engine)
-    if df_db is None:
-        print("No scrobble table in DB – nothing to dump.")
-        return
-    pq_file = PQ_DIR / f"{latest_tbl}.parquet"
-    df_db.to_parquet(pq_file, index=False)
-    print(f"Latest scrobble table persisted → {pq_file}")
+JSON_DIR = HERE / "JSON"
+PALETTES_FILE = JSON_DIR / "palettes.json"
+os.environ.pop("FLASK_APP", None)
+with PALETTES_FILE.open("r", encoding="utf-8") as fh:
+    custom_palettes = json.load(fh)["palettes"]
+custom_colors = register_custom_palette("colorpalette_5", custom_palettes)
+sns.set_style(style="whitegrid")
+sns.set_palette(sns.color_palette(custom_colors))
+cmap = sns.diverging_palette(220, 10, as_cmap=True)
 
 
 # ---------------------------------------------------------------------------
 # main workflow
 # ---------------------------------------------------------------------------
 def main() -> None:
-    user = helper.choose_lastfm_user()
+    user = choose_lastfm_user()
+    # Building up all data tables for env-inferred DB connection
+    Base.metadata.create_all(engine)
     # CSV stage
-    local_csv = newest_csv_for(user)
-    print("\n─ CSV stage ─")
+    local_csv = latest_csv(user)
+    print("\n===========================================")
+    print("Welcome to CanonFodder!")
+    print("===========================================\n")
+    print("CSV stage")
     if local_csv:
         print(f"Newest local file: {local_csv.name}")
-        dl_needed = helper.yes_no("Download a fresh CSV (can take 30 min)?"
-                                  "[y]es or [n]o – default is: ",
-                                  default="n")
+        dl_needed = yes_no("\nDownload a fresh CSV (can take 30 min)?"
+                           "\n[y]es or [n]o – default is: ",
+                           default="n")
     else:
         dl_needed = True
     csv_path: Path
     if dl_needed:
-        print("\nFetching a fresh CSV – this may take ±30 minutes …")
+        print("\nFetching a fresh CSV – this may take ±30 minutes…")
         csv_path = fetch_scrobbles_csv(user, out_dir=CSV_DIR, once_per="week")
         if csv_path is None:
-            print("Download skipped / failed, aborting.")
-            sys.exit(1)
+            # ► the fetcher said “already ran this week” or the
+            #   remote site was down – fall back to the latest local file
+            print("\nDownload skipped – using newest local CSV.")
+            csv_path = local_csv
+            if csv_path is None:  # nothing cached at all → real error
+                sys.exit("\nNo CSV available, aborting.")
     else:
         csv_path = local_csv
-    print("\nVerifying CSV (commas stripped etc.) …")
-    helper.verify_volcano_name(csv_path)
-    df_csv = pd.read_csv(csv_path)
-    print(f"↑ Note how commas inside values are gone? ({csv_path.name})")
+    print("===========================================")
+    print("Verifying CSV")
+    print("===========================================")
+    verify_commas(csv_path)
+    print("===========================================")
+    print(f"↑ Note how commas inside values are gone in ({csv_path.name})?")
+    print("\nThe third-party solution failed to enclose field values within quotation marks.")
+    print("\nLet us use the last.fm API instead.")
     # small profile snapshot directly via API (cheap call)
-    print("\n─ Profile snapshot ─")
+    print("\nLast.fm profile snapshot")
     lfAPI.fetch_misc_data_from_lastfmapi(user)
     # Decide: full refresh vs. reuse parquet
-    print("\n─ Last.fm API / parquet stage ─")
-    use_api = helper.yes_no("Refresh scrobbles from last.fm API now knowing that it takes some time? "
-                            "[y]es or [n]o – default is: ", default="n")
+    print("===========================================")
+    print("\nLast.fm API fetch")
+    use_api = yes_no("\nRefresh scrobbles from last.fm API knowing that it takes some time? "
+                     "\n[y]es or [n]o – default is: ", default="n")
+    print("===========================================")
     if use_api:
+        print("\nFetching scrobbles from last.fm API. Please wait…\n")
         df_recent = lfAPI.fetch_recent_tracks_all_pages(user)
-        print(f"Fetched {len(df_recent)} scrobbles.")
+        print(f"\nFetched {len(df_recent)} scrobbles\n.")
         if df_recent.empty:
-            print("→ nothing to store, aborting workflow.")
+            print("\nNothing to store, aborting workflow.\n")
             sys.exit(1)
-        # store → DB
-        new_tbl = bulk_insert_scrobbles(df_recent, engine)
-        print(f"Data written to {new_tbl}")
+        bulk_insert_scrobbles(df_recent, engine)
+        enrich_artist_country()
+        print("\nWe can check how many times each special ASCII character is found in artist names.")
+        seed_ascii_chars(engine)
+        print(ascii_freq(engine))
         # Dumping table to parquet for the next fast run
-        dump_latest_table_to_parquet()
-    else:  # fast path
-        pq_file = newest_parquet()
-        if pq_file is None:
-            print("No parquet snapshot found – have to hit the API once.")
-            # simple recursion: rerun main() but force API path
-            print("Restarting with fresh-API-fetch …")
-            os.execv(sys.executable, [sys.executable, *sys.argv])
-
-        print(f"Loading cached snapshot → {pq_file.name}")
-        df_recent = pd.read_parquet(pq_file)
-    # From here on, *df_recent* holds the working data – we should hand it to canonisation steps
-    print("\nDataFrame ready for canonisation / enrichment:")
+        dump_parquet(df_recent)
+    else:  # fast lane
+        df_recent, _ = latest_parquet(return_df=True)
+    # From here on, profiling and canonisation steps
+    print("\ndf ready for further work")
     print(df_recent.head())
-    # 5) Canonization experiment
-
-    # 6) MusicBrainz enrichment placeholder ----------------------------------
+    print("===========================================")
+    print("Your data is accessible for the project now. Please head on to dev_profile.py and dev_canon.py for further.")
+    print("===========================================")
+    # print("===========================================")
+    # print("Now, applying previously saved artist canonization, if any")
+    # print("===========================================")
+    # df_canon = cz.apply_previous(df_recent)
+    # profile = dp.run_profiling(df_canon)
     '''
-    TODO:
-      •  run canonisation clustering on Artist names
-      •  mbAPI.fetch_country / lookup by MBID
-      •  decide epsilon by “first Bohren breakpoint”
-      •  interactive confirmation etc.
+    TODO FOR FUTURE DEVELOPMENT:
+      •  creating menu structure for CanonFodder
+      •  restructure above workflow as menu option 1: data fetch
+      •  restructure dev_profile.py to corefunc/dataprofiler.py, dev_canon.py to corefunc/canonizer.py
+      •  write menu option 2: dev_profile.py, menu option 3: dev_canon.py
+      •  write MBID connector and user_country logic
+          # mbAPI.fetch_country(mbid) if available else mbAPI.search(...)
+      •  add menu option 4: user country stats display
     '''
-    # Example stub:
-    # mbAPI.fetch_country(mbid) if available else mbAPI.search(...)
-    # -------------------------------------------------------------
-
-    # 7) Dumping latest table to parquet for EDA workflow
-    df_db, latest_tbl = latest_scrobble_df(engine)
-    if df_db is not None:
-        pq_file = HERE / "PQ" / f"{latest_tbl}.parquet"
-        pq_file.parent.mkdir(exist_ok=True)
-        df_db.to_parquet(pq_file, index=False)
-        print(f"Latest scrobble table persisted → {pq_file}")
 
     print("\nWorkflow finished OK.")
 

@@ -1,0 +1,30 @@
+version: '3.9'
+services:
+  db:
+    image: mysql:8.3
+    environment:
+      MYSQL_ROOT_PASSWORD: canonroot
+      MYSQL_DATABASE: canonfodder
+      MYSQL_USER: canon
+      MYSQL_PASSWORD: canon
+    ports: [ "3306:3306" ]
+    volumes:
+      - dbdata:/var/lib/mysql
+  app:
+    build: .
+    environment:
+      UC_SRC:  mysql+pymysql://canon:canon@db/canonfodder
+      UC_DST:  ${UC_SRC}
+    depends_on: [ db ]
+    command: >
+      bash -c "
+        alembic upgrade head &&
+        python -m canonfodder.scripts.uc_populate &&
+        python -m canonfodder.main
+      "
+  adminer:
+    image: adminer
+    ports: [ "8080:8080" ]
+
+volumes:
+  dbdata:

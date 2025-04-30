@@ -21,6 +21,9 @@ The terms of use can be checked at https://www.last.fm/api.<br>
 
 Note: Make sure you have Python 3.12 installed on your system.<br>
 Clone the repository.<br>
+```shell
+docker-compose up --build
+```
 Create a virtual environment manually using a command like:<br>
 ```shell
 python -m venv .venv
@@ -41,10 +44,28 @@ or
 ```shell
 pip install .
 ```
+Copy `.env.example` ➜ `.env` and fill in the required values  
+      * Get a free key at https://www.last.fm/api/account/create  
+      * For read-only demos only `LASTFM_API_KEY` is mandatory 
+Alembic and SQLAlchemy is used to allow for multiple DB backends.
+I am using MySQL with setting DB_URL=mysql+pymysql://user:pass@localhost/canonfodder,
+but if you look in DB/common.py, you will see that the bootstrapping is configured with a local fallback to sqlite.
+DB_URL there should be set to sqlite:///canonfodder.db automatically if no MySQL is given in .env.
 
 ## How to use it?
 Command
 ```shell
 python main.py
 ```
-And go through the menu options.
+for a complete data fetch.
+
+I am committing example .parquets for fast fload, so if you are in a hurry,
+you can directly command
+```shell
+python dev_profile.py
+```
+&
+```shell
+python dev_canon.py
+```
+and check out in a notebook-style step-by-step way how is canonization envisaged in this project.

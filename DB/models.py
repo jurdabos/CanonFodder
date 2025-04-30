@@ -1,3 +1,6 @@
+"""
+Defines all SQLAlchemy ORM models used by CanonFodder.
+"""
 from __future__ import annotations
 from datetime import date, datetime, UTC
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, func, String, UniqueConstraint
@@ -6,11 +9,12 @@ from typing import Optional
 
 
 class Base(DeclarativeBase):
-    """Shared base class – keeps metadata in one place."""
+    """Serves as the common declarative base so metadata stays centralised"""
     pass
 
 
 class ArtistVariantsCanonized(Base):
+    """Stores variant strings mapped to a canonical artist name"""
     __tablename__ = "artist_variants_canonized"
     artist_variants: Mapped[str] = mapped_column(String(255), primary_key=True)
     to_link: Mapped[bool] = mapped_column(Boolean, nullable=True)
@@ -23,6 +27,7 @@ class ArtistVariantsCanonized(Base):
 
 
 class Scrobble(Base):
+    """Represents a single play event identified by artist track and UTC time"""
     __tablename__ = "scrobbles"
     __table_args__ = (
         UniqueConstraint(
@@ -38,6 +43,7 @@ class Scrobble(Base):
 
 
 class ArtistCountry(Base):
+    """Caches MusicBrainz artist → country mappings and optional MBID"""
     __tablename__ = "artistcountry"
     __table_args__ = (
         UniqueConstraint("id", name="uq_artistcountry"),
@@ -50,10 +56,9 @@ class ArtistCountry(Base):
 
 
 class UserCountry(Base):
-    """
-    One row = one continuous period in which *the* user lived in `country_name`.
-    * `start_date` inclusive
-    * `end_date`   exclusive (NULL ⇒ “still lives there”)
+    """Holds non-overlapping location periods for the application user
+        * start_date inclusive
+        * end_date exclusive or null when the user still lives there
     """
     __tablename__ = "user_country"
     # ── surrogate PK ─────────────────────────────────────────────────────────
@@ -75,7 +80,15 @@ class UserCountry(Base):
         ),
     )
 
-    # helper ---------------------------------------------------------------
+    # helpers ---------------------------------------------------------------
     @property
     def is_current(self) -> bool:
+        """Returns true when end_date is null"""
         return self.end_date is None
+
+
+class AsciiChar(Base):
+    """Lookup table with printable non-alphanumeric ASCII characters 33–126"""
+    __tablename__ = "ascii_chars"
+    ascii_code: Mapped[int]  = mapped_column(primary_key=True)
+    ascii_char: Mapped[str]  = mapped_column(String(1), unique=True, nullable=False)

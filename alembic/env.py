@@ -2,18 +2,23 @@ from logging.config import fileConfig
 
 """Alembic run-environment"""
 from pathlib import Path
+from alembic import context
+from sqlalchemy import pool
+import os
 
-# ───── 1) load .env BEFORE importing DB ──────────────────────────
+# ─── 1  .env + optional -x db_url override ───────────────────────
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).with_suffix(".env").parent.parent / ".env")
-# ─────────────────────────────────────────────────────────────────
+db_url = context.get_x_argument(as_dictionary=True).get("db_url")
+if db_url:
+    os.environ["DB_URL"] = db_url
 
-from alembic import context
-from sqlalchemy import engine_from_config, pool
-from DB import engine                       # <-- DB/__init__ runs here
+# ─── 2  models / engine --------------------------------------------------------
 from DB.models import Base
-from DB.common import DB_URL
+from DB import get_engine                  # returns a *single* Engine
+engine = get_engine()                      # honours DB_URL
 
+# ─── 3  Alembic bookkeeping ----------------------------------------------------
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -27,16 +32,12 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
-
-from DB import get_engine
-engine = get_engine()
-connectable = engine
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
@@ -52,6 +53,7 @@ def run_migrations_offline() -> None:
 
     """
     context.configure(
+        url=str(engine.url),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -61,25 +63,11 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-    connectable = engine_from_config(
-        {
-            **config.get_section(config.config_ini_section),
-            "sqlalchemy.url": context.get_x_argument(as_dictionary=True).get("url", DB_URL),
-        },
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-    with connectable.connect() as connection:
+    with engine.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            compare_type=True,      # to detect type changes
+            compare_type=True,      # detect column-type changes too
         )
         with context.begin_transaction():
             context.run_migrations()
