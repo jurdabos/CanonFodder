@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # %% Basic setup
 from dotenv import load_dotenv
 
@@ -18,6 +17,7 @@ import matplotlib
 
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
+plt.ion()
 import mbAPI
 mbAPI.init()
 import numpy as np
@@ -26,7 +26,8 @@ import os
 os.environ["MPLBACKEND"] = "TkAgg"
 import pandas as pd
 from pathlib import Path
-from rapidfuzz import process, fuzz
+from rapidfuzz import process, distance as rf_dist
+from rapidfuzz.distance import Levenshtein
 import re
 import seaborn as sns
 from scipy.spatial.distance import cdist
@@ -35,6 +36,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.inspection import permutation_importance
 from sklearn.metrics import pairwise_distances, silhouette_score
+from sklearn.model_selection import ParameterGrid
+
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import MinMaxScaler, RobustScaler
 from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
@@ -51,7 +54,6 @@ else:
     HERE = Path.cwd()  # running in a console/notebook
 JSON_DIR = HERE / "JSON"
 PALETTES_FILE = JSON_DIR / "palettes.json"
-os.environ.pop("FLASK_APP", None)
 LOGGER = logging.getLogger(__name__)
 
 # %% Display
@@ -68,25 +70,21 @@ sns.set_style(style="whitegrid")
 sns.set_palette(sns.color_palette(custom_colors))
 cmap = sns.diverging_palette(220, 10, as_cmap=True)
 
-# %% Step 1: Loading the data from the latest parquet
-print("===============================================")
+# %% Step 1: Input & pre-processing
+print("=================================================")
 print("Welcome to the CanonFodder canonization workflow!")
-print("===============================================\n")
-print("Step 1: Loading your scrobble data. Please wait...")
+print("=================================================\n")
 data, latest_filename = io.latest_parquet(return_df=True)
 if data is None or data.empty:
     print("No DataFrame was loaded; cannot proceed with EDA.")
     sys.exit()
+if data is None or data.empty:
+    sys.exit("🚫  No scrobble data found – aborting EDA.")
 data.columns = ["Artist", "Album", "Song", "Datetime"]
-data.info()
 data.dropna(subset=["Datetime"], inplace=True)
-before_count = len(data)
-data = data.drop_duplicates(subset=["Artist", "Album", "Song", "Datetime"], keep="first")
-after_count = len(data)
-removed_count = before_count - after_count
-LOGGER.info(f"Removed {removed_count} duplicate rows.")
+data = data.drop_duplicates(["Artist", "Album", "Song", "Datetime"])
 
-# %% Step 2: Connect to the DB and apply previously stored unifications/canonizations
+# %% Step 2: Variant clustering
 LOGGER.info("Fetching already canonised artist-name variants…")
 with SessionLocal() as sess:
     canon_rows = (
@@ -117,68 +115,53 @@ for row in canon_rows:
             variant_to_canon[variant] = row.canonical_name
 if variant_to_canon:
     data["Artist"] = data["Artist"].replace(variant_to_canon)
-
-# %% Step 3: Before-canonization top artists
 artist_counts = data["Artist"].value_counts()
-top_artists = artist_counts.head(10)
-print(top_artists)
-with PALETTES_FILE.open("r", encoding="utf-8") as fh:
-    custom_palettes = json.load(fh)["palettes"]
-custom_colors_10 = io.register_custom_palette("colorpalette_10", custom_palettes)
-sns.set_style(style="whitegrid")
-sns.set_palette(sns.color_palette(custom_colors_10))
-plt.figure(figsize=(10, 6))
-sns.barplot(
-    x=top_artists.values,
-    y=top_artists.index,
-    palette=custom_colors_10[: len(top_artists)],
-    hue=top_artists.index,
-    legend=False,
-)
-plt.title("Top 10 Artists by Scrobbles", fontsize=16)
-plt.xlabel("Scrobbles", fontsize=14)
-plt.ylabel("Artist", fontsize=14)
-plt.tight_layout()
-plt.show()
-
-# %% Step 4: Before-canonization artist stats
-print(artist_counts.describe())
 artist_counts_df = artist_counts.reset_index()
 artist_counts_df.columns = ["Artist", "Count"]
-count_threshold = 1
+count_threshold = 3
+mandatory = {v.strip() for group in cluster.variant_sets for v in group}
 fltrd_artcount = artist_counts_df[artist_counts_df["Count"] >= count_threshold]
-
-# %% Step 5: Artist names similarity check with DBSCAN
-artist_names = fltrd_artcount["Artist"].str.lower().str.strip().tolist()
+fltrd_artcount = pd.concat([
+    fltrd_artcount,
+    artist_counts_df[artist_counts_df["Artist"].isin(mandatory)]
+]).drop_duplicates(subset=["Artist"])
+artist_names = fltrd_artcount["Artist"].str.strip().tolist()
 n = len(artist_names)
-similarity_matrix = np.zeros((n, n))
-for i in range(n):
-    for j in range(n):
-        similarity_matrix[i, j] = (
-                fuzz.token_sort_ratio(artist_names[i], artist_names[j]) / 100
-        )
-bohren_indices = [i for i, name in enumerate(artist_names) if "bohren" in name]
-# EZ NEM JÓ! bohren_indices CONTAINS MORE COMPOSITE ARTIST NAMES INVOLVING OTHER ARTISTS! CF. MYSQL.
-for eps in np.arange(0.01, 1.0, 0.01):
-    dbscan = DBSCAN(eps=eps, min_samples=2, metric="precomputed")
-    labels = dbscan.fit_predict(1 - similarity_matrix)
-    if labels[bohren_indices[0]] == labels[bohren_indices[1]] and labels[bohren_indices[0]] != -1:
-        print(f"Bohren occurrences are grouped together at epsilon: {eps}")
+sim_matrix = process.cdist(
+        artist_names,
+        artist_names,
+        score_cutoff=0,
+        workers=-1,
+) / 100.0
+dist = 1.0 - sim_matrix
+name2idx = {name: i for i, name in enumerate(artist_names)}
+anchor_idx_sets = [
+    [name2idx[n.strip()] for n in group if n.strip() in name2idx]
+    for group in cluster.variant_sets
+]
+anchor_idx_sets = [s for s in anchor_idx_sets if len(s) >= 2]   # ignore degenerate
+eps_range = np.arange(0.05, 1.0, 0.01)
+best_eps = None
+for eps in eps_range:
+    labels = DBSCAN(eps=eps, min_samples=2, metric="precomputed").fit_predict(dist)
+    if cluster.anchors_ok(labels, anchor_idx_sets):
+        best_eps = eps
         break
-print("\n--- Running DBSCAN to find new clusters of similar artists ---")
-dbscan = DBSCAN(eps=eps, min_samples=2, metric="precomputed")
-labels = dbscan.fit_predict(1 - similarity_matrix)
-clusters = {}
-for label, artist in zip(labels, fltrd_artcount["Artist"]):
-    if label != -1:
-        clusters.setdefault(label, []).append(artist)
-similar_artist_groups = list(clusters.values())
-print(f"Number of groups identified: {len(similar_artist_groups)}")
+if best_eps is None:
+    raise ValueError("No ε in the range puts every variant_set in one cluster.")
+print(f"Chosen ε = {best_eps:.2f} (all anchors satisfied)")
+labels = DBSCAN(eps=best_eps, min_samples=2, metric="precomputed").fit_predict(dist)
+clusters = (
+    pd.DataFrame({"Artist": artist_names, "label": labels})
+      .query("label != -1")
+      .groupby("label")["Artist"].apply(list)
+      .tolist()
+)
 
-# %% Step 6: DBing artist name canonization
+# %% Step 3: Gold standard creation
 with SessionLocal() as sess:
     unhandled = 0
-    for group in similar_artist_groups:
+    for group in clusters:
         if len(group) <= 1:
             continue
         sig = "|".join(sorted(group))
@@ -188,16 +171,12 @@ with SessionLocal() as sess:
         ).first()
         if row is None:
             unhandled += 1
-
-print(f"Number of groups identified by DBSCAN: {len(similar_artist_groups)}")
+print(f"Number of groups identified by DBSCAN: {len(clusters)}")
 print(f"Number of groups NOT yet handled by user: {unhandled}")
-
-# %%
-# CLI for picking canonical names for similar artist names
 data, fltrd_artcount = cli.unify_artist_names_cli(
     data=data,
     fltrd_artcount=fltrd_artcount,
-    similar_artist_groups=similar_artist_groups,
+    similar_artist_groups=clusters,
 )
 print("Done unifying. Next steps coming later. Now exiting...")
 
@@ -843,7 +822,7 @@ print(f"Cut‑off that keeps all true links: {cut:.2f}")
 print(full[["A", "B", "to_link", "proba"]].head(10))
 
 # %% Step X+2: I WILL WRITE SOMETHING INFORMATIVE HERE IF IT WORKS
-artist_names = fltrd_artcount["Artist"].str.lower().str.strip().tolist()
+artist_names = fltrd_artcount["Artist"].str.str.strip().tolist()
 
 match, prob = cluster.most_similar(
     "bohren & der club of gore",

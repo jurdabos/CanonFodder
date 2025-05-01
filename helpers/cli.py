@@ -2,39 +2,56 @@
 Provides interactive command-line helpers for data cleaning and user prompts.
 """
 from dotenv import load_dotenv
+
 load_dotenv()
 from datetime import datetime, UTC
-from DB.models import ArtistVariantsCanonized
+from DB import get_session as _get_session
+
+from DB.models import ArtistVariantsCanonized, ArtistCountry
+from DB import SessionLocal
+
 import os
 import pandas as pd
 from pathlib import Path
+
 HERE = Path(__file__).resolve().parent
 import questionary
-from sqlalchemy import select
+from sqlalchemy import select, insert, update
+
+SEPARATOR = "{"
 
 
-def _apply_canonical(canon, variants, data, counts):
-    """
-    Replaces every occurrence of each variant with `canon` in two dataframes
-    """
-    for old in variants:
-        if old != canon:
-            data.loc[data["Artist"] == old, "Artist"] = canon
-            counts.loc[counts["Artist"] == old, "Artist"] = canon
+def _apply_canonical(canonical: str,
+                     variants: list[str],
+                     data: pd.DataFrame,
+                     artcounts: pd.DataFrame) -> None:
+    """Replace every variant in *data* with *canonical* and refresh counts in-place."""
+    data["Artist"] = data["Artist"].replace(dict.fromkeys(variants, canonical))
+    artcounts.loc[artcounts["Artist"].isin(variants), "Artist"] = canonical
 
 
-def _remember(sig: str, name: str, sess):
-    """
-    Persists a user decision for an artist-variant group so it is reused
-    """
-    now = datetime.now(UTC)
-    sess.execute(
-        ArtistVariantsCanonized.insert().values(
-            group_signature=sig,
-            canonical_name=name,
-            timestamp=now
+def _remember_artist_variant(signature: str, canonical: str, link_flag: bool, sess):
+    """Universal UPSERT for artist_variants_canonized."""
+    existing = sess.execute(
+        select(ArtistVariantsCanonized)
+        .where(ArtistVariantsCanonized.artist_variants == signature)
+    ).scalar_one_or_none()
+
+    if existing:
+        sess.execute(
+            update(ArtistVariantsCanonized)
+            .where(ArtistVariantsCanonized.artist_variants == signature)
+            .values(canonical_name=canonical, to_link=link_flag)
         )
-    )
+    else:
+        sess.execute(
+            insert(ArtistVariantsCanonized)
+            .values(artist_variants=signature, canonical_name=canonical, to_link=link_flag)
+        )
+
+
+def _split_variants(sig: str) -> list[str]:
+    return [v.strip() for v in sig.split(SEPARATOR) if v.strip()]
 
 
 def ask(question: str,
@@ -80,59 +97,60 @@ def choose_lastfm_user() -> str:
 
 
 def unify_artist_names_cli(
-        data,
-        fltrd_artcount,
-        similar_artist_groups,
+        data: pd.DataFrame,
+        fltrd_artcount: pd.DataFrame,
+        similar_artist_groups: list[list[str]],
 ):
     """
-    Guides the user through resolving duplicate artist names
-    Args:
-        data: dataframe with an Artist column
-        fltrd_artcount: dataframe with current artist counts
-        similar_artist_groups: iterable of duplicate-candidate groups
-    Returns:
-        tuple (dataframe with updated names, dataframe with refreshed counts)
+    Interactive resolver for artist-name duplicates, updating canonization and optional comments.
     """
-    from DB import get_engine as _get_engine, get_session as _get_session
-    with _get_session().begin() as sess:
-        for group in similar_artist_groups:
-            group = list(group)
-            if len(group) <= 1:
-                continue
-            sig = "|".join(sorted(group))
-            existing = sess.scalar(
-                select(ArtistVariantsCanonized.canonical_name)
-                .where(ArtistVariantsCanonized.group_signature == sig)
-            )
-            # -----------------------------------------------------------------
-            if existing is not None:  # handled earlier
-                if existing == "__SKIP__":
-                    print(f"\nUser previously SKIPPED group {group}.")
+    with _get_session() as sess:
+        with sess.begin():
+            for group in similar_artist_groups:
+                group = list(group)
+                if len(group) <= 1:
                     continue
-                print(f"\nUser previously unified {group} to "
-                      f"'{existing}'. Applying again.")
-                _apply_canonical(existing, group, data, fltrd_artcount)
-                continue
-            # ----------------------------- ask the user ----------------------
-            print("\n---")
-            print(f"These artist names appear to be duplicates:\n{group}")
-            choice = questionary.select(
-                "Which name would you like to keep for all occurrences?",
-                choices=group + ["Custom", "Skip"]
-            ).ask()
-            if not choice or choice == "Skip":
-                _remember(sig, "__SKIP__", sess)
-                continue
-            canonical = (questionary.text("Enter a custom canonical name:").ask()
-                         if choice == "Custom" else choice)
-            if not canonical:
-                _remember(sig, "__SKIP__", sess)
-                continue
-            _apply_canonical(canonical, group, data, fltrd_artcount)
-            _remember(sig, canonical, sess)
-    # ---------- re-aggregate counts ------------------------------------------
-    out = data["Artist"].value_counts().reset_index(names=["Artist", "Count"])
-    return data, out
+                signature = SEPARATOR.join(sorted(group))
+                prev_row = sess.execute(
+                    select(ArtistVariantsCanonized)
+                    .where(ArtistVariantsCanonized.artist_variants == signature)
+                ).scalar_one_or_none()
+                if prev_row:
+                    if not prev_row.to_link:
+                        print(f"\nUser previously SKIPPED {group}.")
+                        continue
+                    print(f"\nUser previously unified {group} → '{prev_row.canonical_name}'. Applying again.")
+                    _apply_canonical(prev_row.canonical_name, group, data, fltrd_artcount)
+                    continue
+                print("\n---")
+                print("These artist names appear to be duplicates:")
+                print("\n".join(f"  - {v}" for v in group))
+                choice = questionary.select(
+                    "Which name should become canonical?",
+                    choices=group + ["Custom name…", "Skip this group"]
+                ).ask()
+                if not choice or choice.startswith("Skip"):
+                    _remember_artist_variant(signature, "__SKIP__", link_flag=False, sess=sess)
+                    continue
+                canonical = (
+                    questionary.text("Enter the custom canonical name:").ask().strip()
+                    if choice.startswith("Custom") else choice
+                )
+                if not canonical:
+                    _remember_artist_variant(signature, "__SKIP__", link_flag=False, sess=sess)
+                    continue
+                comment = questionary.text(
+                    "Optional comment/disambiguation (hit ↵ to skip):"
+                ).ask().strip() or None
+                _apply_canonical(canonical, group, data, fltrd_artcount)
+                _remember_artist_variant(signature, canonical, link_flag=True, sess=sess)
+    refreshed = (
+        data["Artist"]
+        .value_counts()
+        .rename_axis("Artist")
+        .reset_index(name="Count")
+    )
+    return data, refreshed
 
 
 def verify_commas(csv_path: str | Path) -> None:

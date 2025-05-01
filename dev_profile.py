@@ -224,8 +224,8 @@ def _upsert_artist_country(new_rows: list[dict]) -> None:
 
 
 # Syncing Parquet with DB
-# df = _df_from_db()
-# df.to_parquet(AC_PARQUET, index=False, compression="zstd")
+df = _df_from_db()
+df.to_parquet(AC_PARQUET, index=False, compression="zstd")
 
 
 def artist_countries(series: pd.Series) -> pd.Series:
@@ -373,16 +373,7 @@ plt.ylabel("Artist", fontsize=14)
 plt.tight_layout()
 print("Birds-eye stats for artist counts")
 print(artist_counts.describe())
-# Converting artist_counts to DataFrame
-artist_counts_df = artist_counts.reset_index()
-artist_counts_df.columns = ["Artist", "Count"]
-count_threshold = 3
-print(f"And what if we exclude artists with a play count below {count_threshold}?")
-# Shrinking of the data set can be easily undone here by setting count_threshold to 1 in future flows
-fltrd_artcount = artist_counts_df[artist_counts_df["Count"] >= count_threshold]
-print(fltrd_artcount.describe())
-album_counts = data["Album"].value_counts()
-top_albums = album_counts.head(10)
+
 
 # %%
 # -------------------------------------------------------------------------------------

@@ -13,6 +13,14 @@ def _clf_scorer(x: str, y: str, clf, **kwargs) -> float:
     return clf_proba(x, y, clf)
 
 
+def anchors_ok(labelek, anchor_idx_halmazok):
+    for indexek in anchor_idx_halmazok:
+        lab = labelek[indexek[0]]
+        if lab == -1 or any(labelek[i] != lab for i in indexek[1:]):
+            return False
+    return True
+
+
 def clf_proba(a: str, b: str, clf) -> float:
     """Returns clf.predict_proba on the fuzzy-score vector of `a` and `b`"""
     vec = np.fromiter(fuzzy_scores(a, b).values(), dtype=float)[None, :]
@@ -88,6 +96,18 @@ def calculate_clustering_metrics(name, labels, data, cluster_centers=None, model
         "Silhouette Score": silhouette,
         "BIC": bic,
     }
+
+
+def dbscan_with_anchors(artist_names, dist_matrix, anchor_idx_sets,
+                        eps_range=np.arange(0.05, 1.0, 0.01),
+                        min_samples=2):
+    for eps in eps_range:
+        labels = DBSCAN(eps=eps, min_samples=min_samples,
+                        metric="precomputed").fit_predict(dist_matrix)
+        if anchors_ok(labels, anchor_idx_sets):
+            return eps, labels
+    raise RuntimeError("No ε satisfies anchor constraints.")
+
 
 
 def fuzzy_scores(a: str, b: str) -> dict:
