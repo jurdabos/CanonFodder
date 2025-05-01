@@ -214,13 +214,11 @@ def fetch_country(artist_name: str) -> str | None:
 # Cache helpers
 # ---------------------------------------------------------------------------
 def _cache_artist(data: Dict[str, Any]) -> None:
-    if "id" not in data or _session_maker is None:
+    if _session_maker is None:
         return
     with _get_session() as sess:
-        if sess.get(MBArtistCache, data["id"]):
-            return
-        sess.add(MBArtistCache(
-            mbid=data["id"],
+        sess.merge(MBArtistCache(
+            mbid=data.get("id"),           # may be None
             artist_name=data.get("name"),
             country=data.get("country"),
             disambiguation=data.get("disambiguation"),

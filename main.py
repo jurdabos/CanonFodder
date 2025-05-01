@@ -134,27 +134,20 @@ def main() -> None:
     else:  # fast lane
         df_recent, _ = latest_parquet(return_df=True)
     # From here on, profiling and canonisation steps
-    print("\ndf ready for further work")
-    print(df_recent.head())
     print("===========================================")
     print("Your data is accessible for the project now. Please head on to dev_profile.py and dev_canon.py for further.")
     print("===========================================")
-    # print("===========================================")
-    # print("Now, applying previously saved artist canonization, if any")
-    # print("===========================================")
-    # df_canon = cz.apply_previous(df_recent)
-    # profile = dp.run_profiling(df_canon)
     '''
     TODO FOR FUTURE DEVELOPMENT:
       •  creating menu structure for CanonFodder
       •  restructure above workflow as menu option 1: data fetch
       •  restructure dev_profile.py to corefunc/dataprofiler.py, dev_canon.py to corefunc/canonizer.py
-      •  write menu option 2: dev_profile.py, menu option 3: dev_canon.py
-      •  write MBID connector and user_country logic
-          # mbAPI.fetch_country(mbid) if available else mbAPI.search(...)
-      •  add menu option 4: user country stats display
+      •  write menu option 2: dev_profile.py with MBID connector and user_country logic, menu option 3: dev_canon.py
+          # profile = dp.run_profiling(df_canon),
+          including # mbAPI.fetch_country(mbid) if available else mbAPI.search(...)
+          # df_canon = cz.apply_previous(df_recent)
+      •  add menu option 4: country stats display
     '''
-
     print("\nWorkflow finished OK.")
 
 

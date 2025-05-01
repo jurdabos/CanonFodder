@@ -32,7 +32,7 @@ def enrich_artist_country(*, batch: int = 100) -> None:
             if not result:
                 continue
             cand = result[0]
-            _cache_artist(cand)                         # keep mb_artists hot
+            _cache_artist(cand)                         # to keep mb_artists hot
             rows.append(
                 ArtistCountry(
                     artist_name=name,
@@ -41,11 +41,25 @@ def enrich_artist_country(*, batch: int = 100) -> None:
                     disambiguation_comment=cand.get("disambiguation"),
                 )
             )
-        # ── one INSERT IGNORE / ON CONFLICT DO NOTHING, handled by SQLAlchemy ──
         if rows:
-            try:
-                with SessionLocal() as sess:
-                    sess.bulk_save_objects(rows, ignore_conflicts=True)
+            with SessionLocal() as sess:
+                for r in rows:
+                    existing = (
+                        sess.query(ArtistCountry)
+                        .filter_by(artist_name=r.artist_name)
+                        .one_or_none()
+                    )
+                    if existing:
+                        if not existing.mbid and r.mbid:
+                            existing.mbid = r.mbid
+                        if not existing.disambiguation_comment and r.disambiguation_comment:
+                            existing.disambiguation_comment = r.disambiguation_comment
+                        if not existing.country and r.country:
+                            existing.country = r.country
+                    else:
+                        sess.add(r)
+                try:
                     sess.commit()
-            except SQLAlchemyError as exc:
-                logging.warning("artist_country batch failed: %s", exc)
+                except SQLAlchemyError as exc:
+                    logging.warning("artist_country batch failed: %s", exc)
+                    sess.rollback()

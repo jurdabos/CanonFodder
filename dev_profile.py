@@ -1,14 +1,11 @@
-#!/usr/bin/env python3
 """
 Interactive data‑profiling helper for CanonFodder
 -------------------------------------------------
-Run it as a standalone *script* or in a Jupyter cell with
-    %run dev_profile.py               # end‑to‑end EDA using existing parquet caches
-    %run dev_profile.py country       # edit the user‑country timeline first
-
-What’s new (2025‑04‑30)
-=======================
-* **User‑country timeline now stores free‑text names** (no ISO restriction).
+Run it as a Jupyter-style cells
+-------------------------------------------------
+Per 2025‑04‑30
+-------------------------------------------------
+* **User‑country timeline stores free‑text names** (no ISO restriction).
 * **Artist‑country lookup first hits the local *ArtistCountry* table or
   `PQ/ac.parquet`**, then falls back to MusicBrainz if needed, and rewrites the
   cache + parquet on the fly.
@@ -22,6 +19,7 @@ from __future__ import annotations
 
 from dotenv import load_dotenv
 import argparse
+
 load_dotenv()
 from DB import SessionLocal
 from DB.models import (
@@ -42,9 +40,12 @@ import matplotlib
 
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
+plt.ion()
 import mbAPI
 
 mbAPI.init()
+import musicbrainzngs
+musicbrainzngs.logging.getLogger().setLevel(logging.WARNING)
 logging.getLogger("musicbrainzngs.mbxml").setLevel(logging.WARNING)
 import os
 
@@ -53,14 +54,14 @@ import pandas as pd
 from pathlib import Path
 import re
 import seaborn as sns
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 import sys
 from typing import Optional, Tuple
 
 # %%
 # Constants & basic setup
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler()],
 )
@@ -75,6 +76,7 @@ JSON_DIR = PROJECT_ROOT / "JSON"
 PQ_DIR = PROJECT_ROOT / "PQ"
 UC_PARQUET = PQ_DIR / "uc.parquet"
 AC_PARQUET = PQ_DIR / "ac.parquet"
+AC_COLS = ["artist_name", "country", "mbid", "disambiguation_comment"]
 PALETTES_FILE = JSON_DIR / "palettes.json"
 SEPARATOR = "{"
 pd.options.display.max_columns = None
@@ -119,7 +121,7 @@ def _overlaps(df: pd.DataFrame, sta: pd.Timestamp, e: pd.Timestamp | None) -> bo
 
 # %%
 # ---------------------------------------------------------------------------
-#  Timeline editor (free‑text country names)
+#  Timeline editor
 # ---------------------------------------------------------------------------
 def edit_country_timeline() -> pd.DataFrame:
     uc = pd.read_parquet(UC_PARQUET) if UC_PARQUET.exists() else pd.DataFrame(
@@ -157,68 +159,140 @@ def edit_country_timeline() -> pd.DataFrame:
 # =============================================================================
 # Artist‑country helpers (parquet → DB → MusicBrainz)
 # =============================================================================
-def _load_artist_country_cache() -> pd.DataFrame:
-    """Return df with columns [artist_name, country] (ISO‑2)."""
-    if AC_PARQUET.exists():
-        return pd.read_parquet(AC_PARQUET)
-    # fall back to DB
-    with SessionLocal() as s:
-        rows = s.scalars(select(ArtistCountry)).all()
+def _df_from_db() -> pd.DataFrame:
+    """Pull the entire artistcountry table into a DataFrame."""
+    with SessionLocal() as sessio:
+        rows = sessio.scalars(select(ArtistCountry)).all()
     if not rows:
-        return pd.DataFrame(columns=["artist_name", "country"])
-    df = pd.DataFrame([{"artist_name": r.artist_name, "country": r.country} for r in rows])
-    df.to_parquet(AC_PARQUET, compression="zstd", index=False)
-    return df
+        return pd.DataFrame(columns=AC_COLS)
+    return pd.DataFrame(
+        [
+            {
+                "artist_name": r.artist_name,
+                "country": r.country,
+                "mbid": r.mbid,
+                "disambiguation_comment": r.disambiguation_comment,
+            }
+            for r in rows
+        ],
+        columns=AC_COLS
+    )
 
 
-def _update_artist_country_cache(new_map: dict[str, str | None]):
-    if not new_map:
+def _load_ac_cache() -> pd.DataFrame:
+    """
+    Return the artist-country cache as DataFrame.
+    • If the Parquet is newer than the last DB update → read Parquet
+    • otherwise
+        – pull from DB
+        – overwrite Parquet
+    """
+    if AC_PARQUET.exists():
+        pq_mtime = AC_PARQUET.stat().st_mtime
+        with SessionLocal() as session:
+            db_mtime = session.scalar(
+                select(func.max(ArtistCountry.id))  # monotonic surrogate pk
+            ) or 0
+        if pq_mtime > db_mtime:
+            return pd.read_parquet(AC_PARQUET)
+    dataf = _df_from_db()
+    dataf.to_parquet(AC_PARQUET, index=False, compression="zstd")
+    return dataf
+
+
+def _upsert_artist_country(new_rows: list[dict]) -> None:
+    """Insert *or* enrich existing rows in a backend-agnostic way."""
+    if not new_rows:
         return
-    # update DB
-    with SessionLocal() as s:
-        to_add = []
-        for artist, iso in new_map.items():
-            if s.scalar(select(ArtistCountry).where(ArtistCountry.artist_name == artist)):
-                continue
-            to_add.append(ArtistCountry(artist_name=artist, country=iso))
-        if to_add:
-            s.bulk_save_objects(to_add)
-            s.commit()
-    # update parquet
-    df = _load_artist_country_cache()
-    for a, c in new_map.items():
-        df.loc[df.artist_name == a, "country"] = c
-        if not (df.artist_name == a).any():
-            df.loc[len(df)] = [a, c]
-    df.to_parquet(AC_PARQUET, compression="zstd", index=False)
+    with SessionLocal() as se:
+        for r in new_rows:
+            obj = (
+                se.query(ArtistCountry)
+                .filter_by(artist_name=r["artist_name"])
+                .one_or_none()
+            )
+            if obj:
+                if not obj.mbid and r["mbid"]:
+                    obj.mbid = r["mbid"]
+                if not obj.disambiguation_comment and r["disambiguation_comment"]:
+                    obj.disambiguation_comment = r["disambiguation_comment"]
+                if not obj.country and r["country"]:
+                    obj.country = r["country"]
+            else:
+                se.add(ArtistCountry(**r))
+        se.commit()
+
+
+# Syncing Parquet with DB
+# df = _df_from_db()
+# df.to_parquet(AC_PARQUET, index=False, compression="zstd")
 
 
 def artist_countries(series: pd.Series) -> pd.Series:
-    cache_df = _load_artist_country_cache()
-    cached = dict(zip(cache_df.artist_name, cache_df.country))
+    """
+    Vectorised ISO-country lookup with on-disk/DB cache;
+    back-fills MBID + disambiguation when available.
+    """
+    cache_df = _load_ac_cache()
+    cached = cache_df.set_index("artist_name").to_dict("index")
     missing = [a for a in series.unique() if a not in cached]
-    fetched: dict[str, str | None] = {}
-    for a in missing:
-        fetched[a] = mbAPI.fetch_country(a)
-    _update_artist_country_cache(fetched)
-    cached.update(fetched)
+    new_rows = []
+    for artist in missing:
+        mb_res = mbAPI.search_artist(artist, limit=1)
+        mb_row = mb_res[0] if mb_res else {}
+        new_rows.append(
+            dict(
+                artist_name=artist,
+                country=mb_row.get("country"),
+                mbid=mb_row.get("id"),
+                disambiguation_comment=mb_row.get("disambiguation"),
+            )
+        )
+    _upsert_artist_country(new_rows)
+    # Refreshing cache after insert
+    cache_df = _load_ac_cache()
+    cached = cache_df.set_index("artist_name").country.to_dict()
     return series.map(cached)
+
+
+def top_n_artists_by_country(adatkeret, country, n=24):
+    """
+    Return the N most-played artists for one country,
+    sorted by descending play-count.
+    """
+    (adatkeret
+     .loc[adatkeret["Country"] == country, "Artist"]
+     .value_counts()
+     .head(n)
+     )
 
 
 # %%
 # =============================================================================
 # User‑country assignment to scrobbles (interval join)
 # =============================================================================
-def assign_user_country(scrobbles: pd.DataFrame, timeline: pd.DataFrame) -> pd.Series:
-    if timeline.empty:
-        return pd.Series([None] * len(scrobbles), index=scrobbles.index)
-    timeline = timeline.sort_values("start_date").reset_index(drop=True)
-    # merge_asof trick: needs key on start_date; we’ll merge then mask
-    temp = scrobbles[["Datetime"]].rename(columns={"Datetime": "ts"})
-    merged = pd.merge_asof(temp.sort_values("ts"), timeline, left_on="ts", right_on="start_date", direction="backward")
-    # now drop rows where ts >= end_date (if end_date not null)
-    mask = merged["end_date"].isna() | (merged["ts"] < merged["end_date"])
-    return merged.loc[mask, "country"].reindex(scrobbles.index)
+def load_country_timeline(path: Path) -> pd.DataFrame:
+    tl = (
+        pd.read_parquet(path)
+        .rename(columns={"country_name": "UserCountry"})
+    )
+    tl["start_date"] = pd.to_datetime(tl["start_date"]).dt.normalize()
+    tl["end_date"] = pd.to_datetime(tl["end_date"]).dt.normalize()
+    tl.sort_values("start_date", inplace=True)
+    return tl
+
+
+def assign_user_country(datafr, timeline):
+    temp = datafr.copy()
+    temp["day"] = pd.to_datetime(temp["Datetime"], unit="s").dt.normalize()
+    out = pd.merge_asof(
+        temp.sort_values("day"),
+        timeline[["start_date", "UserCountry"]],
+        left_on="day",
+        right_on="start_date",
+        direction="backward",
+    )
+    return out["UserCountry"]
 
 
 # %%
@@ -234,13 +308,10 @@ print("=" * 90, "\n")
 data, latest_filename = io.latest_parquet(return_df=True)
 if data is None or data.empty:
     sys.exit("🚫  No scrobble data found – aborting EDA.")
-
 data.columns = ["Artist", "Album", "Song", "Datetime"]
 data.dropna(subset=["Datetime"], inplace=True)
-
-before_count = len(data)
 data = data.drop_duplicates(["Artist", "Album", "Song", "Datetime"])
-log.info("Deduplicated %d rows → %d remain", before_count - len(data), len(data))
+log.info("After dedup, %d rows remain.", len(data))
 
 # %%
 # -------------------------------------------------------------------------------------
@@ -279,11 +350,10 @@ if variant_to_canon:
 
 # %%
 # -------------------------------------------------------------------------------------
-#   STEP 3 – basic EDA (top artists)
+#   STEP 3 – EDA
 # -------------------------------------------------------------------------------------
 artist_counts = data["Artist"].value_counts()
 top_artists = artist_counts.head(10)
-print(top_artists)
 with PALETTES_FILE.open("r", encoding="utf-8") as fh:
     custom_palettes = json.load(fh)["palettes"]
 custom_colors_10 = io.register_custom_palette("colorpalette_10", custom_palettes)
@@ -301,7 +371,6 @@ plt.title("Top 10 Artists by Scrobbles", fontsize=16)
 plt.xlabel("Scrobbles", fontsize=14)
 plt.ylabel("Artist", fontsize=14)
 plt.tight_layout()
-plt.show()
 print("Birds-eye stats for artist counts")
 print(artist_counts.describe())
 # Converting artist_counts to DataFrame
@@ -312,41 +381,60 @@ print(f"And what if we exclude artists with a play count below {count_threshold}
 # Shrinking of the data set can be easily undone here by setting count_threshold to 1 in future flows
 fltrd_artcount = artist_counts_df[artist_counts_df["Count"] >= count_threshold]
 print(fltrd_artcount.describe())
+album_counts = data["Album"].value_counts()
+top_albums = album_counts.head(10)
 
 # %%
 # -------------------------------------------------------------------------------------
 #   STEP 4 – user‑country timeline (fast‑lane vs CLI)
 # -------------------------------------------------------------------------------------
 if UC_PARQUET.exists():
-    print(f"Fast‑lane timeline for historical user country locations found at {UC_PARQUET.relative_to(PROJECT_ROOT)}.")
-    choice = input("[U]se as‑is  |  [E]dit   |  [N]ew (overwrite)  ?  [U/e/n]: ").strip().lower() or "u"
-    if choice.startswith("e"):
+    use = input("Use existing user‑country timeline? [Y]es / [E]dit / [N]ew: ").strip().lower() or "y"
+    if use.startswith("e"):
         uc_df = edit_country_timeline()
-    elif choice.startswith("n"):
+    elif use.startswith("n"):
         UC_PARQUET.unlink(missing_ok=True)
         uc_df = edit_country_timeline()
     else:
         uc_df = pd.read_parquet(UC_PARQUET)
-else:
-    print("No user‑country timeline found – let's create one now.")
-    uc_df = edit_country_timeline()
-
 
 # %%
 # -------------------------------------------------------------------------------------
 #   STEP 5 – enrich with country via MusicBrainz & chart
 # -------------------------------------------------------------------------------------
-def _country_for_series(series: pd.Series) -> pd.Series:
-    """
-    Vectorised ISO-country lookup with on-disk cache.
-    """
-    iso = {artist: mbAPI.fetch_country(artist) for artist in series.unique()}
-    return series.map(iso)
+ac_cache = (
+    pd.read_parquet(AC_PARQUET)
+    .set_index("artist_name")["country"]  # Series {artist → country}
+    .to_dict()
+)
 
 
-data["Country"] = _country_for_series(data["Artist"])
-country_count = data.Country.value_counts().sort_values(ascending=False).to_frame()[:15]
-country_count = country_count.rename(columns={"Country": "count"})
+def _country_for_series(series: pd.Series,
+                        cache: dict[str, str | None]) -> pd.Series:
+    """
+    Vectorised ISO-country lookup:
+      1. use cached country if present
+      2. otherwise query MusicBrainz once and extend the cache
+    """
+    missing = [a for a in series.unique() if a not in cache]
+    if missing:
+        mb_results = {
+            artist: mbAPI.fetch_country(artist)
+            for artist in missing
+        }
+        cache.update(mb_results)
+        if mb_results:
+            (pd.DataFrame
+             .from_dict(mb_results, orient="index", columns=["country"])
+             .assign(artist_name=lambda d: d.index)
+             .to_parquet(AC_PARQUET, compression="zstd",
+                         append=True, index=False))
+    return series.map(cache)
+
+
+data["ArtistCountry"] = _country_for_series(data["Artist"], ac_cache)
+country_count = data.ArtistCountry.value_counts().sort_values(ascending=False).to_frame()[:15]
+country_count = country_count.rename(columns={"ArtistCountry": "count"})
 plt.figure(figsize=(12, 6))
 ax = sns.barplot(
     x=country_count.index,
@@ -370,24 +458,90 @@ ax.set_xticks(range(len(country_count)))
 ax.set_xticklabels(country_count.index, rotation=45, ha="right", fontsize=12)
 ax.grid(True, axis="y", linestyle="--", alpha=0.7)
 ax.set_title("Top 15 Countries", fontsize=16)
-ax.set_xlabel("Country", fontsize=14)
+ax.set_xlabel("ArtistCountry", fontsize=14)
 ax.set_ylabel("Count", fontsize=14)
 plt.tight_layout()
-plt.show()
-plt.close()
 
 # %%
 # -------------------------------------------------------------------------------------
 #   STEP 6 – user-country analytics
 # -------------------------------------------------------------------------------------
+uc_df = load_country_timeline(UC_PARQUET)
+data["UserCountry"] = assign_user_country(data, uc_df)
+user_country_count = data.UserCountry.value_counts().sort_values(ascending=False).to_frame()[:10]
+user_country_count = user_country_count.rename(columns={"UserCountry": "count"})
+plt.figure(figsize=(12, 6))
+ax = sns.barplot(
+    x=user_country_count.index,
+    y="count",
+    data=user_country_count,
+    palette="Spectral",
+    hue=user_country_count.index,
+)
+for p in ax.patches:
+    ax.annotate(
+        f"{int(p.get_height())}",
+        (p.get_x() + p.get_width() / 2.0, p.get_height()),
+        ha="center",
+        va="center",
+        xytext=(0, 9),
+        textcoords="offset points",
+        fontsize=10,
+        color="black",
+    )
+ax.set_xticks(range(len(user_country_count)))
+ax.set_xticklabels(user_country_count.index, rotation=45, ha="right", fontsize=12)
+ax.grid(True, axis="y", linestyle="--", alpha=0.7)
+ax.set_title("User countries per scrobble count", fontsize=16)
+ax.set_xlabel("UserCountry", fontsize=14)
+ax.set_ylabel("Count", fontsize=14)
+plt.tight_layout()
+plt.show()
 
 # %%
 # -------------------------------------------------------------------------------------
 #   STEP 7 – temporal enrichment
 # -------------------------------------------------------------------------------------
+adat = data.copy()
+s = pd.to_datetime(adat["Datetime"], unit="s", utc=True)
+s = s.dt.tz_convert(None)
+data["Datetime"] = s
+data.describe()
 data["Year"] = data["Datetime"].dt.year
 data["Month"] = data["Datetime"].dt.month
 data["Day"] = data["Datetime"].dt.day
+# Total scrobbles per year
+data.groupby("Year")["Song"].count().plot(kind="bar", figsize=(10, 4), rot=0,
+                                          title="Total scrobbles per year")
+# Average per month
+data.groupby("Month")["Song"].count().div(data["Year"].nunique()).plot(kind="bar", title="Average monthly scrobbles")
+
+# Calendar heatmap for single year
+y = 2024
+pivot = (data[data["Year"] == y]
+         .assign(DoW=lambda x: x["Datetime"].dt.dayofweek,
+                 Week=lambda x: x["Datetime"].dt.isocalendar().week)
+         .pivot_table(index="Week", columns="DoW",
+                      values="Song", aggfunc="count", fill_value=0))
+sns.heatmap(pivot, cmap="viridis")
+plt.title(f"Scrobbles during {y}")
+
+
+# Top artists per year
+def yearly_top(adatkupac, n=2):
+    return (adatkupac.groupby(["Year", "Artist"])["Song"].count()
+            .groupby(level=0, group_keys=False)
+            .nlargest(n)
+            .reset_index(name="Plays"))
+
+
+yearly = yearly_top(data)
+
+
+# Day-of-week pattern
+data["Datetime"].dt.day_name().value_counts().reindex([
+    "Monday", "Tuesday", "Wednesday", "Thursday",
+    "Friday", "Saturday", "Sunday"]).plot(kind="bar", rot=30, title="Scrobbles by day of week")
 
 
 # %%
@@ -405,18 +559,3 @@ if __name__ == "__main__":
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[logging.StreamHandler()],
     )
-
-# %%
-# DB-based user country lookup for integrated UC-analytics workflow for the future
-uc_df = pd.read_parquet(Path(__file__).resolve().parent / "PQ/uc.parquet")
-with SessionLocal() as s:
-    current_country = (
-        s.scalars(select(UserCountry).where(UserCountry.end_date.is_(None))).first()
-    )
-    if current_country:
-        tracks = s.scalars(
-            select(Scrobble).where(
-                Scrobble.play_time >= current_country.start_date,
-                (current_country.end_date.is_(None)) | (Scrobble.play_time < current_country.end_date),
-            )
-        ).all()
