@@ -59,7 +59,7 @@ def apply_previous(df: pd.DataFrame) -> pd.DataFrame:
                 .all())
     mapping = {v: r.canonical_name
                for r in rows
-               for v in _split(r.artist_variants)
+               for v in _split(r.artist_variants_text)
                if v and v != r.canonical_name}
     if mapping:
         df["Artist"] = df["Artist"].replace(mapping)

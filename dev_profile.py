@@ -303,8 +303,7 @@ print("=" * 90)
 print("Welcome to the CanonFodder data profiling workflow!")
 print("We'll load your scrobble data, apply any previously saved artist name unifications,")
 print("then explore on forward.")
-print("=" * 90, "\n")
-
+print("=" * 90)
 data, latest_filename = io.latest_parquet(return_df=True)
 if data is None or data.empty:
     sys.exit("🚫  No scrobble data found – aborting EDA.")
@@ -341,8 +340,8 @@ def _split_variants(raw: str) -> list[str]:
 variant_to_canon: dict[str, str] = {}
 for row in canon_rows:
     # `artist_variants` keeps the variants in one string, {-separated (a{b{c).
-    variants: list[str] = [v.strip() for v in row.artist_variants.split("{") if v.strip()]
-    for variant in _split_variants(row.artist_variants):
+    variants: list[str] = [v.strip() for v in row.artist_variants_text.split("{") if v.strip()]
+    for variant in _split_variants(row.artist_variants_text):
         if variant and variant != row.canonical_name:
             variant_to_canon[variant] = row.canonical_name
 if variant_to_canon:

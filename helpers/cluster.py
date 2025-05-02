@@ -3,6 +3,7 @@ Wraps assorted clustering utilities including fuzzy string scoring and
 quality metrics.
 """
 from functools import partial
+import itertools
 import numpy as np
 from rapidfuzz import fuzz, process
 from sklearn.cluster import DBSCAN
@@ -110,13 +111,24 @@ def dbscan_with_anchors(artist_names, dist_matrix, anchor_idx_sets,
     raise RuntimeError("No ε satisfies anchor constraints.")
 
 
+def expand_pairs(row):
+    if 'artist_variants' in row:
+        variants = row['artist_variants'].split('{')
+    else:
+        raise KeyError("Neither 'artist_variants_text' nor 'artist_variants' found in dataframe row.")
+    pairs = list(itertools.combinations(sorted(set(variants)), 2))
+    return [(row['artist_variants'], pair[0], pair[1], row['to_link']) for pair in pairs]
+
+
 def fuzzy_scores(a: str, b: str) -> dict:
     """Returns rapidfuzz similarity measures between two strings"""
     return {
-        "ratio": fuzz.ratio(a, b),
-        "partial_ratio": fuzz.partial_ratio(a, b),
-        "token_set_ratio": fuzz.token_set_ratio(a, b),
-        "partial_token_ratio": fuzz.partial_token_set_ratio(a, b),
+        "ratio": fuzz.ratio(a, b) / 100,
+        "partial_ratio": fuzz.partial_ratio(a, b) / 100,
+        "token_sort_ratio": fuzz.token_sort_ratio(a, b) / 100,
+        "token_set_ratio": fuzz.token_set_ratio(a, b) / 100,
+        "WRatio": fuzz.WRatio(a, b) / 100,
+        "QRatio": fuzz.QRatio(a, b) / 100
     }
 
 

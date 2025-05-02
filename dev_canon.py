@@ -1,5 +1,6 @@
 # %% Basic setup
 from dotenv import load_dotenv
+from sklearn.svm import SVC
 
 load_dotenv()
 from DB import SessionLocal
@@ -17,8 +18,10 @@ import matplotlib
 
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
+
 plt.ion()
 import mbAPI
+
 mbAPI.init()
 import numpy as np
 import os
@@ -31,21 +34,23 @@ from rapidfuzz.distance import Levenshtein
 import re
 import seaborn as sns
 from scipy.spatial.distance import cdist
+from scipy.stats import spearmanr
+from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.inspection import permutation_importance
-from sklearn.metrics import pairwise_distances, silhouette_score
-from sklearn.model_selection import ParameterGrid
-
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.preprocessing import MinMaxScaler, RobustScaler
-from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, roc_auc_score
-from sklearn.model_selection import train_test_split
-from sqlalchemy import text
+from sklearn.metrics import confusion_matrix, classification_report, pairwise_distances, roc_auc_score, silhouette_score
+from sklearn.model_selection import ParameterGrid, StratifiedShuffleSplit, train_test_split
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.tree import DecisionTreeClassifier, export_text, plot_tree
+from sqlalchemy import insert, select, text, update
 import sys
 from tabulate import tabulate
+import warnings
+warnings.filterwarnings("ignore", message="'force_all_finite' was renamed")
+import woodwork as ww
 
 if '__file__' in globals():
     HERE = Path(__file__).resolve().parent  # running from a file
@@ -69,7 +74,7 @@ sns.set_style(style="whitegrid")
 sns.set_palette(sns.color_palette(custom_colors))
 cmap = sns.diverging_palette(220, 10, as_cmap=True)
 
-# %% Step 1: Input & pre-processing
+# %% Input & pre-processing
 print("=================================================")
 print("Welcome to the CanonFodder canonization workflow!")
 print("=================================================\n")
@@ -83,7 +88,7 @@ data.columns = ["Artist", "Album", "Song", "Datetime"]
 data.dropna(subset=["Datetime"], inplace=True)
 data = data.drop_duplicates(["Artist", "Album", "Song", "Datetime"])
 
-# %% Step 2: Variant clustering
+# %% Variant clustering
 LOGGER.info("Fetching already canonised artist-name variants…")
 with SessionLocal() as sess:
     canon_rows = (
@@ -108,8 +113,8 @@ def _split_variants(raw: str) -> list[str]:
 variant_to_canon: dict[str, str] = {}
 for row in canon_rows:
     # `artist_variants` keeps the variants in one string, {-separated (a{b{c).
-    variants: list[str] = [v.strip() for v in row.artist_variants.split("{") if v.strip()]
-    for variant in _split_variants(row.artist_variants):
+    variants: list[str] = [v.strip() for v in row.artist_variants_text.split("{") if v.strip()]
+    for variant in _split_variants(row.artist_variants_text):
         if variant and variant != row.canonical_name:
             variant_to_canon[variant] = row.canonical_name
 if variant_to_canon:
@@ -127,10 +132,10 @@ fltrd_artcount = pd.concat([
 artist_names = fltrd_artcount["Artist"].str.strip().tolist()
 n = len(artist_names)
 sim_matrix = process.cdist(
-        artist_names,
-        artist_names,
-        score_cutoff=0,
-        workers=-1,
+    artist_names,
+    artist_names,
+    score_cutoff=0,
+    workers=-1,
 ) / 100.0
 dist = 1.0 - sim_matrix
 name2idx = {name: i for i, name in enumerate(artist_names)}
@@ -138,7 +143,7 @@ anchor_idx_sets = [
     [name2idx[n.strip()] for n in group if n.strip() in name2idx]
     for group in cluster.variant_sets
 ]
-anchor_idx_sets = [s for s in anchor_idx_sets if len(s) >= 2]   # ignore degenerate
+anchor_idx_sets = [s for s in anchor_idx_sets if len(s) >= 2]  # ignore degenerate
 eps_range = np.arange(0.05, 1.0, 0.01)
 best_eps = None
 for eps in eps_range:
@@ -152,12 +157,14 @@ print(f"Chosen ε = {best_eps:.2f} (all anchors satisfied)")
 labels = DBSCAN(eps=best_eps, min_samples=2, metric="precomputed").fit_predict(dist)
 clusters = (
     pd.DataFrame({"Artist": artist_names, "label": labels})
-      .query("label != -1")
-      .groupby("label")["Artist"].apply(list)
-      .tolist()
+    .query("label != -1")
+    .groupby("label")["Artist"].apply(list)
+    .tolist()
 )
 
-# %% Step 3: Gold standard creation
+# %% Gold standard creation
+# This step previously identified a lot of relevant clusters, which I manually clustered to form a gold-standard table.
+# Cf. section 2.3.3 of the assignment
 with SessionLocal() as sess:
     unhandled = 0
     for group in clusters:
@@ -165,7 +172,7 @@ with SessionLocal() as sess:
             continue
         sig = "|".join(sorted(group))
         row = sess.execute(
-            text("SELECT 1 FROM artist_variants_canonized WHERE artist_variants = :sig"),
+            text("SELECT 1 FROM artist_variants_canonized WHERE artist_variants_text = :sig"),
             {"sig": sig},
         ).first()
         if row is None:
@@ -177,83 +184,118 @@ data, fltrd_artcount = cli.unify_artist_names_cli(
     fltrd_artcount=fltrd_artcount,
     similar_artist_groups=clusters,
 )
-print("Done unifying. Next steps coming later. Now exiting...")
-
-
-# %%
-# Building composite features with ft of 6 rapidfuzz function outputs
-
+print("Done unifying. Next steps coming.")
 
 # %%
-# Logic for calculating and visualizing Cramér's V for similarity score metrics
-categorical_columns = data.select_dtypes(include=["object"]).columns
-cramers_matrix = pd.DataFrame(index=categorical_columns, columns=categorical_columns)
-for col1 in categorical_columns:
-    for col2 in categorical_columns:
-        if col1 == col2:
-            cramers_matrix.loc[col1, col2] = 1.0
-        else:
-            cramers_matrix.loc[col1, col2] = stats.cramers_v(data[col1], data[col2])
-cramers_matrix = cramers_matrix.astype(float)
-cramers_matrix.columns = [
-    helper.short_labels.get(col, col) for col in cramers_matrix.columns
-]
-cramers_matrix.index = [
-    helper.short_labels.get(col, col) for col in cramers_matrix.index
-]
-plt.figure(figsize=(12, 8))
-sns.heatmap(
-    cramers_matrix, annot=True, cmap="coolwarm", fmt=".2f", cbar=True, mask=None
+# Building 6 rapidfuzz function outputs
+avc = pd.read_parquet("PQ/avc.parquet")
+expanded_rows = []
+for _, row in avc.iterrows():
+    expanded_rows.extend(cluster.expand_pairs(row))
+goldstandard = pd.DataFrame(expanded_rows, columns=[
+    'variants', 'variant_a', 'variant_b', 'to_link'
+])
+score_df = goldstandard.apply(
+    lambda sor: pd.Series(cluster.fuzzy_scores(sor['variant_a'], sor['variant_b'])),
+    axis=1
 )
-plt.gca().xaxis.set_tick_params(labeltop=True, labelbottom=False)
-plt.xticks(rotation=45, ha="center", fontsize=9)
-plt.yticks(rotation=0, ha="right", fontsize=10)
-plt.tight_layout()
-plt.show()
-plt.close()
+goldstandard = pd.concat([goldstandard, score_df], axis=1)
+goldstandard.info()
+goldstandard.describe()
+goldstandard["to_link"] = goldstandard["to_link"].astype("int64")
+gs = goldstandard[[
+    "variants", "to_link",
+    "ratio", "partial_ratio",
+    "token_sort_ratio", "token_set_ratio",
+    "WRatio", "QRatio"
+]]
 
 # %%
-# Checking the correlation matrix using Spearman's
-vs_corr = data_VT.corr(method="spearman")
+# Variance-pruning and checking the correlation matrix using Spearman's
+X = gs.drop(columns=["variants", "to_link"])
+selector = VarianceThreshold(threshold=0.01)
+_ = selector.fit_transform(X)
+variances = selector.variances_
+variance_df = pd.DataFrame({
+    "features": X.columns,
+    "variances": variances
+})
+pruned_features_df = stats.iterative_correlation_dropper(
+    current_data=X,
+    cutoff=0.85,
+    varframe=variance_df,
+    min_features=3
+)
+gs_VTed = pd.concat([
+    gs[["variants", "to_link"]],
+    pruned_features_df
+], axis=1)
+gs_corr = pruned_features_df.corr(method="spearman")
 plt.figure(figsize=(20, 18))
 sns.heatmap(
-    vs_corr,
+    gs_corr,
     annot=True,
     annot_kws={"size": 8},
     cmap="winter",
     fmt=".2f",
     cbar=True,
     linewidths=0.5,
-    mask=np.triu(vs_corr),
+    mask=np.triu(gs_corr),
 )
 plt.title("")
 plt.xticks(rotation=90)
-plt.show()
-plt.close()
+
+
+# %% FTing
+gs_VTed_num = gs_VTed.drop("variants", axis='columns')
+gs_VTed_num = gs_VTed_num.drop("to_link", axis='columns')
+gs_VTed_num["pair_id"] = gs_VTed_num.index
+gs_VTed_num.ww.init(
+    name="similarities",
+    index="pair_id",
+    logical_types={col: 'Double' for col in gs_VTed_num.columns if col != "pair_id"}
+)
+es = ft.EntitySet(id="artist_pairs")
+es = es.add_dataframe(
+    dataframe_name="similarities",
+    dataframe=gs_VTed_num,
+    index="pair_id"
+)
+trans_primitives = ["add_numeric", "subtract_numeric", "divide_numeric", "multiply_numeric"]
+features, feature_defs = ft.dfs(
+    entityset=es,
+    target_dataframe_name="similarities",
+    trans_primitives=trans_primitives,
+    max_depth=1
+)
+features.reset_index(drop=True, inplace=True)
+features.replace([np.inf, -np.inf], np.nan, inplace=True)
+features.dropna(axis=1, how='any', inplace=True)
+print(features.head())
+print(f"Final features shape: {features.shape}")
 
 # %%
 # Identifying attributes with very strong correlation
-vs_corr_pairs, features_to_drop_vs = stats.drop_high_corr_features(
-    vs_corr, vs_threshold, variance_df
+X = features
+selector = VarianceThreshold(threshold=0.01)
+_ = selector.fit_transform(X)
+variances = selector.variances_
+variance_df = pd.DataFrame({
+    "features": X.columns,
+    "variances": variances
+})
+pruned_features_df = stats.iterative_correlation_dropper(
+    current_data=X,
+    cutoff=0.85,
+    varframe=variance_df,
+    min_features=3
 )
-
-# %%
-# Dropping the deselected tables
-drop_table = pd.DataFrame(
-    {
-        "Very strongly correlated feature pair": [
-            f"{pair[0]} - {pair[1]}" for pair in vs_corr_pairs
-        ],
-        "Feature to drop": features_to_drop_vs,
-    }
-)
-print(tabulate(drop_table, headers="keys", tablefmt="pretty"))
-data_VS_corr = data_VT.drop(columns=features_to_drop_vs)
 
 # %%
 # Recalculating for strong correlations
-corr_matrix_shrunken = data_VS_corr.corr(method="spearman")
-s_threshold = 0.6
+features = pruned_features_df
+corr_matrix_shrunken = features.corr(method="spearman")
+s_threshold = 0.75
 high_corr_pairs_s, features_to_drop_s = stats.drop_high_corr_features(
     corr_matrix_shrunken, s_threshold, variance_df
 )
@@ -266,126 +308,26 @@ drop_table_s = pd.DataFrame(
     }
 )
 print(tabulate(drop_table_s, headers="keys", tablefmt="pretty"))
-data_corr_final = data_VS_corr.drop(columns=features_to_drop_s)
+data_corr_final = features.drop(columns=features_to_drop_s)
 summary_dcf = data_corr_final.describe(include="all").transpose()
 summary_dcf = summary_dcf.drop(columns=["25%", "50%", "75%"])
 summary_dcf.index.name = "Featnames"
 print(tabulate(summary_dcf, headers="keys", tablefmt="pretty"))
 
 # %%
-# DFS with featuretools
-trans_primitives = [
-    "add_numeric",
-    "subtract_numeric",
-    "divide_numeric",
-    "multiply_numeric",
-]
-agg_primitives = ["mean", "std", "min", "max", "count"]
-LLEed_data["index_col"] = range(1, len(LLEed_data) + 1)
-es = ft.EntitySet(id="DataBase")
-es = es.add_dataframe(
-    dataframe_name="TableEntity", dataframe=LLEed_data, index="index_col"
-)
-print(es)
-# noinspection UnusedPrimitiveWarning
-features, feature_names = ft.dfs(
-    entityset=es,
-    target_dataframe_name="TableEntity",
-    max_depth=1,
-    trans_primitives=trans_primitives,
-    agg_primitives=agg_primitives,
-)
-data_with_dfs = features.reset_index()
-print("Number of features:", len(feature_names))
-print(f"Original DFS_data shape: {data_with_dfs.shape}")
-cols_to_drop = [col for col in data_with_dfs.columns if "index_col" in col]
-data_with_dfs = data_with_dfs.drop(columns=cols_to_drop)
-print(f"Shape of DFS_data after dropping index column: {data_with_dfs.shape}")
-nan_count = data_with_dfs.isna().sum()
-inf_count = (data_with_dfs == np.inf).sum()
-nan_columns = nan_count[nan_count >= 1000]
-if not nan_columns.empty:
-    print("Columns with at least 1000 NaN values:")
-    print(nan_columns)
-inf_columns = inf_count[inf_count >= 545]
-if not inf_columns.empty:
-    print("Columns with at least 545 infinite values:")
-    print(inf_columns)
-data_with_dfs_onlyNaN = data_with_dfs.replace([np.inf, -np.inf], np.nan)
-nan_count_onlyNaN = data_with_dfs_onlyNaN.isna().sum()
-inf_count_onlyNaN = (data_with_dfs_onlyNaN == np.inf).sum()
-nan_columns_onlyNaN = nan_count_onlyNaN[nan_count_onlyNaN >= 1125]
-if not nan_columns_onlyNaN.empty:
-    print("Columns with at least 1125 NaN values:")
-    print(nan_columns_onlyNaN)
-inf_columns_onlyNaN = inf_count_onlyNaN[inf_count_onlyNaN >= 545]
-if not inf_columns_onlyNaN.empty:
-    print("Columns with at least 545 infinite values:")
-    print(inf_columns_onlyNaN)
-data_dfs_var = data_with_dfs_onlyNaN.dropna(axis=1)
-print(f"Original DFS_data shape: {data_with_dfs_onlyNaN.shape}")
-print(f"Shape of data after removing NaN & inc columns: {data_dfs_var.shape}")
-vari_threshold = 0.05
-selector2 = VarianceThreshold(threshold=vari_threshold)
-_ = selector2.fit_transform(data_dfs_var)
-variances2 = selector2.variances_
-variance2_df = pd.DataFrame({"features": data_dfs_var.columns, "variances": variances2})
-variance2_df = variance2_df.sort_values(by="variances", ascending=False)
-selected_features2 = data_dfs_var.columns[selector2.get_support(indices=True)]
-final_features2 = list(set(selected_features2))
-data_DFS_var = pd.DataFrame(data_dfs_var[final_features2], columns=final_features2)
-print(f"Filtered dataset size: {data_DFS_var.shape[0], data_DFS_var.shape[1]}")
-
-# %%
-# Iterative correlation-based filtering to exclude very strongly correlated features
-data_dfs_varcor = stats.iterative_correlation_dropper(
-    data_DFS_var, vs_threshold, variance2_df
-)
-
-# %%
-# Iterative correlation-based filtering to exclude strongly correlated features
-data_dfs_varcor = stats.iterative_correlation_dropper(
-    data_dfs_varcor, s_threshold, variance2_df
-)
-
-print(f"Before dataset size: {data_DFS_var.shape[0], data_DFS_var.shape[1]}")
-print(f"After dataset size: {data_dfs_varcor.shape[0], data_dfs_varcor.shape[1]}")
-
-
-# %%
 # Scaling
 scaler2 = MinMaxScaler()
-data_dfs_scaled = scaler2.fit_transform(data_dfs_varcor)
-data_dfs_scaled = pd.DataFrame(data_dfs_scaled, columns=data_dfs_varcor.columns)
+data_dfs_scaled = scaler2.fit_transform(data_corr_final)
+data_dfs_scaled = pd.DataFrame(data_dfs_scaled, columns=data_corr_final.columns)
 summary_dfsmms = data_dfs_scaled.describe(include="all").transpose()
 summary_dfsmms = summary_dfsmms.drop(columns=["25%", "50%", "75%"])
 summary_dfsmms.index.name = "Fnames"
-print(tabulate.tabulate(summary_dfsmms, headers="keys", tablefmt="pretty"))
-
-# %%
-# Baseline k-means
-kmeans_01 = KMeans(n_clusters=5, random_state=44)
-labels_01 = kmeans_01.fit_predict(data_dfs_scaled)
-centers_01 = kmeans_01.cluster_centers_
-cluster_counts = pd.Series(labels_01).value_counts()
-print(cluster_counts)
-data_with_clusters = data_dfs_scaled.copy()
-data_with_clusters["Cluster"] = labels_01
-radii = []
-for i, center in enumerate(centers_01):
-    # Extracting points belonging to the current cluster
-    cluster_points = data_dfs_scaled[labels_01 == i]
-    # Computing distances to the cluster center
-    distances = cdist(cluster_points, [center])
-    # Calculating the maximum radius (farthest point)
-    max_radius = distances.max()
-    radii.append(max_radius)
-print("Radii for each cluster:", radii)
+print(tabulate(summary_dfsmms, headers="keys", tablefmt="pretty"))
 
 # %%
 # Feature importance calculation
-X = data_with_clusters.drop(columns=["Cluster"])
-y = data_with_clusters["Cluster"].astype("category")
+X = data_dfs_scaled
+y = gs_VTed["to_link"].astype("category")
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.3, random_state=43
 )
@@ -400,437 +342,161 @@ print(
 )
 
 # %%
-# QA calculation clustering
-QA_name_01 = "Base_km_5c_44"
-QA_labels_01 = labels_01
-QA_data_01 = data_dfs_scaled
-QA_cc_01 = centers_01
-QA_model_01 = kmeans_01
-QA_results = pd.DataFrame(
-    columns=[
-        "Clustering Name",
-        "Noise Percentage",
-        "Weighted WSS",
-        "Silhouette Score",
-        "BIC",
-    ]
+# Use only the features with the 3 highest feature importance score
+selected_base = ["token_sort_ratio",
+                 "partial_ratio - WRatio",
+                 "partial_ratio - token_set_ratio"]
+df_selected = data_dfs_scaled[selected_base].copy()
+final_ft_df = pd.concat(
+    [gs[['variants', 'to_link']], df_selected.reset_index(drop=True)],
+    axis=1
 )
-QA_metrics_01 = cluster.calculate_clustering_metrics(
-    QA_name_01, QA_labels_01, QA_data_01, QA_cc_01, QA_model_01
-)
-QA_metrics_01_df = pd.DataFrame([QA_metrics_01])
-if QA_results.empty:
-    QA_results = QA_metrics_01_df.dropna(axis=1, how="all")
-    print(
-        f"Initialized QA_results with the first QA entry: '{QA_metrics_01_df['Clustering Name'].iloc[0]}'."
-    )
-else:
-    if (
-            QA_metrics_01_df["Clustering Name"].iloc[0]
-            in QA_results["Clustering Name"].values
-    ):
-        print(
-            f"QA entry with Clustering Name '{QA_metrics_01_df['Clustering Name'].iloc[0]}' already exists."
-        )
-    else:
-        QA_metrics_01_df = QA_metrics_01_df.dropna(axis=1, how="all")
-        QA_results = pd.concat([QA_results, QA_metrics_01_df], ignore_index=True)
-        print(
-            f"Added new QA entry for Clustering Name '{QA_metrics_01_df['Clustering Name'].iloc[0]}'."
-        )
+selected_comp_feats_plus_target = final_ft_df.drop("variants", axis='columns')
 
-# %%
-# Exploring the data to get information about ranges (and a possible further round of scaling)
-summary_df = data_dfs_scaled.describe(include="all").transpose()
-summary_df = summary_df.drop(columns=["25%", "50%", "75%"])
-summary_df.index.name = "Featnames"
-summary_df["range"] = summary_df["max"] - summary_df["min"]
-sorted_summary = summary_df.sort_values(by="range", ascending=False)
-sorted_summary = sorted_summary.drop(columns=["std", "count"])
-largest_ranges = sorted_summary.head(10)
-print("Features with the 10 Largest Ranges:")
-print(tabulate(largest_ranges, headers="keys", tablefmt="pretty"))
-selected_components = set()
-selected_features = []
-for _, row in feature_importances.iterrows():
-    feature_name = row["features"]
-    feature_importance = row["importance"]
-    components = set(feature_name.replace("*", "+").replace("-", "+").split(" + "))
-    if not components & selected_components:
-        selected_features.append(feature_name)
-        selected_components.update(components)
-    if len(selected_features) == 7:
-        break
-print("Selected features:", selected_features)
 
-# %%
-# Building the main df with the top 7 selected attributes based on feature importance
-existing_features = [
-    feature for feature in selected_features if feature in data_dfs_scaled.columns
-]
-filtered_data = data_dfs_scaled[existing_features]
-summary_dfsfilt = filtered_data.describe(include="all").transpose()
-summary_dfsfilt = summary_dfsfilt.drop(columns=["25%", "50%", "75%"])
-summary_dfsfilt.index.name = "Filtnames"
-print(tabulate(summary_dfsfilt, headers="keys", tablefmt="pretty"))
-
-# %%
-# DBSCANning
-X = filtered_data.values
-dbscan_clusterer = DBSCAN(eps=0.5, min_samples=5)
-dbscan_clusterer.fit(X)
-labels_DBSCAN = dbscan_clusterer.labels_
-label_map = {-1: "Noise"}
-categories = [label_map.get(label, f"Cluster {label}") for label in labels_DBSCAN]
-data_with_DBSCAN = filtered_data.copy()
-data_with_DBSCAN["Cluster"] = labels_DBSCAN
-num_noise = np.sum(labels_DBSCAN == -1)
-print(f"Noise points: {num_noise}")
-cluster_counts = pd.Series(labels_DBSCAN).value_counts()
-print("Cluster Summary:")
-print(cluster_counts)
-
-# %%
-# Adding DBSCAN results to QA table
-QA_name_02 = "DBSCAN_eps0.5_minsam5"
-QA_labels_02 = labels_DBSCAN
-QA_data_02 = filtered_data
-clusters_DBSCAN = data_with_DBSCAN[data_with_DBSCAN["Cluster"] != -1]
-cluster_centers_DBSCAN = clusters_DBSCAN.groupby("Cluster").mean()
-QA_cc_02 = cluster_centers_DBSCAN
-QA_model_02 = dbscan_clusterer
-QA_metrics_02 = helper.calculate_clustering_metrics(
-    QA_name_02, QA_labels_02, QA_data_02, QA_cc_02, QA_model_02
-)
-QA_metrics_02_df = pd.DataFrame([QA_metrics_02])
-if QA_results.empty:
-    QA_results = QA_metrics_02_df.dropna(axis=1, how="all")
-    print(
-        f"Initialized QA_results with the first QA entry: '{QA_metrics_02_df['Clustering Name'].iloc[0]}'."
-    )
-else:
-    if (
-            QA_metrics_02_df["Clustering Name"].iloc[0]
-            in QA_results["Clustering Name"].values
-    ):
-        print(
-            f"QA entry with Clustering Name '{QA_metrics_02_df['Clustering Name'].iloc[0]}' already exists."
-        )
-    else:
-        QA_metrics_02_df = QA_metrics_02_df.dropna(axis=1, how="all")
-        QA_results = pd.concat([QA_results, QA_metrics_02_df], ignore_index=True)
-        print(
-            f"Added new QA entry for Clustering Name '{QA_metrics_02_df['Clustering Name'].iloc[0]}'."
-        )
-
-# %%
-# Print description of clusters
-print(data_with_DBSCAN["Cluster"].describe())
-
-# %%
-# HDBSCANning
-X2 = filtered_data.values
-clusterer2 = HDBSCAN(min_cluster_size=10, min_samples=15, cluster_selection_epsilon=0.0)
-clusterer2.fit(X2)
-labels_HDBSCAN = clusterer2.labels_
-probabilities_HDBSCAN = clusterer2.probabilities_
-label_map = {-1: "Noise", -2: "Infinite Values", -3: "Missing Values"}
-categories = [label_map.get(label, f"Cluster {label}") for label in labels_HDBSCAN]
-data_with_HDBSCAN = filtered_data.copy()
-data_with_HDBSCAN["Cluster"] = labels_HDBSCAN
-if probabilities_HDBSCAN is not None:
-    data_with_HDBSCAN["Probability"] = probabilities_HDBSCAN
-num_noise = np.sum(labels_HDBSCAN == -1)
-num_infinite = np.sum(labels_HDBSCAN == -2)
-num_missing = np.sum(labels_HDBSCAN == -3)
-print(f"Noise points: {num_noise}")
-print(f"Entries with infinite values: {num_infinite}")
-print(f"Entries with missing values: {num_missing}")
-cluster_counts = pd.Series(labels_HDBSCAN).value_counts()
-print("Cluster summary:")
-print(cluster_counts)
-print("Cluster size range:", cluster_counts.min(), "to", cluster_counts.max())
-
-# %%
-# Probability check
-print(data_with_HDBSCAN["Cluster"].describe())
-print(data_with_HDBSCAN["Probability"].describe())
-unique_prob = np.unique(probabilities_HDBSCAN)
-count_zero_prob = (data_with_HDBSCAN["Probability"] == 0).sum()
-count_less_than_0_9 = (data_with_HDBSCAN["Probability"] < 0.9).sum()
-count_less_than_0_9_but_more_than_0 = count_less_than_0_9 - count_zero_prob
-print(
-    f"Number of entries with probability less than 0.9 (excluding noise points): {count_less_than_0_9_but_more_than_0}"
-)
-
-# %%
-# Adding first HDBSCAN results to QA table
-QA_name_03 = "HDBSCAN_eps0_minsam15_minclsize10"
-QA_labels_03 = labels_HDBSCAN
-QA_data_03 = filtered_data
-clusters_HDBSCAN = filtered_data[data_with_HDBSCAN["Cluster"] != -1]
-cluster_centers_HDBSCAN = clusters_HDBSCAN.groupby(data_with_HDBSCAN["Cluster"]).mean()
-# clusters_HDBSCAN = data_with_HDBSCAN[data_with_HDBSCAN['Cluster'] != -1]
-# cluster_centers_HDBSCAN = clusters_HDBSCAN.groupby('Cluster').mean()
-QA_cc_03 = cluster_centers_HDBSCAN
-QA_model_03 = clusterer2
-QA_metrics_03 = helper.calculate_clustering_metrics(
-    QA_name_03, QA_labels_03, QA_data_03, QA_cc_03, QA_model_03
-)
-QA_metrics_03_df = pd.DataFrame([QA_metrics_03])
-if QA_results.empty:
-    QA_results = QA_metrics_03_df.dropna(axis=1, how="all")
-    print(
-        f"Initialized QA_results with the first QA entry: '{QA_metrics_03_df['Clustering Name'].iloc[0]}'."
-    )
-else:
-    if (
-            QA_metrics_03_df["Clustering Name"].iloc[0]
-            in QA_results["Clustering Name"].values
-    ):
-        print(
-            f"QA entry with clustering '{QA_metrics_03_df['Clustering Name'].iloc[0]}' already exists."
-        )
-    else:
-        QA_metrics_03_df = QA_metrics_03_df.dropna(axis=1, how="all")
-        QA_results = pd.concat([QA_results, QA_metrics_03_df], ignore_index=True)
-        print(
-            f"Added new QA entry for clustering '{QA_metrics_03_df['Clustering Name'].iloc[0]}'."
-        )
-
-# %%
-# HDBSCANning (with mcs 50)
-X3 = filtered_data.values
-clusterer3 = HDBSCAN(min_cluster_size=50, min_samples=15, cluster_selection_epsilon=0.0)
-clusterer3.fit(X3)
-labels_HDBSCAN_2 = clusterer3.labels_
-probabilities_HDBSCAN_2 = clusterer3.probabilities_
-label_map = {-1: "Noise", -2: "Infinite Values", -3: "Missing Values"}
-categories = [label_map.get(label, f"Cluster {label}") for label in labels_HDBSCAN_2]
-data_with_HDBSCAN_2 = filtered_data.copy()
-data_with_HDBSCAN_2["Cluster"] = labels_HDBSCAN_2
-if probabilities_HDBSCAN_2 is not None:
-    data_with_HDBSCAN_2["Probability"] = probabilities_HDBSCAN_2
-num_noise = np.sum(labels_HDBSCAN_2 == -1)
-num_infinite = np.sum(labels_HDBSCAN_2 == -2)
-num_missing = np.sum(labels_HDBSCAN_2 == -3)
-print(f"Noise points: {num_noise}")
-print(f"Entries with infinite values: {num_infinite}")
-print(f"Entries with missing values: {num_missing}")
-cluster_counts = pd.Series(labels_HDBSCAN_2).value_counts()
-print("Cluster Summary:")
-print(cluster_counts)
-print("Cluster size range:", cluster_counts.min(), "to", cluster_counts.max())
-print(data_with_HDBSCAN_2["Cluster"].describe())
-print(data_with_HDBSCAN_2["Probability"].describe())
-unique_prob = np.unique(probabilities_HDBSCAN)
-count_zero_prob = (data_with_HDBSCAN_2["Probability"] == 0).sum()
-count_less_than_0_9 = (data_with_HDBSCAN_2["Probability"] < 0.9).sum()
-count_less_than_0_9_but_more_than_0 = count_less_than_0_9 - count_zero_prob
-print(
-    f"Number of entries with probability less than 0.9 (excluding noise points): {count_less_than_0_9_but_more_than_0}"
-)
-QA_name_04 = "HDBSCAN_eps0_minsam15_minclsize50"
-QA_labels_04 = labels_HDBSCAN_2
-QA_data_04 = filtered_data
-clusters_HDBSCAN_2 = filtered_data[data_with_HDBSCAN_2["Cluster"] != -1]
-cluster_centers_HDBSCAN_2 = clusters_HDBSCAN_2.groupby(
-    data_with_HDBSCAN_2["Cluster"]
-).mean()
-QA_cc_04 = cluster_centers_HDBSCAN_2
-QA_model_04 = clusterer3
-QA_metrics_04 = helper.calculate_clustering_metrics(
-    QA_name_04, QA_labels_04, QA_data_04, QA_cc_04, QA_model_04
-)
-QA_metrics_04_df = pd.DataFrame([QA_metrics_04])
-if QA_results.empty:
-    QA_results = QA_metrics_04_df.dropna(axis=1, how="all")
-    print(
-        f"Initialized QA_results with the first QA entry: '{QA_metrics_04_df['Clustering Name'].iloc[0]}'."
-    )
-else:
-    if (
-            QA_metrics_04_df["Clustering Name"].iloc[0]
-            in QA_results["Clustering Name"].values
-    ):
-        print(
-            f"QA entry with clustering '{QA_metrics_04_df['Clustering Name'].iloc[0]}' already exists."
-        )
-    else:
-        QA_metrics_04_df = QA_metrics_04_df.dropna(axis=1, how="all")
-        QA_results = pd.concat([QA_results, QA_metrics_04_df], ignore_index=True)
-        print(
-            f"Added new QA entry for clustering '{QA_metrics_04_df['Clustering Name'].iloc[0]}'."
-        )
-
-# %%
-# HDBSCANning (with mcs 100)
-X4 = filtered_data.values
-clusterer4 = HDBSCAN(
-    min_cluster_size=100, min_samples=15, cluster_selection_epsilon=0.0
-)
-clusterer4.fit(X4)
-labels_HDBSCAN_3 = clusterer4.labels_
-probabilities_HDBSCAN_3 = clusterer4.probabilities_
-label_map = {-1: "Noise", -2: "Infinite Values", -3: "Missing Values"}
-categories = [label_map.get(label, f"Cluster {label}") for label in labels_HDBSCAN_3]
-data_with_HDBSCAN_3 = filtered_data.copy()
-data_with_HDBSCAN_3["Cluster"] = labels_HDBSCAN_3
-if probabilities_HDBSCAN_3 is not None:
-    data_with_HDBSCAN_3["Probability"] = probabilities_HDBSCAN_3
-num_noise = np.sum(labels_HDBSCAN_3 == -1)
-num_infinite = np.sum(labels_HDBSCAN_3 == -2)
-num_missing = np.sum(labels_HDBSCAN_3 == -3)
-print(f"Noise points: {num_noise}")
-print(f"Entries with infinite values: {num_infinite}")
-print(f"Entries with missing values: {num_missing}")
-cluster_counts = pd.Series(labels_HDBSCAN_3).value_counts()
-print("Cluster Summary:")
-print(cluster_counts)
-print("Cluster size range:", cluster_counts.min(), "to", cluster_counts.max())
-print(data_with_HDBSCAN_3["Cluster"].describe())
-print(data_with_HDBSCAN_3["Probability"].describe())
-unique_prob = np.unique(probabilities_HDBSCAN_3)
-count_zero_prob = (data_with_HDBSCAN_3["Probability"] == 0).sum()
-count_less_than_0_9 = (data_with_HDBSCAN_3["Probability"] < 0.9).sum()
-count_less_than_0_9_but_more_than_0 = count_less_than_0_9 - count_zero_prob
-print(
-    f"Number of entries with probability less than 0.9 (excluding noise points): {count_less_than_0_9_but_more_than_0}"
-)
-QA_name_05 = "HDBSCAN_eps0_minsam15_minclsize100"
-QA_labels_05 = labels_HDBSCAN_3
-QA_data_05 = filtered_data
-clusters_HDBSCAN_3 = filtered_data[data_with_HDBSCAN_3["Cluster"] != -1]
-cluster_centers_HDBSCAN_3 = clusters_HDBSCAN_3.groupby(
-    data_with_HDBSCAN_3["Cluster"]
-).mean()
-QA_cc_05 = cluster_centers_HDBSCAN_3
-QA_model_05 = clusterer4
-QA_metrics_05 = helper.calculate_clustering_metrics(
-    QA_name_05, QA_labels_05, QA_data_05, QA_cc_05, QA_model_05
-)
-QA_metrics_05_df = pd.DataFrame([QA_metrics_05])
-if QA_results.empty:
-    QA_results = QA_metrics_05_df.dropna(axis=1, how="all")
-    print(
-        f"Initialized QA_results with the first QA entry: '{QA_metrics_05_df['Clustering Name'].iloc[0]}'."
-    )
-else:
-    if (
-            QA_metrics_05_df["Clustering Name"].iloc[0]
-            in QA_results["Clustering Name"].values
-    ):
-        print(
-            f"QA entry with clustering '{QA_metrics_05_df['Clustering Name'].iloc[0]}' already exists."
-        )
-    else:
-        QA_metrics_05_df = QA_metrics_05_df.dropna(axis=1, how="all")
-        QA_results = pd.concat([QA_results, QA_metrics_05_df], ignore_index=True)
-        print(
-            f"Added new QA entry for clustering '{QA_metrics_05_df['Clustering Name'].iloc[0]}'."
-        )
-
-# %%
-# Choosing final clustering
-data_with_HDBSCAN_2.info()
-data_without_noise = data_with_HDBSCAN_2[data_with_HDBSCAN_2["Cluster"] != -1]
-features = [
-    col for col in data_without_noise.columns if col not in ["Cluster", "Probability"]
-]
+# %% Let's now try a decision tree-based approach
+X = df_selected
+y = final_ft_df["to_link"]
+# Constraining tree depth to get human-friendly rules
+tree = DecisionTreeClassifier(max_depth=2, random_state=42)
+tree.fit(X, y)
+print(export_text(tree, feature_names=X.columns.tolist()))
 plt.figure(figsize=(12, 6))
-for feature in features:
-    plt.figure(figsize=(12, 6))
-    sns.boxplot(x="Cluster", y=feature, data=data_without_noise)
-    plt.title(f"Distribution of {feature} by Cluster")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-plt.close()
+plot_tree(tree, feature_names=X.columns.tolist(), class_names=["no link", "link"], filled=True)
 
-
-# %% Step X: Building a labelled training set directly from  collated sqlite table
-# -------------------------------------------------------------------------
-triples = []
-for sig, canon in artist_link_rows.itertuples(index=False):
-    names = [s.strip() for s in sig.split("|") if s.strip()]
-    if len(names) < 2:  # to ignore singletons / malformed rows
-        continue
-    # label = 1 if the group should be unified, 0 if it must be kept separated
-    link_flag = 0 if canon.strip() == "__SKIP__" else 1
-    # every unordered pair inside the group becomes one training example
-    triples.extend(
-        (link_flag, a, b) for a, b in itertools.combinations(names, r=2)
-    )
-# Creating dataframe and dropping duplicates just in case
-df_pairs = (
-    pd.DataFrame(triples, columns=["to_link", "A", "B"])
-    .drop_duplicates()
-    .sample(frac=1, random_state=43)
-    .reset_index(drop=True)
+# %%
+# Schema to test deterministic idea
+final_ft_df["auto_unify"] = 0
+final_ft_df.loc[
+    (final_ft_df["token_sort_ratio"] <= 0.807)
+    & (final_ft_df["partial_ratio - WRatio"] <= 0.54)
+    | (final_ft_df["token_sort_ratio"] > 0.807)
+    & (final_ft_df["partial_ratio - WRatio"] <= 0.725),
+    "auto_unify"
+] = 1
+y_true = final_ft_df["to_link"]
+y_pred = final_ft_df["auto_unify"]
+cm = confusion_matrix(y_true, y_pred)
+cm_table = pd.DataFrame(
+    cm,
+    index=["Actual 0 (no link)", "Actual 1 (link)"],
+    columns=["Predicted 0", "Predicted 1"]
 )
-NEG_TARGET = 500
-# Build a fast lookup: group id  → list(variants)
-groups = (artist_link_rows.assign(gid=range(len(artist_link_rows)))
-          .explode('group_signature')
-          .assign(variant=lambda d: d.group_signature.str.strip())
-          .loc[lambda d: d.variant.ne('')]  # keep non‑empty
-          .groupby('gid')['variant'].apply(list)
-          )
-rng = np.random.default_rng(43)
-gids = groups.index.to_numpy()
-neg_pairs = [
-    (0, *rng.choice(groups[g1]), *rng.choice(groups[g2]))[:3]  # (flag,A,B)
-    for g1, g2 in rng.choice(gids, size=(NEG_TARGET, 2), replace=True)
-    if g1 != g2
+print("Confusion Matrix (Auto-Unify vs to_link):")
+print(tabulate(cm_table, headers="keys", tablefmt="pretty"))
+report = classification_report(y_true, y_pred, target_names=["no link", "link"], output_dict=True)
+report_df = pd.DataFrame(report).transpose().round(2)
+print("\nClassification Report:")
+print(tabulate(report_df, headers="keys", tablefmt="pretty"))
+cm_percent = (cm / cm.sum(axis=1, keepdims=True)) * 100
+cm_percent_df = pd.DataFrame(
+    cm_percent.round(1),
+    index=["Actual 0 (no link)", "Actual 1 (link)"],
+    columns=["Predicted 0", "Predicted 1"]
+)
+print("\nConfusion Matrix (%):")
+print(tabulate(cm_percent_df, headers="keys", tablefmt="pretty"))
+
+# %%
+# Checking misclassifications
+misclassified_idx = final_ft_df.index[
+    final_ft_df["to_link"] != final_ft_df["auto_unify"]
 ]
-df_pairs = (
-    pd.concat([df_pairs, pd.DataFrame(neg_pairs, columns=df_pairs.columns)])
-    .drop_duplicates()
-    .sample(frac=1, random_state=43)
-    .reset_index(drop=True)
+misclassified_details = gs.loc[misclassified_idx, [
+    "variants", "to_link",
+    "ratio", "partial_ratio",
+    "token_sort_ratio", "token_set_ratio",
+    "WRatio", "QRatio"
+]].copy()
+misclassified_details["predicted"] = final_ft_df.loc[misclassified_idx, "auto_unify"].values
+from tabulate import tabulate
+print(tabulate(misclassified_details, headers="keys", tablefmt="pretty"))
+
+# %% Let"s try a decision tree on the original fuzz scores
+orifuzz = gs.drop("variants", axis='columns')
+orirf = orifuzz.drop("to_link", axis='columns')
+X = orirf
+y = final_ft_df["to_link"]
+tree = DecisionTreeClassifier(max_depth=2, random_state=42)
+tree.fit(X, y)
+print(export_text(tree, feature_names=X.columns.tolist()))
+plt.figure(figsize=(12, 6))
+plot_tree(tree, feature_names=X.columns.tolist(), class_names=["no link", "link"], filled=True)
+# Schema to test very deterministic idea
+full = pd.concat(
+    [gs[['variants', 'to_link']], orirf.reset_index(drop=True)],
+    axis=1
 )
-print(f"After synthesis: {len(df_pairs)} pairs  "
-      f"(pos= {df_pairs.to_link.sum()}, "
-      f"neg= {len(df_pairs) - df_pairs.to_link.sum()})")
-
-
-# %% Step X+1: Teaching decision rule to logistic regression or other classifier
-score_df = (
-    df_pairs
-    .apply(lambda r: pd.Series(cluster.fuzzy_scores(r["A"], r["B"])), axis=1)
-    .astype("float32")
+full["auto_unify"] = 0
+full.loc[(full["ratio"] > 0.865)] = 1
+y_true = full["to_link"]
+y_pred = full["auto_unify"]
+cm = confusion_matrix(y_true, y_pred)
+cm_table = pd.DataFrame(
+    cm,
+    index=["Actual 0 (no link)", "Actual 1 (link)"],
+    columns=["Predicted 0", "Predicted 1"]
 )
-full = pd.concat([df_pairs, score_df], axis=1)
-full.head()
-X = score_df.values
-y = full["to_link"].values
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.25, random_state=42, stratify=y)
-clf = LogisticRegression(max_iter=500, class_weight='balanced').fit(X_train, y_train)
-print(classification_report(y_test, clf.predict(X_test)))
-print("AUC:", roc_auc_score(y_test, clf.predict_proba(X_test)[:, 1]).round(3))
-# coefficients → human‑readable weights
-w = pd.Series(clf.coef_[0], index=score_df.columns).round(2)
-print(w.sort_values(ascending=False))
-
-# Picking practical thresholds
-full["proba"] = clf.predict_proba(X)[:, 1]  # 0‑1 similarity proxy
-full = full.sort_values("proba", ascending=False)
-
-# Empirical threshold where FP = 0
-cut = full.loc[full["to_link"] == 1, "proba"].min()
-print(f"Cut‑off that keeps all true links: {cut:.2f}")
-print(full[["A", "B", "to_link", "proba"]].head(10))
-
-# %% Step X+2: I WILL WRITE SOMETHING INFORMATIVE HERE IF IT WORKS
-artist_names = fltrd_artcount["Artist"].str.str.strip().tolist()
-
-match, prob = cluster.most_similar(
-    "bohren & der club of gore",
-    artist_names,
-    clf,
-    threshold=cut,
+print("Confusion Matrix (Auto-Unify vs to_link):")
+print(tabulate(cm_table, headers="keys", tablefmt="pretty"))
+report = classification_report(y_true, y_pred, target_names=["no link", "link"], output_dict=True)
+report_df = pd.DataFrame(report).transpose().round(2)
+print("\nClassification Report:")
+print(tabulate(report_df, headers="keys", tablefmt="pretty"))
+cm_percent = (cm / cm.sum(axis=1, keepdims=True)) * 100
+cm_percent_df = pd.DataFrame(
+    cm_percent.round(1),
+    index=["Actual 0 (no link)", "Actual 1 (link)"],
+    columns=["Predicted 0", "Predicted 1"]
 )
-print(match, prob)
+print("\nConfusion Matrix (%):")
+print(tabulate(cm_percent_df, headers="keys", tablefmt="pretty"))
+misclassified_idx = full.index[
+    full["to_link"] != full["auto_unify"]
+]
+misclassified_details = gs.loc[misclassified_idx, [
+    "variants", "to_link",
+    "ratio", "partial_ratio",
+    "token_sort_ratio", "token_set_ratio",
+    "WRatio", "QRatio"
+]].copy()
+misclassified_details["predicted"] = full.loc[misclassified_idx, "auto_unify"].values
+from tabulate import tabulate
+print(tabulate(misclassified_details, headers="keys", tablefmt="pretty"))
 
+# %%
+# And an SVM?
+# Step 1: Prepare data
+SV = gs.drop("variants", axis="columns")
+SVM = SV.drop("to_link", axis="columns")
+X = SVM.values.astype("float32")
+y = SV["to_link"].values.astype("int")
+# Step 2: Scale features (important for SVMs!)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+# Step 3: Train-test split
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, test_size=0.25, random_state=42, stratify=y
+)
+# Step 4: Train SVM with probability support
+svm = SVC(kernel="linear", class_weight="balanced", probability=True, random_state=42)
+svm.fit(X_train, y_train)
+# Step 5: Evaluate
+y_pred = svm.predict(X_test)
+print("Classification report:")
+print(classification_report(y_test, y_pred))
+print("AUC:", roc_auc_score(y_test, svm.predict_proba(X_test)[:, 1]).round(3))
+w = pd.Series(svm.coef_[0], index=SVM.columns).round(3)
+print("Feature weights:\n", w.sort_values(ascending=False))
+y_train_pred = svm.predict(X_train)
+misclassified_mask = y_train_pred != y_train
+misclassified_indices = X_train[misclassified_mask]
+split = StratifiedShuffleSplit(n_splits=1, test_size=0.25, random_state=42)
+train_idx, test_idx = next(split.split(X_scaled, y))
+# Building df of misclassified training rows from original gs
+misclassified_train_gs = gs.iloc[train_idx[misclassified_mask]].copy()
+
+# Trees and the SVM have misclassifications for very similar records
 
 if __name__ == "__main__":
     logging.basicConfig(

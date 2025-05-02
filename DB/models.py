@@ -3,7 +3,7 @@ Defines all SQLAlchemy ORM models used by CanonFodder.
 """
 from __future__ import annotations
 from datetime import date, datetime, UTC
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, func, String, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, func, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from typing import Optional
 
@@ -16,13 +16,13 @@ class Base(DeclarativeBase):
 class ArtistVariantsCanonized(Base):
     """Stores variant strings mapped to a canonical artist name"""
     __tablename__ = "artist_variants_canonized"
-    artist_variants: Mapped[str] = mapped_column(String(750), primary_key=True)
-    to_link: Mapped[bool] = mapped_column(Boolean, nullable=True)
+    artist_variants_hash: Mapped[str] = mapped_column(String(64), primary_key=True)  # SHA256 = 64 chars
+    artist_variants_text: Mapped[str] = mapped_column(Text)
     canonical_name: Mapped[str] = mapped_column(String(255))
+    to_link: Mapped[bool] = mapped_column(Boolean, nullable=True)
     comment: Mapped[Optional[str]] = mapped_column(String(750))
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

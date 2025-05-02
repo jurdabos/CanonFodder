@@ -9,7 +9,8 @@ from DB import get_session as _get_session
 
 from DB.models import ArtistVariantsCanonized, ArtistCountry
 from DB import SessionLocal
-
+import hashlib
+from .io import PQ_DIR
 import os
 import pandas as pd
 from pathlib import Path
@@ -19,6 +20,8 @@ import questionary
 from sqlalchemy import select, insert, update
 
 SEPARATOR = "{"
+os.makedirs(PQ_DIR, exist_ok=True)
+AVC_PARQUET_PATH = os.path.join(PQ_DIR, "avc.parquet")
 
 
 def _apply_canonical(canonical: str,
@@ -30,28 +33,50 @@ def _apply_canonical(canonical: str,
     artcounts.loc[artcounts["Artist"].isin(variants), "Artist"] = canonical
 
 
-def _remember_artist_variant(signature: str, canonical: str, link_flag: bool, sess):
+def _remember_artist_variant(signature: str, canonical: str, link_flag: bool, comment: str | None, sess):
     """Universal UPSERT for artist_variants_canonized."""
+    signature_hash = hashlib.sha256(signature.encode('utf-8')).hexdigest()
     existing = sess.execute(
         select(ArtistVariantsCanonized)
-        .where(ArtistVariantsCanonized.artist_variants == signature)
+        .where(ArtistVariantsCanonized.artist_variants_hash == signature_hash)
     ).scalar_one_or_none()
-
     if existing:
         sess.execute(
             update(ArtistVariantsCanonized)
-            .where(ArtistVariantsCanonized.artist_variants == signature)
-            .values(canonical_name=canonical, to_link=link_flag)
+            .where(ArtistVariantsCanonized.artist_variants_hash == signature_hash)
+            .values(
+                canonical_name=canonical,
+                to_link=link_flag,
+                comment=comment,
+                artist_variants_text=signature
+            )
         )
     else:
         sess.execute(
             insert(ArtistVariantsCanonized)
-            .values(artist_variants=signature, canonical_name=canonical, to_link=link_flag)
+            .values(
+                artist_variants_hash=signature_hash,
+                artist_variants_text=signature,
+                canonical_name=canonical,
+                to_link=link_flag,
+                comment=comment
+            )
         )
 
 
 def _split_variants(sig: str) -> list[str]:
     return [v.strip() for v in sig.split(SEPARATOR) if v.strip()]
+
+
+def _write_to_avc_parquet(record: dict):
+    """Write a single record to avc.parquet"""
+    record_df = pd.DataFrame([record])
+    if os.path.exists(AVC_PARQUET_PATH):
+        existing_df = pd.read_parquet(AVC_PARQUET_PATH)
+        updated_df = pd.concat([existing_df, record_df], ignore_index=True)
+    else:
+        updated_df = record_df
+    updated_df.to_parquet(AVC_PARQUET_PATH, index=False)
 
 
 def ask(question: str,
@@ -96,24 +121,30 @@ def choose_lastfm_user() -> str:
         print("Please type a user name (or set LASTFM_USER in your .env).")
 
 
+def make_signature_hash(signature: str) -> str:
+    return hashlib.sha256(signature.encode('utf-8')).hexdigest()
+
+
 def unify_artist_names_cli(
         data: pd.DataFrame,
         fltrd_artcount: pd.DataFrame,
         similar_artist_groups: list[list[str]],
 ):
     """
-    Interactive resolver for artist-name duplicates, updating canonization and optional comments.
+    Interactive resolver for artist-name duplicates with splitting capability.
+    Commits each decision immediately, and writes incrementally to Parquet.
     """
-    with _get_session() as sess:
-        with sess.begin():
-            for group in similar_artist_groups:
-                group = list(group)
-                if len(group) <= 1:
-                    continue
-                signature = SEPARATOR.join(sorted(group))
+    groups_to_review = similar_artist_groups.copy()
+    while groups_to_review:
+        group = groups_to_review.pop(0)
+        if len(group) <= 1:
+            continue
+        signature = SEPARATOR.join(sorted(group))
+        with _get_session() as sess:
+            with sess.begin():
                 prev_row = sess.execute(
                     select(ArtistVariantsCanonized)
-                    .where(ArtistVariantsCanonized.artist_variants == signature)
+                    .where(ArtistVariantsCanonized.artist_variants_text == signature)
                 ).scalar_one_or_none()
                 if prev_row:
                     if not prev_row.to_link:
@@ -127,23 +158,71 @@ def unify_artist_names_cli(
                 print("\n".join(f"  - {v}" for v in group))
                 choice = questionary.select(
                     "Which name should become canonical?",
-                    choices=group + ["Custom name…", "Skip this group"]
+                    choices=group + ["Custom name…", "Split group...", "Skip this group"]
                 ).ask()
                 if not choice or choice.startswith("Skip"):
-                    _remember_artist_variant(signature, "__SKIP__", link_flag=False, sess=sess)
+                    comment = questionary.text(
+                        "Optional comment (reason for skip, hit ↵ to skip):"
+                    ).ask().strip() or None
+                    _remember_artist_variant(signature, "__SKIP__", False, comment, sess)
+                    record = {
+                        "artist_variants": signature,
+                        "canonical_name": "__SKIP__",
+                        "to_link": False,
+                        "comment": comment,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    _write_to_avc_parquet(record)
+                    continue
+                if choice == "Split group...":
+                    selected_subgroup = questionary.checkbox(
+                        "Select variants to move into a separate group:",
+                        choices=group
+                    ).ask()
+                    if selected_subgroup and 0 < len(selected_subgroup) < len(group):
+                        remaining_group = [v for v in group if v not in selected_subgroup]
+                        groups_to_review.insert(0, selected_subgroup)
+                        groups_to_review.insert(1, remaining_group)
+                        print("Group split into two new groups for further review.")
+                    else:
+                        print("Invalid selection. Re-queuing current group.")
+                        groups_to_review.append(group)
                     continue
                 canonical = (
                     questionary.text("Enter the custom canonical name:").ask().strip()
                     if choice.startswith("Custom") else choice
                 )
                 if not canonical:
-                    _remember_artist_variant(signature, "__SKIP__", link_flag=False, sess=sess)
+                    print("No canonical name provided, skipping.")
+                    _remember_artist_variant(
+                        signature,
+                        "__SKIP__",
+                        False,
+                        "Skipped: no canonical name provided",
+                        sess
+                    )
+                    record = {
+                        "artist_variants": signature,
+                        "canonical_name": "__SKIP__",
+                        "to_link": False,
+                        "comment": "Skipped: no canonical name provided",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    _write_to_avc_parquet(record)
                     continue
                 comment = questionary.text(
                     "Optional comment/disambiguation (hit ↵ to skip):"
                 ).ask().strip() or None
                 _apply_canonical(canonical, group, data, fltrd_artcount)
-                _remember_artist_variant(signature, canonical, link_flag=True, sess=sess)
+                _remember_artist_variant(signature, canonical, True, comment, sess)
+                record = {
+                    "artist_variants": signature,
+                    "canonical_name": canonical,
+                    "to_link": True,
+                    "comment": comment,
+                    "timestamp": datetime.now().isoformat()
+                }
+                _write_to_avc_parquet(record)
     refreshed = (
         data["Artist"]
         .value_counts()
