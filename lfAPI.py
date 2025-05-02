@@ -49,28 +49,27 @@ def fetch_misc_data_from_lastfmapi(user: str | None = None) -> None:
     top_tracks = lastfm_request("user.getTopTracks", user=user)
     try:
         friends = lastfm_request("user.getFriends", user=user)
-    except LastFMError as exc:  # own wrapper around RuntimeError
-        if exc.code == 6:  # -> not fatal, continue workflow
+    except LastFMError as exc:
+        if exc.code == 6:  # -> not fatal, continue
             logging.info("Friend list private – skipping")
             friends = []
         else:
-            raise  # re-raise unknown problems
+            raise  # to re-raise unknown problems
     infos = lastfm_request("user.getInfo", user=user)
-    lovedtracks = lastfm_request("user.getLovedTracks", user=user)
     # ── Top artists ────────────────────────────────────────────────────────────
     if top_artists and "topartists" in top_artists:
-        print("Top Artists:")
-        for artist in top_artists["topartists"]["artist"][:2]:
+        print("Top Artist")
+        for artist in top_artists["topartists"]["artist"][:1]:
             print("   ", artist.get("name", "N/A"))
     # ── Top albums (title  +  “by ‹artist›”) ───────────────────────────────────
     if top_albums and "topalbums" in top_albums:
-        print("\nTop Albums:")
-        for album in top_albums["topalbums"]["album"][:2]:
+        print("\nTop Album")
+        for album in top_albums["topalbums"]["album"][:1]:
             print(f"   {album.get('name', 'N/A')}  by {album.get('artist', {}).get('name', '?')}")
     # ── Top tracks (title  +  “by ‹artist›”) ───────────────────────────────────
     if top_tracks and "toptracks" in top_tracks:
-        print("\nTop Tracks:")
-        for track in top_tracks["toptracks"]["track"][:2]:
+        print("\nTop Track")
+        for track in top_tracks["toptracks"]["track"][:1]:
             title = track.get("name", "N/A")
             artist = track.get("artist", {}).get("name", "N/A")
             print(f"   {title} by {artist}")
@@ -81,13 +80,6 @@ def fetch_misc_data_from_lastfmapi(user: str | None = None) -> None:
         print("   Name:", u.get("name", "N/A"))
         print("   Country:", u.get("country", "N/A"))
         print("   Playcount:", u.get("playcount", "N/A"))
-    # ── Loved tracks ───────────────────────────────────────────────────────────
-    if lovedtracks and "lovedtracks" in lovedtracks:
-        print("\n2 loved tracks:")
-        for lt in lovedtracks["lovedtracks"]["track"][:2]:
-            title = lt.get("name", "N/A")
-            artist = lt.get("artist", {}).get("name", "N/A")
-            print(f"   {title} by {artist}")
 
 
 # --------------------------------------------------------------

@@ -18,6 +18,9 @@ logging.basicConfig(
     force=True
 )
 logging.getLogger("musicbrainzngs").setLevel(logging.WARNING)
+from dotenv import load_dotenv
+
+load_dotenv()
 # All DB plumbing resolved by DB.__init__
 from DB import engine, SessionLocal  # noqa: I202
 from DB.ops import ascii_freq, bulk_insert_scrobbles, latest_scrobble_table_to_df, seed_ascii_chars
@@ -31,9 +34,7 @@ import matplotlib.pyplot as plt
 import os
 import pandas as pd
 import seaborn as sns
-from dotenv import load_dotenv
 
-load_dotenv()
 from corefunc import dataprofiler as dp, canonizer as cz
 from CSV.autofetch import fetch_scrobbles_csv
 from enrich import enrich_artist_country
@@ -113,7 +114,7 @@ def main() -> None:
     lfAPI.fetch_misc_data_from_lastfmapi(user)
     # Decide: full refresh vs. reuse parquet
     print("===========================================")
-    print("\nLast.fm API fetch")
+    print("Last.fm API fetch")
     use_api = yes_no("\nRefresh scrobbles from last.fm API knowing that it takes some time? "
                      "\n[y]es or [n]o – default is: ", default="n")
     print("===========================================")

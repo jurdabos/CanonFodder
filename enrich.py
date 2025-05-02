@@ -44,20 +44,21 @@ def enrich_artist_country(*, batch: int = 100) -> None:
         if rows:
             with SessionLocal() as sess:
                 for r in rows:
-                    existing = (
-                        sess.query(ArtistCountry)
-                        .filter_by(artist_name=r.artist_name)
-                        .one_or_none()
-                    )
-                    if existing:
-                        if not existing.mbid and r.mbid:
-                            existing.mbid = r.mbid
-                        if not existing.disambiguation_comment and r.disambiguation_comment:
-                            existing.disambiguation_comment = r.disambiguation_comment
-                        if not existing.country and r.country:
-                            existing.country = r.country
-                    else:
-                        sess.add(r)
+                    with sess.no_autoflush:
+                        existing = (
+                            sess.query(ArtistCountry)
+                            .filter_by(artist_name=r.artist_name)
+                            .one_or_none()
+                        )
+                        if existing:
+                            if not existing.mbid and r.mbid:
+                                existing.mbid = r.mbid
+                            if not existing.disambiguation_comment and r.disambiguation_comment:
+                                existing.disambiguation_comment = r.disambiguation_comment
+                            if not existing.country and r.country:
+                                existing.country = r.country
+                        else:
+                            sess.add(r)
                 try:
                     sess.commit()
                 except SQLAlchemyError as exc:

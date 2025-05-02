@@ -5,6 +5,7 @@ quality metrics.
 from functools import partial
 import numpy as np
 from rapidfuzz import fuzz, process
+from sklearn.cluster import DBSCAN
 from typing import Any, Sequence, Tuple
 
 
@@ -109,7 +110,6 @@ def dbscan_with_anchors(artist_names, dist_matrix, anchor_idx_sets,
     raise RuntimeError("No ε satisfies anchor constraints.")
 
 
-
 def fuzzy_scores(a: str, b: str) -> dict:
     """Returns rapidfuzz similarity measures between two strings"""
     return {
@@ -137,7 +137,14 @@ def most_similar(name: str,
 
 
 variant_sets = [
+    ["Beatles", "The Beatles"],
     ["Bohren & der Club of Gore", "Bohren und der Club of Gore"],
+    ["Gorillaz, Adeleye Omotayo", "GorillazAdeleye Omotayo"],
+    ["Gorillaz, Bad Bunny", "GorillazBad Bunny"],
+    ["Gorillaz, Beck", "GorillazBeck"],
+    ["Gorillaz, Stevie Nicks", "GorillazStevie Nicks"],
+    ["Gorillaz, Tame Impala, Bootie Brown", "GorillazTame ImpalaBootie Brown"],
+    ["Gorillaz, Thundercat", "GorillazThundercat"],
     ["Robert Miles & Trilok Gurtu",
      "Robert Miles And Trilok Gurtu",
      "Robert Miles, Trilok Gurtu"],

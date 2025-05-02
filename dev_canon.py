@@ -31,7 +31,6 @@ from rapidfuzz.distance import Levenshtein
 import re
 import seaborn as sns
 from scipy.spatial.distance import cdist
-from sklearn.cluster import DBSCAN
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.inspection import permutation_importance
