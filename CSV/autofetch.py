@@ -84,6 +84,8 @@ def fetch_scrobbles_csv(
             LOCATOR = (By.XPATH,
                        "//a[@href='#download' and contains(@class,'btn')]")
             while stable < 3:
+                time.sleep(5)
+
                 try:
                     btn = WebDriverWait(driver, 30).until(
                         EC.presence_of_element_located(LOCATOR)
@@ -109,9 +111,13 @@ def fetch_scrobbles_csv(
             # else we have a valid btn
             LOGGER.info("File size stabilised at %s KB → downloading", last_size)
             time.sleep(10)  # let browser finish writing
-
+            btn.click()
             dl_dir = Path.home() / "Downloads"
             tmp = dl_dir / f"{username}.csv"
+            for _ in range(60):
+                if tmp.exists():
+                    break
+                time.sleep(1)
             if not tmp.exists():
                 LOGGER.error("Downloaded file not found: %s", tmp)
                 return None

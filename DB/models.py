@@ -16,7 +16,7 @@ class Base(DeclarativeBase):
 class ArtistVariantsCanonized(Base):
     """Stores variant strings mapped to a canonical artist name"""
     __tablename__ = "artist_variants_canonized"
-    artist_variants: Mapped[str] = mapped_column(String(255), primary_key=True)
+    artist_variants: Mapped[str] = mapped_column(String(750), primary_key=True)
     to_link: Mapped[bool] = mapped_column(Boolean, nullable=True)
     canonical_name: Mapped[str] = mapped_column(String(255))
     comment: Mapped[Optional[str]] = mapped_column(String(750))
