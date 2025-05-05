@@ -7,6 +7,7 @@ import itertools
 import numpy as np
 from rapidfuzz import fuzz, process
 from sklearn.cluster import DBSCAN
+from sklearn.tree import _tree, DecisionTreeClassifier
 from typing import Any, Sequence, Tuple
 
 
@@ -146,6 +147,29 @@ def most_similar(name: str,
         score_cutoff=threshold
     )
     return match, score or 0.0
+
+
+def tree_to_rule_list(decision_tree, feature_names):
+    tree_ = decision_tree.tree_
+    feature_name = [
+        feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
+        for i in tree_.feature
+    ]
+    rules = []
+
+    def walk(node, conds):
+        if tree_.feature[node] != _tree.TREE_UNDEFINED:
+            name = feature_name[node]
+            threshold = tree_.threshold[node]
+            walk(tree_.children_left[node], conds + [f'({name} <= {threshold:.3f})'])
+            walk(tree_.children_right[node], conds + [f'({name} > {threshold:.3f})'])
+        else:
+            # leaf
+            proba_1 = tree_.value[node][0, 1] / tree_.value[node].sum()
+            rules.append((" & ".join(conds), proba_1))
+
+    walk(0, [])
+    return rules
 
 
 variant_sets = [

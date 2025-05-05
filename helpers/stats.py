@@ -3,7 +3,8 @@ Supplies small statistical helpers for feature selection and outlier checks.
 """
 import numpy as np
 import pandas as pd
-
+from sklearn.metrics import confusion_matrix, classification_report
+from tabulate import tabulate
 
 def cramers_v(x, y):
     """
@@ -86,6 +87,19 @@ def missing_value_ratio(col):
     Returns the percentage of missing values in a pandas Series.
     """
     return (col.isnull().sum() / len(col)) * 100
+
+
+def show_cm_and_report(y_true, y_pred, title=""):
+    cm = confusion_matrix(y_true, y_pred)
+    cm_df = pd.DataFrame(
+        cm,
+        index=["Actual 0", "Actual 1"],
+        columns=["Predicted 0", "Predicted 1"]
+    )
+    if title:
+        print(f"\n{title}")
+    print(tabulate(cm_df, headers="keys", tablefmt="pretty"))
+    print(classification_report(y_true, y_pred, target_names=["no link", "link"]))
 
 
 def variance_testing(dframe, varthresh):

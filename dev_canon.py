@@ -6,12 +6,10 @@ load_dotenv()
 from DB import SessionLocal
 from DB.models import ArtistVariantsCanonized
 import featuretools as ft
-from hdbscan import HDBSCAN
 from helpers import cli
 from helpers import io
 from helpers import cluster
 from helpers import stats
-import itertools
 import json
 import logging
 import matplotlib
@@ -29,26 +27,21 @@ import os
 os.environ["MPLBACKEND"] = "TkAgg"
 import pandas as pd
 from pathlib import Path
-from rapidfuzz import process, distance as rf_dist
-from rapidfuzz.distance import Levenshtein
+from rapidfuzz import process
 import re
 import seaborn as sns
-from scipy.spatial.distance import cdist
-from scipy.stats import spearmanr
 from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import VarianceThreshold
-from sklearn.inspection import permutation_importance
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import confusion_matrix, classification_report, pairwise_distances, roc_auc_score, silhouette_score
-from sklearn.model_selection import ParameterGrid, StratifiedShuffleSplit, train_test_split
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import StratifiedShuffleSplit, train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from sklearn.tree import DecisionTreeClassifier, export_text, plot_tree
 from sqlalchemy import insert, select, text, update
 import sys
 from tabulate import tabulate
 import warnings
+
 warnings.filterwarnings("ignore", message="'force_all_finite' was renamed")
 import woodwork as ww
 
@@ -207,6 +200,11 @@ goldstandard = pd.concat([goldstandard, score_df], axis=1)
 goldstandard.info()
 goldstandard.describe()
 goldstandard["to_link"] = goldstandard["to_link"].astype("int64")
+base_feats = [
+    "ratio", "partial_ratio",
+    "token_sort_ratio", "token_set_ratio",
+    "WRatio", "QRatio"
+]
 gs = goldstandard[[
     "variants", "to_link",
     "ratio", "partial_ratio",
@@ -248,7 +246,6 @@ sns.heatmap(
 )
 plt.title("")
 plt.xticks(rotation=90)
-
 
 # %% FTing
 gs_VTed_num = gs_VTed.drop("variants", axis='columns')
@@ -347,22 +344,29 @@ print(
 
 # %%
 # Use only the features with the 3 highest feature importance score
-selected_base = ["token_sort_ratio",
-                 "partial_ratio - WRatio",
-                 "partial_ratio - token_set_ratio"]
+TOP_K = 3
+TOP_K = min(TOP_K, len(feature_importances))
+selected_base = (
+    feature_importances  # DataFrame with cols ["features","importance"]
+    .head(TOP_K)  # to keep the K highest
+    .loc[:, "features"]  # to take the names only
+    .tolist()
+)
+print(f"Selected top-{TOP_K} features:", ", ".join(selected_base))
 df_selected = data_dfs_scaled[selected_base].copy()
 final_ft_df = pd.concat(
-    [gs[['variants', 'to_link']], df_selected.reset_index(drop=True)],
+    [gs[['variants', 'to_link']].reset_index(drop=True), df_selected.reset_index(drop=True)],
     axis=1
 )
 selected_comp_feats_plus_target = final_ft_df.drop("variants", axis='columns')
-
+(Path("JSON") / "selected_features.json").write_text(
+    json.dumps({"top_k": TOP_K, "features": selected_base}, indent=2)
+)
 
 # %% Let's now try a decision tree-based approach
 X = df_selected
 y = final_ft_df["to_link"]
-# Constraining tree depth to get human-friendly rules
-tree = DecisionTreeClassifier(max_depth=2, random_state=42)
+tree = DecisionTreeClassifier(max_depth=2, random_state=44)
 tree.fit(X, y)
 print(export_text(tree, feature_names=X.columns.tolist()))
 plt.figure(figsize=(12, 6))
@@ -370,137 +374,78 @@ plot_tree(tree, feature_names=X.columns.tolist(), class_names=["no link", "link"
 
 # %%
 # Schema to test deterministic idea
+rules = cluster.tree_to_rule_list(tree, X.columns)
+print("\nExtracted rule set:")
+for cond, p1 in rules:
+    print(f"If {cond}  =>  P(to_link=1)={p1:.2f}")
 final_ft_df["auto_unify"] = 0
-final_ft_df.loc[
-    (final_ft_df["token_sort_ratio"] <= 0.807)
-    & (final_ft_df["partial_ratio - WRatio"] <= 0.54)
-    | (final_ft_df["token_sort_ratio"] > 0.807)
-    & (final_ft_df["partial_ratio - WRatio"] <= 0.725),
-    "auto_unify"
-] = 1
+for cond, _ in rules:
+    final_ft_df.loc[final_ft_df.eval(cond), "auto_unify"] = 1
 y_true = final_ft_df["to_link"]
 y_pred = final_ft_df["auto_unify"]
-cm = confusion_matrix(y_true, y_pred)
-cm_table = pd.DataFrame(
-    cm,
-    index=["Actual 0 (no link)", "Actual 1 (link)"],
-    columns=["Predicted 0", "Predicted 1"]
-)
-print("Confusion Matrix (Auto-Unify vs to_link):")
-print(tabulate(cm_table, headers="keys", tablefmt="pretty"))
-report = classification_report(y_true, y_pred, target_names=["no link", "link"], output_dict=True)
-report_df = pd.DataFrame(report).transpose().round(2)
-print("\nClassification Report:")
-print(tabulate(report_df, headers="keys", tablefmt="pretty"))
+cm = confusion_matrix(final_ft_df["to_link"], final_ft_df["auto_unify"])
+cm_df = pd.DataFrame(cm,
+                     index=["Actual 0", "Actual 1"],
+                     columns=["Pred 0", "Pred 1"])
+print("\nClassification report:")
+print(classification_report(final_ft_df["to_link"],
+                            final_ft_df["auto_unify"],
+                            target_names=["no link", "link"]))
 cm_percent = (cm / cm.sum(axis=1, keepdims=True)) * 100
-cm_percent_df = pd.DataFrame(
-    cm_percent.round(1),
-    index=["Actual 0 (no link)", "Actual 1 (link)"],
-    columns=["Predicted 0", "Predicted 1"]
-)
-print("\nConfusion Matrix (%):")
-print(tabulate(cm_percent_df, headers="keys", tablefmt="pretty"))
 
 # %%
 # Checking misclassifications
-misclassified_idx = final_ft_df.index[
-    final_ft_df["to_link"] != final_ft_df["auto_unify"]
-]
-misclassified_details = gs.loc[misclassified_idx, [
-    "variants", "to_link",
-    "ratio", "partial_ratio",
-    "token_sort_ratio", "token_set_ratio",
-    "WRatio", "QRatio"
-]].copy()
-misclassified_details["predicted"] = final_ft_df.loc[misclassified_idx, "auto_unify"].values
-from tabulate import tabulate
-print(tabulate(misclassified_details, headers="keys", tablefmt="pretty"))
+mis_mask_tree = final_ft_df["to_link"] != final_ft_df["auto_unify"]
+mis_tree = gs.loc[mis_mask_tree, ["variants", "to_link"] + base_feats].copy()
+mis_tree["predicted"] = final_ft_df.loc[mis_mask_tree, "auto_unify"].values
+print("\n🚨  Tree mis-classified rows:")
+print(tabulate(mis_tree.head(20), headers="keys", tablefmt="pretty"))
 
 # %% Let"s try a decision tree on the original fuzz scores
-orifuzz = gs.drop("variants", axis='columns')
-orirf = orifuzz.drop("to_link", axis='columns')
-X = orirf
-y = final_ft_df["to_link"]
-tree = DecisionTreeClassifier(max_depth=2, random_state=42)
-tree.fit(X, y)
-print(export_text(tree, feature_names=X.columns.tolist()))
-plt.figure(figsize=(12, 6))
-plot_tree(tree, feature_names=X.columns.tolist(), class_names=["no link", "link"], filled=True)
-# Schema to test very deterministic idea
+RATIO_TH = 0.865
 full = pd.concat(
-    [gs[['variants', 'to_link']], orirf.reset_index(drop=True)],
+    [gs[["variants", "to_link"]], gs[base_feats]],
     axis=1
 )
 full["auto_unify"] = 0
-full.loc[(full["ratio"] > 0.865)] = 1
-y_true = full["to_link"]
-y_pred = full["auto_unify"]
-cm = confusion_matrix(y_true, y_pred)
-cm_table = pd.DataFrame(
-    cm,
-    index=["Actual 0 (no link)", "Actual 1 (link)"],
-    columns=["Predicted 0", "Predicted 1"]
-)
-print("Confusion Matrix (Auto-Unify vs to_link):")
-print(tabulate(cm_table, headers="keys", tablefmt="pretty"))
-report = classification_report(y_true, y_pred, target_names=["no link", "link"], output_dict=True)
-report_df = pd.DataFrame(report).transpose().round(2)
-print("\nClassification Report:")
-print(tabulate(report_df, headers="keys", tablefmt="pretty"))
-cm_percent = (cm / cm.sum(axis=1, keepdims=True)) * 100
-cm_percent_df = pd.DataFrame(
-    cm_percent.round(1),
-    index=["Actual 0 (no link)", "Actual 1 (link)"],
-    columns=["Predicted 0", "Predicted 1"]
-)
-print("\nConfusion Matrix (%):")
-print(tabulate(cm_percent_df, headers="keys", tablefmt="pretty"))
-misclassified_idx = full.index[
-    full["to_link"] != full["auto_unify"]
-]
-misclassified_details = gs.loc[misclassified_idx, [
-    "variants", "to_link",
-    "ratio", "partial_ratio",
-    "token_sort_ratio", "token_set_ratio",
-    "WRatio", "QRatio"
-]].copy()
-misclassified_details["predicted"] = full.loc[misclassified_idx, "auto_unify"].values
-from tabulate import tabulate
-print(tabulate(misclassified_details, headers="keys", tablefmt="pretty"))
+full.loc[full["ratio"] > RATIO_TH, "auto_unify"] = 1  # assigning only the col
+stats.show_cm_and_report(full["to_link"], full["auto_unify"],
+                         title=f"Single-feature rule (ratio > {RATIO_TH})")
+mis_mask_rule = full["to_link"] != full["auto_unify"]
+mis_rule = full.loc[mis_mask_rule, ["variants", "to_link"] + base_feats + ["auto_unify"]]
+print("\nRule mis-classified rows:")
+print(tabulate(mis_rule.head(20), headers="keys", tablefmt="pretty"))
 
 # %%
-# And an SVM?
-# Step 1: Prepare data
-SV = gs.drop("variants", axis="columns")
-SVM = SV.drop("to_link", axis="columns")
-X = SVM.values.astype("float32")
-y = SV["to_link"].values.astype("int")
-# Step 2: Scale features (important for SVMs!)
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-# Step 3: Train-test split
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.25, random_state=42, stratify=y
+# SVM experiment (linear kernel)
+X = gs[base_feats].values.astype("float32")
+y = gs["to_link"].values
+X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(
+    X, y, gs.index, test_size=0.25, random_state=42, stratify=y
 )
-# Step 4: Train SVM with probability support
-svm = SVC(kernel="linear", class_weight="balanced", probability=True, random_state=42)
-svm.fit(X_train, y_train)
-# Step 5: Evaluate
-y_pred = svm.predict(X_test)
-print("Classification report:")
-print(classification_report(y_test, y_pred))
-print("AUC:", roc_auc_score(y_test, svm.predict_proba(X_test)[:, 1]).round(3))
-w = pd.Series(svm.coef_[0], index=SVM.columns).round(3)
-print("Feature weights:\n", w.sort_values(ascending=False))
-y_train_pred = svm.predict(X_train)
-misclassified_mask = y_train_pred != y_train
-misclassified_indices = X_train[misclassified_mask]
-split = StratifiedShuffleSplit(n_splits=1, test_size=0.25, random_state=42)
-train_idx, test_idx = next(split.split(X_scaled, y))
-# Building df of misclassified training rows from original gs
-misclassified_train_gs = gs.iloc[train_idx[misclassified_mask]].copy()
+scaler = StandardScaler()
+X_train_sc = scaler.fit_transform(X_train)
+X_test_sc  = scaler.transform(X_test)
+svm = SVC(kernel="linear", class_weight="balanced",
+          probability=True, random_state=42)
+svm.fit(X_train_sc, y_train)
+print("\n=== SVM on base RapidFuzz scores ===")
+stats.show_cm_and_report(y_test, svm.predict(X_test_sc))
 
-# Trees and the SVM have misclassifications for very similar records
+# mis-classified rows in training set
+train_pred = svm.predict(X_train_sc)
+mis_mask_svm = train_pred != y_train
+mis_svm = gs.loc[idx_train[mis_mask_svm], ["variants", "to_link"] + base_feats].copy()
+mis_svm["predicted"] = train_pred[mis_mask_svm]
+print("\nSVM mis-classified training rows:")
+print(tabulate(mis_svm.head(20), headers="keys", tablefmt="pretty"))
+
+# weights for interpretability
+coef_series = pd.Series(svm.coef_[0], index=base_feats).round(3)
+print("\nSVM linear weights:")
+print(tabulate(coef_series.sort_values(ascending=False).to_frame("weight"),
+               headers="keys", tablefmt="pretty"))
+
 
 if __name__ == "__main__":
     logging.basicConfig(
