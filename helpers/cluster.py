@@ -149,7 +149,7 @@ def most_similar(name: str,
     return match, score or 0.0
 
 
-def tree_to_rule_list(decision_tree, feature_names):
+def tree_to_rule_list(decision_tree, feature_names, prob_threshold=0.5):
     tree_ = decision_tree.tree_
     feature_name = [
         feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
@@ -160,16 +160,18 @@ def tree_to_rule_list(decision_tree, feature_names):
     def walk(node, conds):
         if tree_.feature[node] != _tree.TREE_UNDEFINED:
             name = feature_name[node]
-            threshold = tree_.threshold[node]
-            walk(tree_.children_left[node], conds + [f'({name} <= {threshold:.3f})'])
-            walk(tree_.children_right[node], conds + [f'({name} > {threshold:.3f})'])
+            thr = tree_.threshold[node]
+            walk(tree_.children_left[node], conds + [f'({name} <= {thr:.3f})'])
+            walk(tree_.children_right[node], conds + [f'({name} >  {thr:.3f})'])
         else:
-            # leaf
-            proba_1 = tree_.value[node][0, 1] / tree_.value[node].sum()
-            rules.append((" & ".join(conds), proba_1))
-
+            pos = tree_.value[node][0, 1]
+            neg = tree_.value[node][0, 0]
+            p1 = pos / (pos + neg)
+            cls = 1 if pos > neg else 0
+            rules.append((" & ".join(conds), cls, p1))
     walk(0, [])
-    return rules
+    # Keeping only leaves that are class 1 **and** above threshold
+    return [(c, p) for c, cls, p in rules if cls == 1 and p >= prob_threshold]
 
 
 variant_sets = [

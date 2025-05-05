@@ -121,6 +121,11 @@ def choose_lastfm_user() -> str:
         print("Please type a user name (or set LASTFM_USER in your .env).")
 
 
+def make_signature(variants: list[str]) -> str:
+    """Canonical, DB-compatible signature string."""
+    return SEPARATOR.join(sorted(v.strip() for v in variants if v.strip()))
+
+
 def make_signature_hash(signature: str) -> str:
     return hashlib.sha256(signature.encode('utf-8')).hexdigest()
 
@@ -139,7 +144,7 @@ def unify_artist_names_cli(
         group = groups_to_review.pop(0)
         if len(group) <= 1:
             continue
-        signature = SEPARATOR.join(sorted(group))
+        signature = make_signature(group)
         with _get_session() as sess:
             with sess.begin():
                 prev_row = sess.execute(
@@ -148,9 +153,9 @@ def unify_artist_names_cli(
                 ).scalar_one_or_none()
                 if prev_row:
                     if not prev_row.to_link:
-                        print(f"\nUser previously SKIPPED {group}.")
+                        # print(f"\nUser previously SKIPPED {group}.")
                         continue
-                    print(f"\nUser previously unified {group} → '{prev_row.canonical_name}'. Applying again.")
+                    # print(f"\nUser previously unified {group} → '{prev_row.canonical_name}'. Applying again.")
                     _apply_canonical(prev_row.canonical_name, group, data, fltrd_artcount)
                     continue
                 print("\n---")

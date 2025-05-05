@@ -10,9 +10,6 @@ from helpers import cli
 from helpers import io
 from helpers import cluster
 from helpers import stats
-from helpers import review
-
-review.review_canonized_variants()
 import json
 import logging
 import matplotlib
@@ -171,9 +168,10 @@ with SessionLocal() as sess:
     for group in clusters:
         if len(group) <= 1:
             continue
-        sig = "|".join(sorted(group))
+        sig = cli.make_signature(group)                       # <- unified
         row = sess.execute(
-            text("SELECT 1 FROM artist_variants_canonized WHERE artist_variants_text = :sig"),
+            text("SELECT 1 FROM artist_variants_canonized "
+                 "WHERE artist_variants_text = :sig"),
             {"sig": sig},
         ).first()
         if row is None:
@@ -276,7 +274,6 @@ features, feature_defs = ft.dfs(
 features.reset_index(drop=True, inplace=True)
 features.replace([np.inf, -np.inf], np.nan, inplace=True)
 features.dropna(axis=1, how='any', inplace=True)
-print(features.head())
 print(f"Final features shape: {features.shape}")
 
 # %%
@@ -348,7 +345,7 @@ print(
 
 # %%
 # Use only the features with the 3 highest feature importance score
-TOP_K = 3
+TOP_K = 5
 TOP_K = min(TOP_K, len(feature_importances))
 selected_base = (
     feature_importances  # DataFrame with cols ["features","importance"]
@@ -383,7 +380,7 @@ plot_tree(tree, feature_names=X.columns.tolist(), class_names=["no link", "link"
 
 # %%
 # Schema to test deterministic idea
-rules = cluster.tree_to_rule_list(tree, safe_cols)
+rules = cluster.tree_to_rule_list(tree, safe_cols, prob_threshold=0.7)
 print("\nExtracted rule set:")
 for cond, p1 in rules:
     print(f"If {cond}  =>  P(to_link=1)={p1:.2f}")
@@ -417,13 +414,13 @@ full = pd.concat(
     axis=1
 )
 full["auto_unify"] = 0
-full.loc[full["ratio"] > RATIO_TH, "auto_unify"] = 1  # assigning only the col
+full.loc[full["ratio"] > RATIO_TH, "auto_unify"] = 1  # assigning only the 1 col
 stats.show_cm_and_report(full["to_link"], full["auto_unify"],
                          title=f"Single-feature rule (ratio > {RATIO_TH})")
 mis_mask_rule = full["to_link"] != full["auto_unify"]
 mis_rule = full.loc[mis_mask_rule, ["variants", "to_link"] + base_feats + ["auto_unify"]]
-print("\nRule mis-classified rows:")
-print(tabulate(mis_rule.head(20), headers="keys", tablefmt="pretty"))
+print("\nRule mis-classified rows such as:")
+print(tabulate(mis_rule.head(20), headers="keys", tablefmt="pretty", maxcolwidths=70))
 
 # %%
 # SVM experiment (linear kernel)
@@ -447,13 +444,13 @@ mis_mask_svm = train_pred != y_train
 mis_svm = gs.loc[idx_train[mis_mask_svm], ["variants", "to_link"] + base_feats].copy()
 mis_svm["predicted"] = train_pred[mis_mask_svm]
 print("\nSVM mis-classified training rows:")
-print(tabulate(mis_svm.head(20), headers="keys", tablefmt="pretty"))
+print(tabulate(mis_svm.head(20), headers="keys", tablefmt="pretty", maxcolwidths=70))
 
 # weights for interpretability
 coef_series = pd.Series(svm.coef_[0], index=base_feats).round(3)
 print("\nSVM linear weights:")
 print(tabulate(coef_series.sort_values(ascending=False).to_frame("weight"),
-               headers="keys", tablefmt="pretty"))
+               headers="keys", tablefmt="pretty", maxcolwidths=70))
 
 if __name__ == "__main__":
     logging.basicConfig(
