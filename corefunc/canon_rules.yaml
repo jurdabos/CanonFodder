@@ -1,0 +1,40 @@
+datetime:
+  format: "YYYY-MM-DD HH:MM:SS"
+  timezone: "UTC"
+
+storage:
+  preferred_file_format: parquet
+  parquet_compression: zstd
+  location: "/PQ"
+
+encoding: "utf-8"
+missing_value: null
+boolean_values: [true, false]
+decimal_separator: "."
+checksum: sha256
+
+canonization_rules:
+  - number: 1
+    text: Lookup of official versions is the most authoritative way to decide on canonical variant.
+    example: [Discogs, MB, official website, registries, Wikipedia]
+  - number: 2
+    text: '&' is preferred over 'and', 'And', 'und, 'Und'.
+    example: Bohren & der Club of Gore
+  - number: 3
+    text: 'és' is preferred over '&'.
+    example: Kispál és a Borz
+  - number: 4
+    text: Version with 't/The' prevails.
+    example: The Dream Syndicate
+  - number: 5
+    text: The name of artists from countries following the Western name order follows the Western name order.
+    example: Christ Watson
+  - number: 6
+    text: The name of artists from countries following the Eastern name order follows the Eastern name order.
+    example: Víg Mihály
+  - number: 7
+    text: When listing collaborators, the format collaborator1, collaborator2 & collaborator3 is preferred.
+    example: Emerson, Lake & Palmer
+  - number: 8
+    text: Preserve special characters used in official artist names whenever possible.
+    example: Acidbólé

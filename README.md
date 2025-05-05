@@ -44,13 +44,13 @@ or
 ```shell
 pip install .
 ```
-Copy `.env.example` ➜ `.env` and fill in the required values  
-      * Get a free key at https://www.last.fm/api/account/create  
-      * For read-only demos only `LASTFM_API_KEY` is mandatory 
-Alembic and SQLAlchemy is used to allow for multiple DB backends.
+Copy `.env.example` ➜ `.env` and fill in the required values.<br> 
+      * Get a free key at https://www.last.fm/api/account/create<br> 
+      * For read-only demos only `LASTFM_API_KEY` is mandatory.<br>
+Alembic and SQLAlchemy is used to allow for multiple DB backends.<br>
 I am using MySQL with setting DB_URL=mysql+pymysql://user:pass@localhost/canonfodder,
-but if you look in DB/common.py, you will see that the bootstrapping is configured with a local fallback to sqlite.
-DB_URL there should be set to sqlite:///canonfodder.db automatically if no MySQL is given in .env.
+but if you look in DB/common.py, you will see that the bootstrapping is configured with a local fallback to sqlite.<br>
+DB_URL there is set to sqlite:///canonfodder.db automatically if no MySQL is given in .env.
 
 ## How to use it?
 Command

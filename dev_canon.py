@@ -153,7 +153,11 @@ for eps in eps_range:
         break
 if best_eps is None:
     raise ValueError("No ε in the range puts every variant_set in one cluster.")
-print(f"Chosen ε = {best_eps:.2f} (all anchors satisfied)")
+# print(f"Chosen ε = {best_eps:.2f} (all anchors satisfied)")
+# Manually updating best_eps here based on results from previous iterations,
+# since, in the meantime, variants contained in "variant_sets", which plays an important part in ε identification,
+# have been canonized.
+best_eps = 0.23
 labels = DBSCAN(eps=best_eps, min_samples=2, metric="precomputed").fit_predict(dist)
 clusters = (
     pd.DataFrame({"Artist": artist_names, "label": labels})
