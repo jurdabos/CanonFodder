@@ -1,15 +1,18 @@
 # %% Basic setup
 from dotenv import load_dotenv
-from sklearn.svm import SVC
 
 load_dotenv()
 from DB import SessionLocal
 from DB.models import ArtistVariantsCanonized
+from collections import Counter
 import featuretools as ft
 from helpers import cli
 from helpers import io
 from helpers import cluster
 from helpers import stats
+from helpers import review
+
+review.review_canonized_variants()
 import json
 import logging
 import matplotlib
@@ -36,6 +39,7 @@ from sklearn.feature_selection import VarianceThreshold
 from sklearn.metrics import confusion_matrix, classification_report, pairwise_distances, roc_auc_score, silhouette_score
 from sklearn.model_selection import StratifiedShuffleSplit, train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier, export_text, plot_tree
 from sqlalchemy import insert, select, text, update
 import sys
@@ -362,11 +366,16 @@ selected_comp_feats_plus_target = final_ft_df.drop("variants", axis='columns')
 (Path("JSON") / "selected_features.json").write_text(
     json.dumps({"top_k": TOP_K, "features": selected_base}, indent=2)
 )
+seen = Counter()
+rename_map = {c: io.sanitize(c, seen) for c in df_selected.columns}
+df_selected_safe = df_selected.rename(columns=rename_map)
+final_ft_df = final_ft_df.rename(columns=rename_map)
+safe_cols = list(rename_map.values())  # to feed the tree
 
 # %% Let's now try a decision tree-based approach
-X = df_selected
+X = df_selected_safe
 y = final_ft_df["to_link"]
-tree = DecisionTreeClassifier(max_depth=2, random_state=44)
+tree = DecisionTreeClassifier(max_depth=2, random_state=45)
 tree.fit(X, y)
 print(export_text(tree, feature_names=X.columns.tolist()))
 plt.figure(figsize=(12, 6))
@@ -374,7 +383,7 @@ plot_tree(tree, feature_names=X.columns.tolist(), class_names=["no link", "link"
 
 # %%
 # Schema to test deterministic idea
-rules = cluster.tree_to_rule_list(tree, X.columns)
+rules = cluster.tree_to_rule_list(tree, safe_cols)
 print("\nExtracted rule set:")
 for cond, p1 in rules:
     print(f"If {cond}  =>  P(to_link=1)={p1:.2f}")
@@ -398,7 +407,7 @@ cm_percent = (cm / cm.sum(axis=1, keepdims=True)) * 100
 mis_mask_tree = final_ft_df["to_link"] != final_ft_df["auto_unify"]
 mis_tree = gs.loc[mis_mask_tree, ["variants", "to_link"] + base_feats].copy()
 mis_tree["predicted"] = final_ft_df.loc[mis_mask_tree, "auto_unify"].values
-print("\n🚨  Tree mis-classified rows:")
+print("\nTree mis-classified rows:")
 print(tabulate(mis_tree.head(20), headers="keys", tablefmt="pretty"))
 
 # %% Let"s try a decision tree on the original fuzz scores
@@ -425,7 +434,7 @@ X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(
 )
 scaler = StandardScaler()
 X_train_sc = scaler.fit_transform(X_train)
-X_test_sc  = scaler.transform(X_test)
+X_test_sc = scaler.transform(X_test)
 svm = SVC(kernel="linear", class_weight="balanced",
           probability=True, random_state=42)
 svm.fit(X_train_sc, y_train)
@@ -445,7 +454,6 @@ coef_series = pd.Series(svm.coef_[0], index=base_feats).round(3)
 print("\nSVM linear weights:")
 print(tabulate(coef_series.sort_values(ascending=False).to_frame("weight"),
                headers="keys", tablefmt="pretty"))
-
 
 if __name__ == "__main__":
     logging.basicConfig(

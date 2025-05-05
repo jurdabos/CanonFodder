@@ -73,5 +73,3 @@ def review_canonized_variants():
             elif action == "Quit review":
                 print("👋  Exiting review early; changes so far are saved.")
                 break
-
-review_canonized_variants()

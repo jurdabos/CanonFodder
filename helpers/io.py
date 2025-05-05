@@ -2,16 +2,14 @@
 Provides small I/O helpers: pick the latest csv or parquet dump, write new
 parquet snapshots, register seaborn palettes, and save dataframes to Word.
 """
+from collections import Counter
 from datetime import datetime, UTC
 from DB import engine
 from DB.ops import latest_scrobble_table_to_df
 from docx import Document
-from glob import glob
-import os
 import pandas as pd
 from pathlib import Path
 import re
-from typing import Optional
 if '__file__' in globals():
     HERE = Path(__file__).resolve().parent
 else:
@@ -19,6 +17,12 @@ else:
 CSV_DIR = Path.cwd() / "CSV"
 PQ_DIR = Path.cwd() / "PQ"
 PQ_DIR.mkdir(exist_ok=True)
+OP_TOKENS = {           # space–operator–space → token
+    r"\s\-\s": "_minus_",
+    r"\s\+\s": "_plus_",
+    r"\s\*\s": "_mul_",
+    r"\s\/\s": "_div_"
+}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -31,6 +35,19 @@ def _parquet_name(stamp: datetime | None = None) -> Path:
     now = datetime.now(UTC)
     stamp = stamp or now
     return PQ_DIR / f"scrobbles_{stamp:%Y%m%d_%H%M%S}.parquet"
+
+
+def dump_latest_table_to_parquet() -> None:
+    """
+    Materialises the newest DB scrobble table as a parquet file.
+    """
+    df_db, latest_tbl = latest_scrobble_table_to_df(engine)
+    if df_db is None:
+        print("No scrobble table in DB – nothing to dump.")
+        return
+    pq_file = PQ_DIR / f"scrobbles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
+    df_db.to_parquet(pq_file, index=False)
+    print(f"Latest scrobble table persisted → {pq_file}")
 
 
 def dump_parquet(df: pd.DataFrame | None = None,
@@ -80,19 +97,6 @@ def latest_parquet(*, return_df: bool = False):
     return newest
 
 
-def dump_latest_table_to_parquet() -> None:
-    """
-    Materialises the newest DB scrobble table as a parquet file.
-    """
-    df_db, latest_tbl = latest_scrobble_table_to_df(engine)
-    if df_db is None:
-        print("No scrobble table in DB – nothing to dump.")
-        return
-    pq_file = PQ_DIR / f"scrobbles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
-    df_db.to_parquet(pq_file, index=False)
-    print(f"Latest scrobble table persisted → {pq_file}")
-
-
 def register_custom_palette(palette_name, palettes):
     """
     Register a custom palette in Seaborn from the palette dictionary.
@@ -107,6 +111,23 @@ def register_custom_palette(palette_name, palettes):
     ]
     sns.set_palette(sns.color_palette(colors))
     return colors
+
+
+def sanitize(col: str, seen: Counter) -> str:
+    """
+    Turn 'partial_ratio - QRatio'  →  'partial_ratio_minus_QRatio'
+    Guarantees each result is a valid Python identifier **and unique**.
+    """
+    safe = col
+    for pat, tok in OP_TOKENS.items():
+        safe = re.sub(pat, tok, safe)          # to encode operator
+    safe = re.sub(r"\W+", "_", safe).strip("_")  # to clean leftovers
+    # Guaranteeing uniqueness
+    count = seen[safe]
+    seen[safe] += 1
+    if count:
+        safe = f"{safe}_{count}"               # to append _1, _2 …
+    return safe
 
 
 def save_as_word_table(dataframe, file_name):
