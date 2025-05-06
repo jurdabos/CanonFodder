@@ -3,8 +3,10 @@ Supplies small statistical helpers for feature selection and outlier checks.
 """
 import numpy as np
 import pandas as pd
+import re
 from sklearn.metrics import confusion_matrix, classification_report
 from tabulate import tabulate
+
 
 def cramers_v(x, y):
     """
@@ -80,6 +82,44 @@ def iterative_correlation_dropper(current_data, cutoff, varframe, min_features=8
             break
     print(f"Final feature count: {len(current_data.columns)}")
     return current_data
+
+
+def length_stats(text):
+    parts = re.split(r"{", text)
+    lens = [len(p.strip()) for p in parts if p.strip()]
+    return pd.Series({
+        "sig_len": sum(lens),
+        "n_variants": len(lens),
+        "avg_name_len": np.mean(lens),
+        "max_name_len": np.max(lens),
+        "var_len": np.std(lens)
+    })
+
+
+def show_misclassified(gs_df, model_pipe, X_matrix, extra_cols=None,
+                       only_test=False, idx_test=None, top_n=20):
+    """
+    gs_df      : original DataFrame with 'variants' and target
+    model_pipe : the fitted sklearn Pipeline
+    X_matrix   : numeric matrix corresponding to gs_df
+    extra_cols : list of additional column names to show (optional)
+    only_test  : if True, show mis-classifications on test set only
+    idx_test   : indices of rows that formed the held-out test set
+    """
+    extra_cols = extra_cols or []
+    y_predicted = model_pipe.predict(X_matrix)
+    y_prob1 = model_pipe.predict_proba(X_matrix)[:, 1]
+    if only_test:
+        mask = (gs_df.index.isin(idx_test)) & (gs_df["to_link"] != y_predicted)
+    else:
+        mask = gs_df["to_link"] != y_predicted
+    mis = gs_df.loc[mask, ["variants", "to_link"] + extra_cols].copy()
+    mis["predicted"] = y_predicted[mask]
+    mis["prob_1"] = y_prob1[mask].round(3)
+    print(f"\nMis-classified rows ({'test' if only_test else 'all'} set): "
+          f"{len(mis)}\n")
+    print(tabulate(mis.head(top_n), headers="keys",
+                   tablefmt="pretty", maxcolwidths=70))
 
 
 def missing_value_ratio(col):

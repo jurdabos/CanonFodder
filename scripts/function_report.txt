@@ -47,43 +47,68 @@ dev_canon.py
     _split_variants()
 
 dev_profile.py
-    MBXMLFilter
+    _parse_date()
+    _interval_ok()
+    _overlaps()
+    edit_country_timeline()
+    _df_from_db()
+    _load_ac_cache()
+    _upsert_artist_country()
+    artist_countries()
+    top_n_artists_by_country()
+    load_country_timeline()
+    assign_user_country()
     _split_variants()
     _country_for_series()
+    yearly_top()
+    parse_args()
 
 enrich.py
     enrich_artist_country()
 
 helpers\cli.py
     _apply_canonical()
-    _remember()
+    _remember_artist_variant()
+    _split_variants()
+    _write_to_avc_parquet()
     ask()
     choose_lastfm_user()
+    make_signature()
+    make_signature_hash()
     unify_artist_names_cli()
     verify_commas()
     yes_no()
 
 helpers\cluster.py
     _clf_scorer()
+    anchors_ok()
     clf_proba()
     calculate_clustering_metrics()
+    dbscan_with_anchors()
+    expand_pairs()
     fuzzy_scores()
     most_similar()
+    tree_to_rule_list()
 
 helpers\io.py
     _parquet_name()
+    dump_latest_table_to_parquet()
     dump_parquet()
     latest_csv()
     latest_parquet()
-    dump_latest_table_to_parquet()
     register_custom_palette()
+    sanitize()
     save_as_word_table()
+
+helpers\review.py
+    review_canonized_variants()
 
 helpers\stats.py
     cramers_v()
     drop_high_corr_features()
     iterative_correlation_dropper()
     missing_value_ratio()
+    show_cm_and_report()
     variance_testing()
     winsorization_outliers()
 
@@ -97,9 +122,6 @@ lfAPI.py
     generate_lastfm_signature()
     lastfm_request()
     LastFMError
-
-LLM.py
-    train_llm_and_enrich_data()
 
 main.py
     main()
@@ -120,3 +142,7 @@ mbAPI.py
 
 scripts\list_symbols.py
     list_defs()
+
+scripts\uc_populate.py
+    parse_cli()
+    main()

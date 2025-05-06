@@ -31,17 +31,21 @@ from rapidfuzz import process
 import re
 import seaborn as sns
 from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
+from sklearn.compose import ColumnTransformer
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import VarianceThreshold
-from sklearn.metrics import confusion_matrix, classification_report, pairwise_distances, roc_auc_score, silhouette_score
-from sklearn.model_selection import StratifiedShuffleSplit, train_test_split
-from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import RobustScaler
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier, export_text, plot_tree
 from sqlalchemy import insert, select, text, update
 import sys
 from tabulate import tabulate
 import warnings
+from xgboost import XGBClassifier
 
 warnings.filterwarnings("ignore", message="'force_all_finite' was renamed")
 import woodwork as ww
@@ -53,8 +57,6 @@ else:
 JSON_DIR = HERE / "JSON"
 PALETTES_FILE = JSON_DIR / "palettes.json"
 LOGGER = logging.getLogger(__name__)
-
-# %% Display
 pd.options.display.max_columns = None
 pd.options.display.max_rows = None
 pd.set_option("display.width", 200)
@@ -81,9 +83,7 @@ if data is None or data.empty:
 data.columns = ["Artist", "Album", "Song", "Datetime"]
 data.dropna(subset=["Datetime"], inplace=True)
 data = data.drop_duplicates(["Artist", "Album", "Song", "Datetime"])
-
-# %% Variant clustering
-LOGGER.info("Fetching already canonised artist-name variants…")
+LOGGER.info("Fetching already canonised artist name variants…")
 with SessionLocal() as sess:
     canon_rows = (
         sess.query(ArtistVariantsCanonized)
@@ -106,7 +106,6 @@ def _split_variants(raw: str) -> list[str]:
 
 variant_to_canon: dict[str, str] = {}
 for row in canon_rows:
-    # `artist_variants` keeps the variants in one string, {-separated (a{b{c).
     variants: list[str] = [v.strip() for v in row.artist_variants_text.split("{") if v.strip()]
     for variant in _split_variants(row.artist_variants_text):
         if variant and variant != row.canonical_name:
@@ -137,7 +136,7 @@ anchor_idx_sets = [
     [name2idx[n.strip()] for n in group if n.strip() in name2idx]
     for group in cluster.variant_sets
 ]
-anchor_idx_sets = [s for s in anchor_idx_sets if len(s) >= 2]  # ignore degenerate
+anchor_idx_sets = [s for s in anchor_idx_sets if len(s) >= 2]
 eps_range = np.arange(0.05, 1.0, 0.01)
 best_eps = None
 for eps in eps_range:
@@ -149,8 +148,7 @@ if best_eps is None:
     raise ValueError("No ε in the range puts every variant_set in one cluster.")
 # print(f"Chosen ε = {best_eps:.2f} (all anchors satisfied)")
 # Manually updating best_eps here based on results from previous iterations,
-# since, in the meantime, variants contained in "variant_sets", which plays an important part in ε identification,
-# have been canonized.
+# since, in the meantime, variants contained in the DBSCAN input set have been canonized.
 best_eps = 0.23
 labels = DBSCAN(eps=best_eps, min_samples=2, metric="precomputed").fit_predict(dist)
 clusters = (
@@ -160,15 +158,18 @@ clusters = (
     .tolist()
 )
 
-# %% Gold standard creation
-# This step previously identified a lot of relevant clusters, which I manually clustered to form a gold-standard table.
+# %%
+# ------------------------------------------------------------------
+# 0.  Load gold-standard pairs
+# ------------------------------------------------------------------
+# This step previously identified a lot of relevant clusters, which I manually handled to form a gold-standard table.
 # Cf. section 2.3.3 of the assignment
 with SessionLocal() as sess:
     unhandled = 0
     for group in clusters:
         if len(group) <= 1:
             continue
-        sig = cli.make_signature(group)                       # <- unified
+        sig = cli.make_signature(group)  # <- unified
         row = sess.execute(
             text("SELECT 1 FROM artist_variants_canonized "
                  "WHERE artist_variants_text = :sig"),
@@ -183,274 +184,147 @@ data, fltrd_artcount = cli.unify_artist_names_cli(
     fltrd_artcount=fltrd_artcount,
     similar_artist_groups=clusters,
 )
-print("Done unifying. Next steps coming.")
+print("Done unifying. ML steps coming.")
 
-# %%
-# Building 6 rapidfuzz function outputs
-avc = pd.read_parquet("PQ/avc.parquet")
-expanded_rows = []
-for _, row in avc.iterrows():
-    expanded_rows.extend(cluster.expand_pairs(row))
-goldstandard = pd.DataFrame(expanded_rows, columns=[
-    'variants', 'variant_a', 'variant_b', 'to_link'
-])
-score_df = goldstandard.apply(
-    lambda sor: pd.Series(cluster.fuzzy_scores(sor['variant_a'], sor['variant_b'])),
-    axis=1
-)
-goldstandard = pd.concat([goldstandard, score_df], axis=1)
-goldstandard.info()
-goldstandard.describe()
-goldstandard["to_link"] = goldstandard["to_link"].astype("int64")
-base_feats = [
+gs = pd.read_parquet("PQ/avc.parquet")
+# Exploding into pairwise rows if not yet done
+if {"variant_a", "variant_b"}.issubset(gs.columns) is False:
+    rows = []
+    for _, row in gs.iterrows():
+        rows.extend(cluster.expand_pairs(row))
+    gs = pd.DataFrame(rows, columns=[
+        "variants", "variant_a", "variant_b", "to_link"
+    ])
+all_scores = {
     "ratio", "partial_ratio",
     "token_sort_ratio", "token_set_ratio",
     "WRatio", "QRatio"
-]
-gs = goldstandard[[
-    "variants", "to_link",
-    "ratio", "partial_ratio",
-    "token_sort_ratio", "token_set_ratio",
-    "WRatio", "QRatio"
-]]
+}
+if all_scores.difference(gs.columns):
+    scores = gs.apply(
+        lambda r: pd.Series(cluster.fuzzy_scores(r["variant_a"],
+                                                 r["variant_b"])),
+        axis=1
+    )
+    # Overwriting only the missing columns
+    for col in all_scores:
+        if col not in gs.columns:
+            gs[col] = scores[col]
 
 # %%
-# Variance-pruning and checking the correlation matrix using Spearman's
-X = gs.drop(columns=["variants", "to_link"])
-selector = VarianceThreshold(threshold=0.01)
-_ = selector.fit_transform(X)
-variances = selector.variances_
-variance_df = pd.DataFrame({
-    "features": X.columns,
-    "variances": variances
-})
-pruned_features_df = stats.iterative_correlation_dropper(
-    current_data=X,
-    cutoff=0.85,
-    varframe=variance_df,
-    min_features=3
-)
-gs_VTed = pd.concat([
-    gs[["variants", "to_link"]],
-    pruned_features_df
-], axis=1)
-gs_corr = pruned_features_df.corr(method="spearman")
-plt.figure(figsize=(20, 18))
-sns.heatmap(
-    gs_corr,
-    annot=True,
-    annot_kws={"size": 8},
-    cmap="winter",
-    fmt=".2f",
-    cbar=True,
-    linewidths=0.5,
-    mask=np.triu(gs_corr),
-)
-plt.title("")
-plt.xticks(rotation=90)
-
-# %% FTing
-gs_VTed_num = gs_VTed.drop("variants", axis='columns')
-gs_VTed_num = gs_VTed_num.drop("to_link", axis='columns')
-gs_VTed_num["pair_id"] = gs_VTed_num.index
-gs_VTed_num.ww.init(
-    name="similarities",
-    index="pair_id",
-    logical_types={col: 'Double' for col in gs_VTed_num.columns if col != "pair_id"}
-)
-es = ft.EntitySet(id="artist_pairs")
-es = es.add_dataframe(
-    dataframe_name="similarities",
-    dataframe=gs_VTed_num,
-    index="pair_id"
-)
-trans_primitives = ["add_numeric", "subtract_numeric", "divide_numeric", "multiply_numeric"]
-features, feature_defs = ft.dfs(
-    entityset=es,
-    target_dataframe_name="similarities",
-    trans_primitives=trans_primitives,
-    max_depth=1
-)
-features.reset_index(drop=True, inplace=True)
-features.replace([np.inf, -np.inf], np.nan, inplace=True)
-features.dropna(axis=1, how='any', inplace=True)
-print(f"Final features shape: {features.shape}")
+# ------------------------------------------------------------------
+# 1.  New engineered features
+# ------------------------------------------------------------------
+gs = pd.concat([gs, gs["variants"].apply(stats.length_stats)], axis=1)
 
 # %%
-# Identifying attributes with very strong correlation
-X = features
-selector = VarianceThreshold(threshold=0.01)
-_ = selector.fit_transform(X)
-variances = selector.variances_
-variance_df = pd.DataFrame({
-    "features": X.columns,
-    "variances": variances
-})
-pruned_features_df = stats.iterative_correlation_dropper(
-    current_data=X,
-    cutoff=0.85,
-    varframe=variance_df,
-    min_features=3
-)
+# ------------------------------------------------------------------
+# 2.  Feature / target split
+# ------------------------------------------------------------------
+target = "to_link"
+num_cols = [c for c in gs.columns if c not in ["variants", target,
+                                               "variant_a", "variant_b"]]
+X = gs[num_cols]
+y = gs[target].astype(int)
 
-# %%
-# Recalculating for strong correlations
-features = pruned_features_df
-corr_matrix_shrunken = features.corr(method="spearman")
-s_threshold = 0.75
-high_corr_pairs_s, features_to_drop_s = stats.drop_high_corr_features(
-    corr_matrix_shrunken, s_threshold, variance_df
-)
-drop_table_s = pd.DataFrame(
-    {
-        "Strongly correlated feature pair": [
-            f"{pair[0]} - {pair[1]}" for pair in high_corr_pairs_s
-        ],
-        "Feature to drop": features_to_drop_s,
-    }
-)
-print(tabulate(drop_table_s, headers="keys", tablefmt="pretty"))
-data_corr_final = features.drop(columns=features_to_drop_s)
-summary_dcf = data_corr_final.describe(include="all").transpose()
-summary_dcf = summary_dcf.drop(columns=["25%", "50%", "75%"])
-summary_dcf.index.name = "Featnames"
-print(tabulate(summary_dcf, headers="keys", tablefmt="pretty"))
-
-# %%
-# Scaling
-scaler2 = MinMaxScaler()
-data_dfs_scaled = scaler2.fit_transform(data_corr_final)
-data_dfs_scaled = pd.DataFrame(data_dfs_scaled, columns=data_corr_final.columns)
-summary_dfsmms = data_dfs_scaled.describe(include="all").transpose()
-summary_dfsmms = summary_dfsmms.drop(columns=["25%", "50%", "75%"])
-summary_dfsmms.index.name = "Fnames"
-print(tabulate(summary_dfsmms, headers="keys", tablefmt="pretty"))
-
-# %%
-# Feature importance calculation
-X = data_dfs_scaled
-y = gs_VTed["to_link"].astype("category")
+# ------------------------------------------------------------------
+# 3.  Train / test split
+# ------------------------------------------------------------------
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3, random_state=43
+    X, y, test_size=0.25, random_state=47, stratify=y
 )
-model = RandomForestClassifier(random_state=41)
+
+# %%
+# ------------------------------------------------------------------
+# 4.  Pipeline: RobustScaler ➜ XGBoost
+# ------------------------------------------------------------------
+numeric_pipe = Pipeline([
+    ("scaler", RobustScaler())
+])
+pre = ColumnTransformer(
+    [("num", numeric_pipe, num_cols)],
+    remainder="drop"
+)
+xgb = XGBClassifier(
+    n_estimators=400,
+    learning_rate=0.05,
+    max_depth=4,
+    subsample=0.9,
+    colsample_bytree=0.75,
+    scale_pos_weight=(y_train == 0).sum() / (y_train == 1).sum(),
+    eval_metric='logloss',
+    random_state=49,
+    n_jobs=-1
+)
+model = Pipeline([
+    ("prep", pre),
+    ("xgb", xgb)
+])
+
+# %%
+# ------------------------------------------------------------------
+# 5.  Training
+# ------------------------------------------------------------------
 model.fit(X_train, y_train)
-importances = model.feature_importances_
-feature_importances = pd.DataFrame(
-    {"features": X.columns, "importance": importances}
-).sort_values(by="importance", ascending=False)
-print(
-    tabulate(feature_importances.head(20), headers="keys", tablefmt="pretty")
-)
 
 # %%
-# Use only the features with the 3 highest feature importance score
-TOP_K = 5
-TOP_K = min(TOP_K, len(feature_importances))
-selected_base = (
-    feature_importances  # DataFrame with cols ["features","importance"]
-    .head(TOP_K)  # to keep the K highest
-    .loc[:, "features"]  # to take the names only
-    .tolist()
-)
-print(f"Selected top-{TOP_K} features:", ", ".join(selected_base))
-df_selected = data_dfs_scaled[selected_base].copy()
-final_ft_df = pd.concat(
-    [gs[['variants', 'to_link']].reset_index(drop=True), df_selected.reset_index(drop=True)],
-    axis=1
-)
-selected_comp_feats_plus_target = final_ft_df.drop("variants", axis='columns')
-(Path("JSON") / "selected_features.json").write_text(
-    json.dumps({"top_k": TOP_K, "features": selected_base}, indent=2)
-)
-seen = Counter()
-rename_map = {c: io.sanitize(c, seen) for c in df_selected.columns}
-df_selected_safe = df_selected.rename(columns=rename_map)
-final_ft_df = final_ft_df.rename(columns=rename_map)
-safe_cols = list(rename_map.values())  # to feed the tree
-
-# %% Let's now try a decision tree-based approach
-X = df_selected_safe
-y = final_ft_df["to_link"]
-tree = DecisionTreeClassifier(max_depth=2, random_state=45)
-tree.fit(X, y)
-print(export_text(tree, feature_names=X.columns.tolist()))
-plt.figure(figsize=(12, 6))
-plot_tree(tree, feature_names=X.columns.tolist(), class_names=["no link", "link"], filled=True)
-
-# %%
-# Schema to test deterministic idea
-rules = cluster.tree_to_rule_list(tree, safe_cols, prob_threshold=0.7)
-print("\nExtracted rule set:")
-for cond, p1 in rules:
-    print(f"If {cond}  =>  P(to_link=1)={p1:.2f}")
-final_ft_df["auto_unify"] = 0
-for cond, _ in rules:
-    final_ft_df.loc[final_ft_df.eval(cond), "auto_unify"] = 1
-y_true = final_ft_df["to_link"]
-y_pred = final_ft_df["auto_unify"]
-cm = confusion_matrix(final_ft_df["to_link"], final_ft_df["auto_unify"])
-cm_df = pd.DataFrame(cm,
-                     index=["Actual 0", "Actual 1"],
-                     columns=["Pred 0", "Pred 1"])
-print("\nClassification report:")
-print(classification_report(final_ft_df["to_link"],
-                            final_ft_df["auto_unify"],
+# ------------------------------------------------------------------
+# 6.  Evaluation
+# ------------------------------------------------------------------
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+print("\n=== XGBoost report (held-out 25 %) ===")
+print(classification_report(y_test, y_pred,
                             target_names=["no link", "link"]))
-cm_percent = (cm / cm.sum(axis=1, keepdims=True)) * 100
+print("AUC :", round(roc_auc_score(y_test, y_prob), 3))
 
 # %%
-# Checking misclassifications
-mis_mask_tree = final_ft_df["to_link"] != final_ft_df["auto_unify"]
-mis_tree = gs.loc[mis_mask_tree, ["variants", "to_link"] + base_feats].copy()
-mis_tree["predicted"] = final_ft_df.loc[mis_mask_tree, "auto_unify"].values
-print("\nTree mis-classified rows:")
-print(tabulate(mis_tree.head(20), headers="keys", tablefmt="pretty"))
-
-# %% Let"s try a decision tree on the original fuzz scores
-RATIO_TH = 0.865
-full = pd.concat(
-    [gs[["variants", "to_link"]], gs[base_feats]],
-    axis=1
-)
-full["auto_unify"] = 0
-full.loc[full["ratio"] > RATIO_TH, "auto_unify"] = 1  # assigning only the 1 col
-stats.show_cm_and_report(full["to_link"], full["auto_unify"],
-                         title=f"Single-feature rule (ratio > {RATIO_TH})")
-mis_mask_rule = full["to_link"] != full["auto_unify"]
-mis_rule = full.loc[mis_mask_rule, ["variants", "to_link"] + base_feats + ["auto_unify"]]
-print("\nRule mis-classified rows such as:")
-print(tabulate(mis_rule.head(20), headers="keys", tablefmt="pretty", maxcolwidths=70))
+# ------------------------------------------------------------------
+# 7.  Feature importance (gain)
+# ------------------------------------------------------------------
+booster = model.named_steps["xgb"]
+raw_imp = booster.get_booster().get_score(importance_type="gain")
+feat_names = model.named_steps["prep"].get_feature_names_out()
+imp_series = (pd.Series(raw_imp)
+              .rename(index=lambda k: feat_names[int(k[1:])])
+              .astype(float)
+              .sort_values(ascending=False))
+TOP_SHOW = 15
+imp_df = (imp_series.head(TOP_SHOW)
+          .reset_index()
+          .rename(columns={"index": "feature", 0: "gain"}))
+print("\nTop-gain features")
+print(tabulate(imp_df, headers="keys", tablefmt="pretty", showindex=False))
 
 # %%
-# SVM experiment (linear kernel)
-X = gs[base_feats].values.astype("float32")
-y = gs["to_link"].values
-X_train, X_test, y_train, y_test, idx_train, idx_test = train_test_split(
-    X, y, gs.index, test_size=0.25, random_state=42, stratify=y
+# ------------------------------------------------------------------
+# 8.  Save model & mapping
+# ------------------------------------------------------------------
+Path("models").mkdir(exist_ok=True)
+model_path = Path("models/xgb.json")
+booster.save_model(model_path)
+(Path("models/xgb_columns.json")
+ .write_text(json.dumps(num_cols, indent=2)))
+print(f"\n✅  Model saved to {model_path}")
+
+# %%
+# ---------------------------------------------------------------
+# 9.  Mis-classified rows
+# ---------------------------------------------------------------
+stats.show_misclassified(
+    gs_df=gs,
+    model_pipe=model,
+    X_matrix=gs[num_cols],
+    extra_cols=list(all_scores) + ["sig_len", "avg_name_len"],
+    top_n=40
 )
-scaler = StandardScaler()
-X_train_sc = scaler.fit_transform(X_train)
-X_test_sc = scaler.transform(X_test)
-svm = SVC(kernel="linear", class_weight="balanced",
-          probability=True, random_state=42)
-svm.fit(X_train_sc, y_train)
-print("\n=== SVM on base RapidFuzz scores ===")
-stats.show_cm_and_report(y_test, svm.predict(X_test_sc))
 
-# mis-classified rows in training set
-train_pred = svm.predict(X_train_sc)
-mis_mask_svm = train_pred != y_train
-mis_svm = gs.loc[idx_train[mis_mask_svm], ["variants", "to_link"] + base_feats].copy()
-mis_svm["predicted"] = train_pred[mis_mask_svm]
-print("\nSVM mis-classified training rows:")
-print(tabulate(mis_svm.head(20), headers="keys", tablefmt="pretty", maxcolwidths=70))
+# TEST set only
+stats.show_misclassified(gs, model, gs[num_cols],
+                         only_test=True, idx_test=idx_test,
+                         extra_cols=list(all_scores), top_n=15)
 
-# weights for interpretability
-coef_series = pd.Series(svm.coef_[0], index=base_feats).round(3)
-print("\nSVM linear weights:")
-print(tabulate(coef_series.sort_values(ascending=False).to_frame("weight"),
-               headers="keys", tablefmt="pretty", maxcolwidths=70))
+# %%
 
 if __name__ == "__main__":
     logging.basicConfig(
