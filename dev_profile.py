@@ -5,7 +5,7 @@ Run it as a Jupyter-style cells
 -------------------------------------------------
 Per 2025‑04‑30
 -------------------------------------------------
-* **User‑country timeline stores free‑text names** (no ISO restriction).
+* **User‑country timeline stores ISO-2 country codes.
 * **Artist‑country lookup first hits the local *ArtistCountry* table or
   `PQ/ac.parquet`**, then falls back to MusicBrainz if needed, and rewrites the
   cache + parquet on the fly.
@@ -29,7 +29,7 @@ from DB.models import (
     Scrobble,
 )
 from datetime import date, datetime
-
+from helpers import cli
 from helpers import io
 import json
 import logging
@@ -113,10 +113,10 @@ def _interval_ok(start: pd.Timestamp | None, end: pd.Timestamp | None) -> None:
         raise ValueError("End date must be after start date")
 
 
-def _overlaps(df: pd.DataFrame, sta: pd.Timestamp, e: pd.Timestamp | None) -> bool:
-    cond_left = df["end_date"].isna() | (df["end_date"] >= sta)
-    cond_right = e is None or (df["start_date"] <= e)
-    return bool(df[cond_left & cond_right].shape[0])
+def _overlaps(keret: pd.DataFrame, sta: pd.Timestamp, e: pd.Timestamp | None) -> bool:
+    cond_left = keret["end_date"].isna() | (keret["end_date"] >= sta)
+    cond_right = e is None or (keret["start_date"] <= e)
+    return bool(keret[cond_left & cond_right].shape[0])
 
 
 # %%
@@ -159,6 +159,27 @@ def edit_country_timeline() -> pd.DataFrame:
 # =============================================================================
 # Artist‑country helpers (parquet → DB → MusicBrainz)
 # =============================================================================
+def _append_to_parquet(path: Path, adatk: pd.DataFrame) -> None:
+    if path.exists():
+        old = pd.read_parquet(path)
+        adatk  = (pd.concat([old, adatk])
+                  .drop_duplicates(subset="artist_name", keep="last"))
+    adatk.to_parquet(path, compression="zstd", index=False)
+
+
+def _country_for_series(series: pd.Series, cache: dict[str, str | None]) -> pd.Series:
+    missing = [a for a in series.unique() if a not in cache]
+    if missing:
+        mb_results = {a: mbAPI.fetch_country(a) for a in missing}
+        cache.update(mb_results)
+        if mb_results:
+            new_df = (pd.DataFrame
+                        .from_dict(mb_results, orient="index", columns=["country"])
+                        .assign(artist_name=lambda d: d.index))
+            _append_to_parquet(AC_PARQUET, new_df)
+    return series.map(cache)
+
+
 def _df_from_db() -> pd.DataFrame:
     """Pull the entire artistcountry table into a DataFrame."""
     with SessionLocal() as sessio:
@@ -274,7 +295,7 @@ def top_n_artists_by_country(adatkeret, country, n=24):
 def load_country_timeline(path: Path) -> pd.DataFrame:
     tl = (
         pd.read_parquet(path)
-        .rename(columns={"country_name": "UserCountry"})
+        .rename(columns={"country_code": "UserCountry"})
     )
     tl["start_date"] = pd.to_datetime(tl["start_date"]).dt.normalize()
     tl["end_date"] = pd.to_datetime(tl["end_date"]).dt.normalize()
@@ -379,14 +400,16 @@ print(artist_counts.describe())
 #   STEP 4 – user‑country timeline (fast‑lane vs CLI)
 # -------------------------------------------------------------------------------------
 if UC_PARQUET.exists():
-    use = input("Use existing user‑country timeline? [Y]es / [E]dit / [N]ew: ").strip().lower() or "y"
-    if use.startswith("e"):
+    use = cli.choose_timeline()
+    if use == "e":
         uc_df = edit_country_timeline()
-    elif use.startswith("n"):
+    elif use == "n":
         UC_PARQUET.unlink(missing_ok=True)
         uc_df = edit_country_timeline()
-    else:
+    else:                           # "y"
         uc_df = pd.read_parquet(UC_PARQUET)
+else:
+    uc_df = edit_country_timeline()
 
 # %%
 # -------------------------------------------------------------------------------------
@@ -394,34 +417,9 @@ if UC_PARQUET.exists():
 # -------------------------------------------------------------------------------------
 ac_cache = (
     pd.read_parquet(AC_PARQUET)
-    .set_index("artist_name")["country"]  # Series {artist → country}
+    .set_index("artist_name")["country"]
     .to_dict()
 )
-
-
-def _country_for_series(series: pd.Series,
-                        cache: dict[str, str | None]) -> pd.Series:
-    """
-    Vectorised ISO-country lookup:
-      1. use cached country if present
-      2. otherwise query MusicBrainz once and extend the cache
-    """
-    missing = [a for a in series.unique() if a not in cache]
-    if missing:
-        mb_results = {
-            artist: mbAPI.fetch_country(artist)
-            for artist in missing
-        }
-        cache.update(mb_results)
-        if mb_results:
-            (pd.DataFrame
-             .from_dict(mb_results, orient="index", columns=["country"])
-             .assign(artist_name=lambda d: d.index)
-             .to_parquet(AC_PARQUET, compression="zstd",
-                         append=True, index=False))
-    return series.map(cache)
-
-
 data["ArtistCountry"] = _country_for_series(data["Artist"], ac_cache)
 country_count = data.ArtistCountry.value_counts().sort_values(ascending=False).to_frame()[:15]
 country_count = country_count.rename(columns={"ArtistCountry": "count"})

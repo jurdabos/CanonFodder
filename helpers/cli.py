@@ -9,6 +9,7 @@ from DB import get_session as _get_session
 
 from DB.models import ArtistVariantsCanonized, ArtistCountry
 from DB import SessionLocal
+import getpass
 import hashlib
 from .io import PQ_DIR
 import os
@@ -18,6 +19,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 import questionary
 from sqlalchemy import select, insert, update
+import sys
 
 SEPARATOR = "{"
 os.makedirs(PQ_DIR, exist_ok=True)
@@ -119,6 +121,31 @@ def choose_lastfm_user() -> str:
         if default:
             return default
         print("Please type a user name (or set LASTFM_USER in your .env).")
+
+
+def choose_timeline(default: str = "Y") -> str:
+    """
+    Return 'y', 'e', or 'n'.
+
+    • If running in a true TTY → prompt the user.
+    • If stdin is not a TTY (PyCharm SciView, Jupyter, CI) → return *default*.
+    """
+    def _prompt() -> str:
+        answ = input("Use existing user-country timeline? [Y]es/[E]dit/[N]ew: ").strip() or default
+        return answ[0].lower()
+    # PyCharm's console / notebooks: no interactive stdin
+    if not sys.stdin.isatty() or os.getenv("PYCHARM_HOSTED"):
+        print(f"(no TTY – assuming '{default}')")
+        return default[0].lower()
+    while True:
+        try:
+            ans = _prompt()
+            if ans in {"y", "e", "n"}:
+                return ans
+            print("Please enter Y, E, or N.")
+        except (EOFError, KeyboardInterrupt):
+            print()           # new line
+            sys.exit("aborted by user")
 
 
 def make_signature(variants: list[str]) -> str:

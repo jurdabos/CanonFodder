@@ -38,11 +38,11 @@ def no_overlapping_user_countries(session: Session, flush_ctx, _):
         overlap_q = (
             session.query(UserCountry)
             .filter(UserCountry.id != getattr(obj, "id", None))  # different row
-            .filter(UserCountry.country_name == obj.country_name)  # same country
+            .filter(UserCountry.country_code == obj.country_code)  # same country
             .filter(*_overlap_clause(UserCountry, obj.start_date, obj.end_date))
         )
         if session.query(overlap_q.exists()).scalar():
             raise ValueError(
-                f"Overlap detected for {obj.country_name}: "
+                f"Overlap detected for {obj.country_code}: "
                 f"{obj.start_date} – {obj.end_date or '∞'}"
             )

@@ -64,14 +64,14 @@ class UserCountry(Base):
     # ── surrogate PK ─────────────────────────────────────────────────────────
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     # ── dimensions ───────────────────────────────────────────────────────────
-    country_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    country_code: Mapped[str] = mapped_column(String(255), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     # ── constraints / quality guards ─────────────────────────────────────────
     __table_args__ = (
         # only *one* row per (country, start_date)
         UniqueConstraint(
-            "country_name", "start_date",
+            "country_code", "start_date",
             name="uq_usercountry_start",
         ),
         CheckConstraint(
