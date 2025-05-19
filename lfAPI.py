@@ -1,36 +1,294 @@
+from __future__ import annotations
+
+import time
+
+import requests
 from dotenv import load_dotenv
+
 load_dotenv()
+from datetime import date
+
+from DB import SessionLocal
+from DB.models import Scrobble
+
 import hashlib
 from HTTP.client import make_request, USER_AGENT
 import logging
+
+log = logging.getLogger("lfAPI")
 import os
 import pandas as pd
 from pathlib import Path
-from typing import Any, Dict, Optional
+from sqlalchemy import select, or_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+import typing
+from typing import Any, Dict, Iterable, Optional
 
-ENDPOINT = "https://ws.audioscrobbler.com/2.0/"
+# Import the reference and timeline models only when the type checker needs them
+if typing.TYPE_CHECKING:  # pragma: no cover
+    from DB.models import UserCountry
+
+LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/"
 HERE = Path(__file__).resolve().parent
 # Constants
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY")
 LASTFM_SECRET = os.environ.get("LASTFM_SECRET")
+USERNAME = os.getenv("LASTFM_USER")
+
 if not LASTFM_API_KEY:
     raise RuntimeError(
         "LASTFM_API_KEY not found – did you forget to put it into .env "
         "or call load_dotenv(<path>) before importing lfAPI?")
 
+PER_PAGE = 200
+
 
 def _clean_track(rec: object) -> dict | None:
-    """Returns a normalised track‐dict or None."""
-    if not isinstance(rec, dict):  # ← to guard against plain strings
+    """Return a normalised track-dict or None for malformed rows."""
+    if not isinstance(rec, dict):  # guard against stray strings
         return None
-    # rows for the *currently playing* track having no 'date'
-    uts = int(rec.get("date", {}).get("uts", 0) or 0)
+    # ― timestamp ────────────────────────────────────────────────
+    uts = int(rec.get("date", {}).get("uts", 0) or 0)  # 0 for “now-playing”
+    # ― nested helpers ────────────────────────────────────────────
+    artist = rec.get("artist", {}) or {}
+    album = rec.get("album", {}) or {}
     return {
-        "artist_name": rec["artist"]["#text"],
-        "album_title": rec["album"]["#text"],
-        "track_title": rec["name"],
+        "artist_name": artist.get("#text", ""),
+        "artist_mbid": artist.get("mbid") or None,
+        "album_title": album.get("#text", ""),
+        "track_title": rec.get("name", ""),
         "uts": uts,
     }
+
+
+def _normalise_tracks(tracks: list[dict]) -> list[dict]:
+    """
+    Normalize a list of tracks from Last.fm API into a consistent format.
+    Filters out tracks without timestamps (now playing).
+    Parameters
+    ----------
+    tracks : list[dict]
+        List of track dictionaries from Last.fm API
+    Returns
+    -------
+    list[dict]
+        List of normalized track dictionaries with consistent keys
+    """
+    normalized = []
+    for track in tracks:
+        # Skip "now playing" tracks (no timestamp)
+        if "date" not in track:
+            continue
+        artist = track.get(
+            "artist",
+            {}
+        ) if isinstance(track.get("artist"), dict) else {"#text": track.get("artist", "")}
+        album = track.get("album", {}) if isinstance(track.get("album"), dict) else {"#text": track.get("album", "")}
+        normalized.append({
+            "Artist": artist.get("#text", ""),
+            "Song": track.get("name", ""),
+            "Album": album.get("#text", ""),
+            "uts": int(track.get("date", {}).get("uts", 0)),
+            "artist_mbid": artist.get("mbid") if isinstance(artist, dict) else None
+        })
+    return normalized
+
+
+def _fetch_country_from_lastfm(username: str) -> str:
+    """
+    Call Last.fm and return the *ISO* country code.
+    Raises RuntimeError if the API call fails or the country cannot be mapped.
+    """
+    payload = lastfm_request("user.getInfo", user=username)
+    country_name = payload["user"].get("country")  # '' when user hid location
+    if not country_name:
+        raise RuntimeError("Last.fm did not return a country for that user.")
+    # Create a session to use for country code lookup
+    with SessionLocal() as session:
+        code = iso2_for_en_name(session, country_name)
+        if code is None:
+            raise RuntimeError(f"Unknown country «{country_name}» – extend mapping.")
+        return code
+
+
+def _update_user_country(session: Session, new_code: str) -> bool:
+    """
+    Persist the new country if it differs from *today’s* entry.
+    Returns
+    -------
+    True  … when the DB was changed
+    False … when nothing had to be changed
+    """
+    today = date.today()
+    # 1) locate the *current* row (start ≤ today < end OR end IS NULL)
+    stmt = (select(UserCountry)
+            .where(UserCountry.start_date <= today)
+            .where(or_(UserCountry.end_date.is_(None),
+                       UserCountry.end_date > today))
+            .order_by(UserCountry.start_date.desc())
+            .limit(1))
+    current: Optional[UserCountry] = session.scalars(stmt).first()
+    if current and current.country_code == new_code:
+        return False  # already up-to-date
+    # 2) close old row (if any)
+    if current:
+        current.end_date = today
+    # 3) insert the new row
+    uc = UserCountry(country_code=new_code,
+                     start_date=today,
+                     end_date=None)
+    session.add(uc)
+    session.commit()
+    return True
+
+
+def enrich_artist_mbids(username, progress_callback=None):
+    """
+    Fetch artist MBIDs from Last.fm API and update the database.
+    This function gets recent tracks for the user and extracts artist MBIDs,
+    then updates the database with these values.
+    
+    Parameters
+    ----------
+    username : str
+        Last.fm username
+    progress_callback : callable, optional
+        Callback for progress updates (task_name, percentage, message)
+        
+    Returns
+    -------
+    dict
+        Status information about the operation
+    """
+    try:
+        from sqlalchemy import text
+        from DB import engine, SessionLocal
+
+        if progress_callback:
+            progress_callback("Initializing", 0, "Starting artist MBID enrichment")
+
+        # First, get a count of artists without MBIDs in the database
+        with engine.connect() as conn:
+            missing_count_query = text("""
+                SELECT COUNT(DISTINCT artist_name) 
+                FROM scrobble 
+                WHERE artist_mbid IS NULL OR artist_mbid = ''
+            """)
+            
+            missing_count = conn.execute(missing_count_query).scalar() or 0
+            
+            if missing_count == 0:
+                return {
+                    "status": "success", 
+                    "message": "No artists missing MBIDs in database",
+                    "enriched": 0
+                }
+                
+            if progress_callback:
+                progress_callback("Analyzing", 5, f"Found {missing_count} artists without MBIDs")
+            
+            # Get the list of artists needing MBIDs
+            artists_query = text("""
+                SELECT DISTINCT artist_name 
+                FROM scrobble 
+                WHERE artist_mbid IS NULL OR artist_mbid = '' 
+                ORDER BY artist_name
+            """)
+            
+            artists = [row[0] for row in conn.execute(artists_query).fetchall()]
+            
+        # Process in batches to avoid overwhelming the API
+        batch_size = 50
+        total_enriched = 0
+        artist_mbid_map = {}
+        
+        for i in range(0, len(artists), batch_size):
+            batch = artists[i:i+batch_size]
+            
+            if progress_callback:
+                percentage = 5 + (i / len(artists)) * 45
+                progress_callback("Fetching", percentage, f"Getting MBIDs for artists {i+1}-{i+len(batch)} of {len(artists)}")
+            
+            # Get recent tracks for each artist
+            for artist_name in batch:
+                try:
+                    # Use the user's recent tracks to find MBIDs for this artist
+                    params = {
+                        'method': 'user.getrecenttracks',
+                        'user': username,
+                        'artist': artist_name,
+                        'limit': 10,  # Just need a few to find the MBID
+                        'api_key': LASTFM_API_KEY,
+                        'format': 'json'
+                    }
+                    response = requests.get(LASTFM_API_URL, params=params)
+                    data = response.json()
+                    if 'recenttracks' in data and 'track' in data['recenttracks']:
+                        tracks = data['recenttracks']['track']
+                        if isinstance(tracks, list) and tracks:
+                            for track in tracks:
+                                if ('artist' in track and '@attr' in track['artist'] and
+                                        'mbid' in track['artist']['@attr'] and
+                                        track['artist']['@attr']['mbid']):
+                                    mbid = track['artist']['@attr']['mbid']
+                                    artist_mbid_map[artist_name] = mbid
+                                    break
+                        # If we didn't find the MBID in track artist attr, try artist.getInfo
+                        if artist_name not in artist_mbid_map:
+                            params = {
+                                'method': 'artist.getinfo',
+                                'artist': artist_name,
+                                'api_key': LASTFM_API_KEY,
+                                'format': 'json'
+                            }
+                            
+                            response = requests.get(LASTFM_API_URL, params=params)
+                            data = response.json()
+                            if 'artist' in data and 'mbid' in data['artist'] and data['artist']['mbid']:
+                                artist_mbid_map[artist_name] = data['artist']['mbid']
+                except Exception as e:
+                    logging.warning(f"Error fetching MBID for artist '{artist_name}': {e}")
+                    continue
+                # Small delay to avoid rate limiting
+                time.sleep(0.2)
+            # After processing a batch, update the database
+            if artist_mbid_map:
+                if progress_callback:
+                    progress_callback("Updating", 50 + (i / len(artists)) * 45, 
+                                     f"Updating database with {len(artist_mbid_map)} MBIDs")
+                with engine.connect() as conn:
+                    conn.execute(text("BEGIN"))
+                    try:
+                        for artist_name, mbid in artist_mbid_map.items():
+                            update_query = text("""
+                                UPDATE scrobble 
+                                SET artist_mbid = :mbid 
+                                WHERE artist_name = :artist_name
+                                AND (artist_mbid IS NULL OR artist_mbid = '')
+                            """)
+                            result = conn.execute(update_query, {"mbid": mbid, "artist_name": artist_name})
+                            total_enriched += 1
+                        conn.execute(text("COMMIT"))
+                    except Exception as e:
+                        conn.execute(text("ROLLBACK"))
+                        logging.error(f"Database error during MBID update: {e}")
+                        raise
+        # Final status update
+        if progress_callback:
+            progress_callback("Complete", 100, f"Enriched {total_enriched} artists with MBIDs")
+        return {
+            "status": "success",
+            "message": f"Successfully enriched {total_enriched} artists with MBIDs",
+            "enriched": total_enriched
+        }
+    except Exception as e:
+        if progress_callback:
+            progress_callback("Error", 100, f"Error: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error enriching artist MBIDs: {str(e)}"
+        }
 
 
 # --------------------------------------------------------------
@@ -47,14 +305,6 @@ def fetch_misc_data_from_lastfmapi(user: str | None = None) -> None:
     top_artists = lastfm_request("user.getTopArtists", user=user)
     top_albums = lastfm_request("user.getTopAlbums", user=user)
     top_tracks = lastfm_request("user.getTopTracks", user=user)
-    try:
-        friends = lastfm_request("user.getFriends", user=user)
-    except LastFMError as exc:
-        if exc.code == 6:  # -> not fatal, continue
-            logging.info("Friend list private – skipping")
-            friends = []
-        else:
-            raise  # to re-raise unknown problems
     infos = lastfm_request("user.getInfo", user=user)
     # ── Top artists ────────────────────────────────────────────────────────────
     if top_artists and "topartists" in top_artists:
@@ -83,28 +333,101 @@ def fetch_misc_data_from_lastfmapi(user: str | None = None) -> None:
 
 
 # --------------------------------------------------------------
+# Get pages of recent tracks from last.fm API until first DB hit
+# --------------------------------------------------------------
+def fetch_recent(limit: int = 1000) -> pd.DataFrame:
+    """
+    Return the user’s most recent scrobbles as a DataFrame.
+    Columns match the naming expected by `_prepare_scrobble_rows`.
+    """
+    batch_size = 200  # Last.fm API limit per page
+    # Calculate how many pages needed
+    pages_needed = (limit + batch_size - 1) // batch_size
+    params = {
+        "user": USERNAME,
+        "limit": min(batch_size, limit),
+        "extended": 1,  # ← includes MBIDs
+    }
+    # Use pagination to get all tracks
+    all_tracks = []
+    page = 1
+    while len(all_tracks) < limit and page <= pages_needed:
+        params["page"] = page
+        response = lastfm_request("user.getRecentTracks", **params)
+        tracks = response["recenttracks"]["track"]
+        if not tracks:  # end of catalogue
+            break
+        normalized_tracks = _normalise_tracks(tracks)
+        all_tracks.extend(normalized_tracks)
+        # Check if we're on the last page
+        attr = response["recenttracks"].get("@attr", {})
+        if int(attr.get("page", 0)) >= int(attr.get("totalPages", 0)):
+            break
+        page += 1
+    # Truncate to requested limit
+    all_tracks = all_tracks[:limit]
+    return pd.DataFrame.from_records(all_tracks)
+
+
+# --------------------------------------------------------------
 # Get all pages of recent tracks from last.fm API to df
 # --------------------------------------------------------------
 def fetch_recent_tracks_all_pages(user: str) -> pd.DataFrame:
     """Return all scrobbles for *user* as a DataFrame."""
-    bag: list[dict] = []
-    pageno = 1
+    tracks = _paginate("user.getRecentTracks", user=user, limit=200)
+
+    if not tracks:
+        logging.warning("No tracks returned for user %s", user)
+        return pd.DataFrame()
+
+    # Apply _clean_track to each track
+    batch = [_clean_track(t) for t in tracks]
+    batch = [b for b in batch if b]  # to drop Nones
+
+    return pd.DataFrame(batch)
+
+
+def fetch_scrobbles_since(username: str,
+                          since: Optional[int] = None) -> pd.DataFrame:
+    """
+    Fetch every scrobble after `since` (Unix time, exclusive).
+    When `since` is None we fetch the complete history.
+    Returns a tidy DataFrame with the same column set that
+    bulk_insert_scrobbles() expects.
+    """
+    page = 1
+    rows: list[dict] = []
     while True:
-        rsp = lastfm_request("user.getRecentTracks",
-                             user=user, page=pageno, limit=200)
-        if not rsp or "recenttracks" not in rsp:
-            logging.warning("Empty / invalid reply for page %s – stopping", pageno)
+        # Use lastfm_request with method as the first argument and named parameters after
+        params = {
+            "user": username,
+            "limit": PER_PAGE,
+            "page": page,
+        }
+        if since is not None:
+            params["from"] = since + 1  # strictly newer
+        payload = lastfm_request("user.getRecentTracks", **params)
+        tracks = payload["recenttracks"]["track"]
+        if not tracks:
             break
-        raw = rsp["recenttracks"].get("track", [])
-        batch = [_clean_track(t) for t in raw]
-        batch = [b for b in batch if b]  # to drop Nones
-        bag.extend(batch)
-        # Are we on the last page?
-        meta = rsp["recenttracks"].get("@attr", {})
-        if int(meta.get("page", 0)) >= int(meta.get("totalPages", 0)):
+        for t in tracks:
+            # skip “now-playing” pseudo-track (no date key)
+            if "date" not in t:
+                continue
+            rows.append(
+                {
+                    "Artist": t["artist"]["#text"],
+                    "Song": t["name"],
+                    "Album": t["album"]["#text"],
+                    "uts": int(t["date"]["uts"]),
+                    "artist_mbid": t["artist"].get("mbid") if isinstance(t["artist"], dict) else None
+                }
+            )
+        page += 1
+        if page > int(payload["recenttracks"]["@attr"]["totalPages"]):
             break
-        pageno += 1
-    return pd.DataFrame(bag)
+    df = pd.DataFrame(rows, columns=["Artist", "Song", "Album", "uts", "artist_mbid"])
+    return df
 
 
 # --------------------------------------------------------------
@@ -119,9 +442,91 @@ def generate_lastfm_signature(params, secret):
     return signature
 
 
+def iso2_for_en_name(session: Session, en_name: str) -> str | None:
+    """
+    Translate an English country name into ISO-3166 alpha-2 using the
+    `country_code` reference table.  The comparison is *case-insensitive* and
+    falls back to a very small Levenshtein threshold (≤ 1).
+    """
+    from DB.models import CountryCode  # local import to avoid circular deps
+    stmt = (
+        select(CountryCode.iso2)  # DB column is named `ISO2`
+        .where(CountryCode.en_name.ilike(en_name))
+    )
+    iso = session.scalars(stmt).first()
+    if iso:
+        return iso
+
+    # optional fuzzy fallback – avoid extra deps, so we do simple len-1 edit
+    def _very_close(a: str, b: str) -> bool:
+        if abs(len(a) - len(b)) > 1:
+            return False
+        # naive “distance” count
+        return sum(c1 != c2 for c1, c2 in zip(a.lower(), b.lower())) <= 1
+
+    rows = session.execute(select(CountryCode.en_name, CountryCode.iso2))
+    for db_en, db_iso in rows:
+        if _very_close(db_en, en_name):
+            return db_iso
+    return None
+
+
 # --------------------------------------------------------------
 # Thin last.fm-specific wrapper around HTTP.client's make_request
 # --------------------------------------------------------------
+def _paginate(method: str, **params) -> list[dict]:
+    """
+    Handle pagination for Last.fm API calls.
+    Returns all pages of results combined into a single list.
+    
+    Parameters
+    ----------
+    method : str
+        Last.fm API method name
+    **params
+        Any parameters to pass to the Last.fm API
+        
+    Returns
+    -------
+    list[dict]
+        Combined list of items from all paginated responses
+    """
+    page = 1
+    results = []
+    total_pages = 1  # Will be updated after first request
+
+    while page <= total_pages:
+        params_with_page = params.copy()
+        params_with_page["page"] = page
+
+        response = lastfm_request(method, **params_with_page)
+
+        # Extract the result key based on method
+        result_key = method.split('.')[-1]
+        if method == "user.getRecentTracks":
+            items = response.get("recenttracks", {}).get("track", [])
+            attr = response.get("recenttracks", {}).get("@attr", {})
+        else:
+            # For other methods, try to determine the key dynamically
+            items_key = f"{result_key.lower()}s"  # e.g., "artists" for "getArtists"
+            items = response.get(items_key, {}).get(result_key.lower(), [])
+            attr = response.get(items_key, {}).get("@attr", {})
+
+        # Add items to our results
+        results.extend(items)
+
+        # Update total pages from response metadata
+        total_pages = int(attr.get("totalPages", "1"))
+
+        # If we're on the last page, or there are no more pages, break
+        if page >= total_pages or not items:
+            break
+
+        page += 1
+
+    return results
+
+
 def lastfm_request(
         method: str,
         *,
@@ -129,27 +534,53 @@ def lastfm_request(
         user: Optional[str] = None,
         page: Optional[int] = None,
         limit: Optional[int] = None,
+        from_ts: Optional[int] = None,  # Added parameter to handle 'from' timestamp
         timeout: int = 10,
+        **kwargs  # Additional parameters
 ) -> Dict[str, Any]:
     """
     Thin wrapper around the Last.fm REST endpoint.
+    Parameters
+    ----------
+    method : str
+        Last.fm API method name
+    authed : bool
+        Whether to use authenticated call
+    user : str, optional
+        Last.fm username
+    page : int, optional
+        Page number for paginated results
+    limit : int, optional
+        Number of results per page
+    from_ts : int, optional
+        Unix timestamp to fetch scrobbles from (used instead of 'from' to avoid Python keyword)
+    timeout : int
+        Request timeout in seconds
+    **kwargs
+        Any additional parameters to pass to the Last.fm API
+    Returns
+    -------
+    Dict[str, Any]
+        Parsed JSON response from Last.fm API
     Raises
     ------
-    LastFMError   for HTTP failures or Last.fm JSON errors
+    LastFMError for HTTP failures or Last.fm JSON errors
     """
     # ---------- query construction ------------------------------------------------
     q: dict[str, Any] = {
         "method": method,
         "format": "json",
     }
-    # auth — either API key or `sk` (session key) for write-calls
+    # auth — either API key or session key for write-calls
     if authed:
-        if not LASTFM_SESSION_KEY:
-            raise LastFMError(-2, "No SESSION KEY in env", ENDPOINT)
-        q["sk"] = LASTFM_SESSION_KEY
+        # For authenticated calls, we need the session key from environment
+        session_key = os.environ.get("LASTFM_SESSION_KEY")
+        if not session_key:
+            raise LastFMError(-2, "No LASTFM_SESSION_KEY in environment", LASTFM_API_URL)
+        q["sk"] = session_key
     else:
         if not LASTFM_API_KEY:
-            raise LastFMError(-3, "No API KEY in env", ENDPOINT)
+            raise LastFMError(-3, "No API KEY in env", LASTFM_API_URL)
         q["api_key"] = LASTFM_API_KEY
     # optional parameters ----------------------------------------------------------
     if user is not None:
@@ -158,13 +589,18 @@ def lastfm_request(
         q["page"] = page
     if limit is not None:
         q["limit"] = limit
+    # Handle the 'from' parameter specially (Python reserved keyword)
+    if from_ts is not None:
+        q["from"] = from_ts
+    # Add any additional parameters
+    q.update(kwargs)
     # --- HTTP request ---------------------------------------------------------
-    r = make_request(url=ENDPOINT,
+    r = make_request(url=LASTFM_API_URL,
                      params=q,
                      headers={"User-Agent": USER_AGENT},
                      max_retries=10)
     if r is None:  # network totally failed
-        raise LastFMError(-1, "empty HTTP response", ENDPOINT)
+        raise LastFMError(-1, "empty HTTP response", LASTFM_API_URL)
     # Try JSON decoding no matter what the status code was
     json_body: Any | None = None
     try:
@@ -179,7 +615,7 @@ def lastfm_request(
                               json_body.get("message", "No message"),
                               r.url)
         raise LastFMError(-1, f"HTTP {r.status_code}", r.url)
-    # 200 OK but application-level error?
+    # 200 OK, but application-level error?
     if isinstance(json_body, dict) and "error" in json_body:
         raise LastFMError(json_body["error"],
                           json_body.get("message", "No message"),
@@ -192,9 +628,9 @@ class LastFMError(RuntimeError):
     Raised for any non-200 response from the Last.fm API.
     Attributes
     ----------
-    code        Last.fm numeric error code (int)
-    message     Last.fm error message (str)
-    url         full request URL (str) – handy when debugging
+    code: Last.fm numeric error code (int)
+    message: Last.fm error message (str)
+    url: full request URL (str) – handy when debugging
     """
 
     def __init__(self, code: int, message: str, url: str):
@@ -202,3 +638,51 @@ class LastFMError(RuntimeError):
         self.code = code
         self.message = message
         self.url = url
+
+
+def sync_user_country(
+        session: Session,
+        lastfm_username: str,
+        ask: bool = True,
+) -> bool:
+    """
+    High-level helper: fetch the country for `lastfm_username` via Last.fm,
+    translate it to ISO-2 with `iso2_for_en_name`, and update `user_country`
+    so that the current row ends yesterday (end_date = today) and a fresh one
+    starts today.
+    Returns True when the DB was changed, False when no action was necessary.
+    Raises RuntimeError for any unexpected problem.
+    """
+    payload = lastfm_request("user.getInfo", user=lastfm_username)
+    raw_country = payload["user"].get("country") or ""
+    if not raw_country:
+        raise RuntimeError("Last.fm did not return a country for that user.")
+    code = iso2_for_en_name(session, raw_country)
+    if code is None:
+        raise RuntimeError(f"Country «{raw_country}» not found in reference table.")
+    if ask:
+        from helpers.cli import yes_no  # existing helper for Y/N prompts
+        if not yes_no(f"Last.fm says your country is «{code}».  Save it?"):
+            return False
+    # ------------------------------------------------------------- timeline fix
+    from DB.models import UserCountry  # local import to avoid circular deps
+    today = date.today()
+    current: UserCountry | None = (
+        session.scalars(
+            select(UserCountry)
+            .where(UserCountry.start_date <= today)
+            .where(or_(UserCountry.end_date.is_(None),
+                       UserCountry.end_date > today))
+            .order_by(UserCountry.start_date.desc())
+            .limit(1)
+        ).first()
+    )
+    if current and current.country_code == code:
+        return False  # nothing to do
+    if current:
+        current.end_date = today
+    session.add(UserCountry(country_code=code,
+                            start_date=today,
+                            end_date=None))
+    session.commit()
+    return True

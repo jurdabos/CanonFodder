@@ -300,10 +300,10 @@ print(tabulate(imp_df, headers="keys", tablefmt="pretty", showindex=False))
 # ------------------------------------------------------------------
 # 8.  Save model & mapping
 # ------------------------------------------------------------------
-Path("models").mkdir(exist_ok=True)
-model_path = Path("models/xgb.json")
+Path("ML").mkdir(exist_ok=True)
+model_path = Path("ML/xgb.json")
 booster.save_model(model_path)
-(Path("models/xgb_columns.json")
+(Path("ML/xgb_columns.json")
  .write_text(json.dumps(num_cols, indent=2)))
 print(f"\n✅  Model saved to {model_path}")
 

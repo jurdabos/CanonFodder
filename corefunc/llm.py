@@ -1,5 +1,6 @@
 # %%
 from dotenv import load_dotenv
+
 load_dotenv()
 import aiohttp
 import openai
@@ -8,6 +9,7 @@ from pathlib import Path
 import re
 import sqlalchemy as sa
 import yaml
+
 if '__file__' in globals():
     HERE = Path(__file__).resolve().parent  # running from a file
 else:
@@ -70,11 +72,10 @@ class CanonFodderLLM:
                 parsed = yaml.safe_load(m.group(0))
                 # guard against partial / malformed replies
                 result["country_iso2"] = parsed.get("country_iso2")
-                result["confidence"]   = float(parsed.get("confidence", 0))
+                result["confidence"] = float(parsed.get("confidence", 0))
             except Exception:
-                pass   # leave defaults (None, 0.0)
+                pass  # leave defaults (None, 0.0)
         return result
-
 
     async def decide_merge(self, variants: list[str]) -> dict:
         system = ("You are an expert music data curator with a vast knowledge on artists, bands, composers and alike."

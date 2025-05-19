@@ -5,7 +5,7 @@ back-off while adding CanonFodder’s User-Agent.
 from __future__ import annotations
 import requests
 from time import sleep
-USER_AGENT = "CanonFodder/1.0 (balazs.torda@iu-study.org)"
+USER_AGENT = "CanonFodder/1.3 (balazs.torda@iu-study.org)"
 
 
 def make_request(

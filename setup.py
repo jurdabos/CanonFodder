@@ -6,7 +6,7 @@ with open("requirements.txt", "r") as f:
 setup(
     name='CanonFodder',
     packages=find_packages(exclude=['examples']),
-    version='1.0',
+    version='1.3',
     license='MIT',
     description='Code base for a written assignment in the field of Data Quality and Data Wrangling at IU',
     author='Torda Balázs',

@@ -12,18 +12,24 @@ from DB import SessionLocal
 import getpass
 import hashlib
 from .io import PQ_DIR
+import logging
+log = logging.getLogger(__name__)
 import os
 import pandas as pd
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1] if "__file__" in globals() else Path.cwd()
+
 import questionary
 from sqlalchemy import select, insert, update
 import sys
+from typing import Optional
 
 SEPARATOR = "{"
 os.makedirs(PQ_DIR, exist_ok=True)
 AVC_PARQUET_PATH = os.path.join(PQ_DIR, "avc.parquet")
+UC_PARQUET = PQ_DIR / "uc.parquet"
 
 
 def _apply_canonical(canonical: str,
@@ -33,6 +39,29 @@ def _apply_canonical(canonical: str,
     """Replace every variant in *data* with *canonical* and refresh counts in-place."""
     data["Artist"] = data["Artist"].replace(dict.fromkeys(variants, canonical))
     artcounts.loc[artcounts["Artist"].isin(variants), "Artist"] = canonical
+
+
+def _interval_ok(start: pd.Timestamp | None, end: pd.Timestamp | None) -> None:
+    if start is None:
+        raise ValueError("Start date is required")
+    if end is not None and end < start:
+        raise ValueError("End date must be after start date")
+
+
+def _overlaps(keret: pd.DataFrame, sta: pd.Timestamp, e: pd.Timestamp | None) -> bool:
+    cond_left = keret["end_date"].isna() | (keret["end_date"] >= sta)
+    cond_right = e is None or (keret["start_date"] <= e)
+    return bool(keret[cond_left & cond_right].shape[0])
+
+
+def _parse_date(d: str) -> Optional[pd.Timestamp]:
+    d = d.strip()
+    if not d:
+        return None
+    try:
+        return pd.Timestamp(d).normalize()
+    except ValueError as err:
+        raise ValueError(f"❌  '{d}' is not a valid date (YYYY‑MM‑DD)") from err
 
 
 def _remember_artist_variant(signature: str, canonical: str, link_flag: bool, comment: str | None, sess):
@@ -146,6 +175,41 @@ def choose_timeline(default: str = "Y") -> str:
         except (EOFError, KeyboardInterrupt):
             print()           # new line
             sys.exit("aborted by user")
+
+
+# ---------------------------------------------------------------------------
+#  Timeline editor
+# ---------------------------------------------------------------------------
+def edit_country_timeline() -> pd.DataFrame:
+    uc = pd.read_parquet(UC_PARQUET) if UC_PARQUET.exists() else pd.DataFrame(
+        columns=["country", "start_date", "end_date"], dtype="object")
+    print("\nEnter your country timeline. Blank to finish.\n")
+    if not uc.empty:
+        print(uc.to_string(index=False))
+    while True:
+        name = input("Country name  (blank = done): ").strip()
+        if not name:
+            break
+        s_in = input("   Start YYYY‑MM‑DD: ")
+        e_in = input("   End YYYY‑MM‑DD  (blank = ongoing): ")
+        try:
+            s_ts, e_ts = _parse_date(s_in), _parse_date(e_in)
+            _interval_ok(s_ts, e_ts)
+            if _overlaps(uc, s_ts, e_ts):
+                print("⚠ Overlaps existing interval – try again\n")
+                continue
+            uc.loc[len(uc)] = [name, s_ts, e_ts]
+            print("✔ added", name, s_ts.date(), "→", e_ts.date() if e_ts else "open‑ended")
+        except ValueError as e:
+            print("❌", e)
+    if uc.empty:
+        print("No intervals – leaving uc.parquet untouched.")
+        return uc
+    PQ_DIR.mkdir(parents=True, exist_ok=True)
+    uc.sort_values("start_date", inplace=True)
+    uc.to_parquet(UC_PARQUET, compression="zstd", index=False)
+    log.info("Saved timeline → %s", UC_PARQUET.relative_to(PROJECT_ROOT))
+    return uc
 
 
 def make_signature(variants: list[str]) -> str:

@@ -1,0 +1,64 @@
+%% CanonFodder – BI Reference Architecture
+flowchart TB
+
+%% ───── Source layer ─────
+subgraph Source_Systems["Source systems"]
+    direction LR
+    lfAPI["lfAPI  ⤵️\n• scrobble JSON\n• fields: Artist, Album, Song, uts, artist mbid"]
+    mbAPI["mbAPI  ⤵️\n• artist JSON\n• alias, primary_alias, comment, country"]
+    userCLI["User CLI  ⤵️\n• artist variant canonisation\n• user‑country timeline"]
+end
+
+%% ───── Integration / Staging layer ─────
+subgraph Staging["Integration layer  ➜  Staging area (Python ETL)"]
+    direction LR
+    extract["Extract"] --- transform["Transform"] --- load["Load"]
+end
+
+%% ───── Data‑storage layer ─────
+subgraph DWH["Data‑storage layer  ➜  CanonFodder DWH (SQLAlchemy‑based backend-agnostic RDBMS)"]
+    cdw["Core Data Warehouse\n\nTables\n───────────────\n• scrobble\n• artist_info\n• artist_variants_canonized\n• user_country"]
+end
+
+%% ───── Output / evaluation layer ─────
+subgraph Output["Output layer  ➜  Evaluation DBs"]
+    parquet[".parquet snapshots\n(star schema)\n• fact_scrobble (Y/M/D expanded)\n• dim_artist_info\n• dim_avc\n• dim_uc\n• dim_country_code"]
+end
+
+%% ───── Front‑end / analytics layer ─────
+subgraph Frontend["Frontend"]
+    viz["Python dashboards\nPlotly Express / Matplotlib / seaborn"]
+end
+
+%% ───── Metadata side‑rail ─────
+subgraph Metadata["Metadata management"]
+    mapping["Mapping\n Artist → artist_name\n Album  → album_title\n Song   → track_title\n uts    → SQL DATETIME"]
+end
+
+%% ───── DevOps / packaging note ─────
+Docker["Docker container\n(canonfodder:latest)"]:::docker
+classDef docker fill:#E0F7FA,stroke:#0288D1,stroke-width:2px,color:#01579B
+
+%% ───── Configure layout directions ─────
+%% Force a more centered layout
+Source_Systems --> Staging --> DWH --> Output --> Frontend
+
+%% ───── Data flow arrows ─────
+lfAPI --> extract
+mbAPI --> extract
+userCLI --> extract
+
+extract --> transform --> load --> cdw
+cdw --> parquet --> viz
+
+%% metadata dotted links
+Metadata --- Source_Systems
+mapping -. manages .-> extract
+mapping -. manages .-> transform
+mapping -. governs .-> cdw
+mapping -. documents .-> parquet
+
+%% packaging
+Docker -.-> viz
+Docker -.-> parquet
+Docker -.-> cdw

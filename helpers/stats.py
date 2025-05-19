@@ -1,11 +1,122 @@
 """
 Supplies small statistical helpers for feature selection and outlier checks.
 """
+from DB import SessionLocal
+from DB.models import ArtistCountry
+from .io import PQ_DIR
+import mbAPI
 import numpy as np
 import pandas as pd
 import re
 from sklearn.metrics import confusion_matrix, classification_report
+from sqlalchemy import select, text, func
 from tabulate import tabulate
+AC_PARQUET = PQ_DIR / "ac.parquet"
+AC_COLS = ["artist_name", "country", "mbid", "disambiguation_comment"]
+
+
+def _df_from_db() -> pd.DataFrame:
+    """Pull the entire artistcountry table into a DataFrame."""
+    with SessionLocal() as sessio:
+        rows = sessio.scalars(select(ArtistCountry)).all()
+    if not rows:
+        return pd.DataFrame(columns=AC_COLS)
+    return pd.DataFrame(
+        [
+            {
+                "artist_name": r.artist_name,
+                "country": r.country,
+                "mbid": r.mbid,
+                "disambiguation_comment": r.disambiguation_comment,
+            }
+            for r in rows
+        ],
+        columns=AC_COLS
+    )
+
+
+def _load_ac_cache() -> pd.DataFrame:
+    """
+    Return the artist-country cache as DataFrame.
+    • If the Parquet is newer than the last DB update → read Parquet
+    • otherwise
+        – pull from DB
+        – overwrite Parquet
+    """
+    if AC_PARQUET.exists():
+        pq_mtime = AC_PARQUET.stat().st_mtime
+        with SessionLocal() as session:
+            db_mtime = session.scalar(
+                select(func.max(ArtistCountry.id))  # monotonic surrogate pk
+            ) or 0
+        if pq_mtime > db_mtime:
+            return pd.read_parquet(AC_PARQUET)
+    dataf = _df_from_db()
+    dataf.to_parquet(AC_PARQUET, index=False, compression="zstd")
+    return dataf
+
+
+def _upsert_artist_country(new_rows: list[dict]) -> None:
+    """Insert *or* enrich existing rows in a backend-agnostic way."""
+    if not new_rows:
+        return
+    with SessionLocal() as se:
+        for r in new_rows:
+            obj = (
+                se.query(ArtistCountry)
+                .filter_by(artist_name=r["artist_name"])
+                .one_or_none()
+            )
+            if obj:
+                if not obj.mbid and r["mbid"]:
+                    obj.mbid = r["mbid"]
+                if not obj.disambiguation_comment and r["disambiguation_comment"]:
+                    obj.disambiguation_comment = r["disambiguation_comment"]
+                if not obj.country and r["country"]:
+                    obj.country = r["country"]
+            else:
+                se.add(ArtistCountry(**r))
+        se.commit()
+
+
+def artist_countries(series: pd.Series) -> pd.Series:
+    """
+    Vectorised ISO-country lookup with on-disk/DB cache;
+    back-fills MBID + disambiguation when available.
+    """
+    cache_df = _load_ac_cache()
+    cached = cache_df.set_index("artist_name").to_dict("index")
+    missing = [a for a in series.unique() if a not in cached]
+    new_rows = []
+    for artist in missing:
+        mb_res = mbAPI.search_artist(artist, limit=1)
+        mb_row = mb_res[0] if mb_res else {}
+        new_rows.append(
+            dict(
+                artist_name=artist,
+                country=mb_row.get("country"),
+                mbid=mb_row.get("id"),
+                disambiguation_comment=mb_row.get("disambiguation"),
+            )
+        )
+    _upsert_artist_country(new_rows)
+    # Refreshing cache after insert
+    cache_df = _load_ac_cache()
+    cached = cache_df.set_index("artist_name").country.to_dict()
+    return series.map(cached)
+
+
+def assign_user_country(datafr, timeline):
+    temp = datafr.copy()
+    temp["day"] = pd.to_datetime(temp["Datetime"], unit="s").dt.normalize()
+    out = pd.merge_asof(
+        temp.sort_values("day"),
+        timeline[["start_date", "UserCountry"]],
+        left_on="day",
+        right_on="start_date",
+        direction="backward",
+    )
+    return out["UserCountry"]
 
 
 def cramers_v(x, y):
@@ -140,6 +251,18 @@ def show_cm_and_report(y_true, y_pred, title=""):
         print(f"\n{title}")
     print(tabulate(cm_df, headers="keys", tablefmt="pretty"))
     print(classification_report(y_true, y_pred, target_names=["no link", "link"]))
+
+
+def top_n_artists_by_country(adatkeret, country, n=24):
+    """
+    Return the N most-played artists for one country,
+    sorted by descending play-count.
+    """
+    (adatkeret
+     .loc[adatkeret["Country"] == country, "Artist"]
+     .value_counts()
+     .head(n)
+     )
 
 
 def variance_testing(dframe, varthresh):

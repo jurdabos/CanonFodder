@@ -13,7 +13,7 @@ db_url = context.get_x_argument(as_dictionary=True).get("db_url")
 if db_url:
     os.environ["DB_URL"] = db_url
 
-# ─── 2  models / engine --------------------------------------------------------
+# ─── 2  ML / engine --------------------------------------------------------
 from DB.models import Base
 from DB import get_engine                  # returns a *single* Engine
 engine = get_engine()                      # honours DB_URL

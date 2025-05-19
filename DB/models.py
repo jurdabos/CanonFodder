@@ -1,9 +1,9 @@
 """
-Defines all SQLAlchemy ORM models used by CanonFodder.
+Defines all SQLAlchemy ORM ML used by CanonFodder.
 """
 from __future__ import annotations
 from datetime import date, datetime, UTC
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, func, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, func, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from typing import Optional
 
@@ -16,9 +16,10 @@ class Base(DeclarativeBase):
 class ArtistVariantsCanonized(Base):
     """Stores variant strings mapped to a canonical artist name"""
     __tablename__ = "artist_variants_canonized"
-    artist_variants_hash: Mapped[str] = mapped_column(String(64), primary_key=True)  # SHA256 = 64 chars
+    artist_variants_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     artist_variants_text: Mapped[str] = mapped_column(Text)
     canonical_name: Mapped[str] = mapped_column(String(255))
+    mbid = mapped_column(String(36), nullable=True)
     to_link: Mapped[bool] = mapped_column(Boolean, nullable=True)
     comment: Mapped[Optional[str]] = mapped_column(String(750))
     timestamp: Mapped[datetime] = mapped_column(
@@ -28,7 +29,7 @@ class ArtistVariantsCanonized(Base):
 
 class Scrobble(Base):
     """Represents a single play event identified by artist track and UTC time"""
-    __tablename__ = "scrobbles"
+    __tablename__ = "scrobble"
     __table_args__ = (
         UniqueConstraint(
             "artist_name", "track_title", "play_time",
@@ -36,6 +37,7 @@ class Scrobble(Base):
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     artist_name: Mapped[str] = mapped_column(String(350))
+    artist_mbid = mapped_column(String(36), nullable=True, index=True)
     album_title: Mapped[str] = mapped_column(String(350))
     track_title: Mapped[str] = mapped_column(String(350))
     play_time: Mapped[datetime] = mapped_column(
@@ -64,7 +66,7 @@ class UserCountry(Base):
     # ── surrogate PK ─────────────────────────────────────────────────────────
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     # ── dimensions ───────────────────────────────────────────────────────────
-    country_code: Mapped[str] = mapped_column(String(255), nullable=False)
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     # ── constraints / quality guards ─────────────────────────────────────────
@@ -90,5 +92,14 @@ class UserCountry(Base):
 class AsciiChar(Base):
     """Lookup table with printable non-alphanumeric ASCII characters 33–126"""
     __tablename__ = "ascii_chars"
-    ascii_code: Mapped[int]  = mapped_column(primary_key=True)
-    ascii_char: Mapped[str]  = mapped_column(String(1), unique=True, nullable=False)
+    ascii_code: Mapped[int] = mapped_column(primary_key=True)
+    ascii_char: Mapped[str] = mapped_column(String(1), unique=True, nullable=False)
+
+
+class CountryCode(Base):
+    """Lookup table with country codes, English country name and Hungarian country name"""
+    __tablename__ = "country_code"
+    iso2: Mapped[str] = mapped_column(String(2), primary_key=True, unique=True)
+    iso3: Mapped[str] = mapped_column(String(3), unique=True)
+    en_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=False)
+    hu_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=True)

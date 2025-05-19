@@ -25,17 +25,13 @@ from DB import SessionLocal
 from DB.models import (
     ArtistCountry,
     ArtistVariantsCanonized,
-    UserCountry,
-    Scrobble,
 )
 from datetime import date, datetime
 from helpers import cli
 from helpers import io
+from helpers import stats
 import json
 import logging
-
-log = logging.getLogger(__name__)
-
 import matplotlib
 
 matplotlib.use("TkAgg")
@@ -54,9 +50,8 @@ import pandas as pd
 from pathlib import Path
 import re
 import seaborn as sns
-from sqlalchemy import select, text, func
+from sqlalchemy import select
 import sys
-from typing import Optional, Tuple
 
 # %%
 # Constants & basic setup
@@ -89,70 +84,6 @@ with PALETTES_FILE.open("r", encoding="utf‑8") as fh:
 custom_colors = io.register_custom_palette("colorpalette_5", custom_palettes)
 sns.set_style("whitegrid")
 sns.set_palette(sns.color_palette(custom_colors))
-
-
-# %%
-# -------------------------------------------------------------------------------------
-#   Helper functions – timeline parsing / validation
-# -------------------------------------------------------------------------------------
-
-def _parse_date(d: str) -> Optional[pd.Timestamp]:
-    d = d.strip()
-    if not d:
-        return None
-    try:
-        return pd.Timestamp(d).normalize()
-    except ValueError as err:
-        raise ValueError(f"❌  '{d}' is not a valid date (YYYY‑MM‑DD)") from err
-
-
-def _interval_ok(start: pd.Timestamp | None, end: pd.Timestamp | None) -> None:
-    if start is None:
-        raise ValueError("Start date is required")
-    if end is not None and end < start:
-        raise ValueError("End date must be after start date")
-
-
-def _overlaps(keret: pd.DataFrame, sta: pd.Timestamp, e: pd.Timestamp | None) -> bool:
-    cond_left = keret["end_date"].isna() | (keret["end_date"] >= sta)
-    cond_right = e is None or (keret["start_date"] <= e)
-    return bool(keret[cond_left & cond_right].shape[0])
-
-
-# %%
-# ---------------------------------------------------------------------------
-#  Timeline editor
-# ---------------------------------------------------------------------------
-def edit_country_timeline() -> pd.DataFrame:
-    uc = pd.read_parquet(UC_PARQUET) if UC_PARQUET.exists() else pd.DataFrame(
-        columns=["country", "start_date", "end_date"], dtype="object")
-    print("\nEnter your country timeline (free‑text names). Blank to finish.\n")
-    if not uc.empty:
-        print(uc.to_string(index=False))
-    while True:
-        name = input("Country name  (blank = done): ").strip()
-        if not name:
-            break
-        s_in = input("   Start YYYY‑MM‑DD: ")
-        e_in = input("   End YYYY‑MM‑DD  (blank = ongoing): ")
-        try:
-            s_ts, e_ts = _parse_date(s_in), _parse_date(e_in)
-            _interval_ok(s_ts, e_ts)
-            if _overlaps(uc, s_ts, e_ts):
-                print("⚠ Overlaps existing interval – try again\n")
-                continue
-            uc.loc[len(uc)] = [name, s_ts, e_ts]
-            print("✔ added", name, s_ts.date(), "→", e_ts.date() if e_ts else "open‑ended")
-        except ValueError as e:
-            print("❌", e)
-    if uc.empty:
-        print("No intervals – leaving uc.parquet untouched.")
-        return uc
-    PQ_DIR.mkdir(parents=True, exist_ok=True)
-    uc.sort_values("start_date", inplace=True)
-    uc.to_parquet(UC_PARQUET, compression="zstd", index=False)
-    log.info("Saved timeline → %s", UC_PARQUET.relative_to(PROJECT_ROOT))
-    return uc
 
 
 # %%
@@ -200,121 +131,9 @@ def _df_from_db() -> pd.DataFrame:
     )
 
 
-def _load_ac_cache() -> pd.DataFrame:
-    """
-    Return the artist-country cache as DataFrame.
-    • If the Parquet is newer than the last DB update → read Parquet
-    • otherwise
-        – pull from DB
-        – overwrite Parquet
-    """
-    if AC_PARQUET.exists():
-        pq_mtime = AC_PARQUET.stat().st_mtime
-        with SessionLocal() as session:
-            db_mtime = session.scalar(
-                select(func.max(ArtistCountry.id))  # monotonic surrogate pk
-            ) or 0
-        if pq_mtime > db_mtime:
-            return pd.read_parquet(AC_PARQUET)
-    dataf = _df_from_db()
-    dataf.to_parquet(AC_PARQUET, index=False, compression="zstd")
-    return dataf
-
-
-def _upsert_artist_country(new_rows: list[dict]) -> None:
-    """Insert *or* enrich existing rows in a backend-agnostic way."""
-    if not new_rows:
-        return
-    with SessionLocal() as se:
-        for r in new_rows:
-            obj = (
-                se.query(ArtistCountry)
-                .filter_by(artist_name=r["artist_name"])
-                .one_or_none()
-            )
-            if obj:
-                if not obj.mbid and r["mbid"]:
-                    obj.mbid = r["mbid"]
-                if not obj.disambiguation_comment and r["disambiguation_comment"]:
-                    obj.disambiguation_comment = r["disambiguation_comment"]
-                if not obj.country and r["country"]:
-                    obj.country = r["country"]
-            else:
-                se.add(ArtistCountry(**r))
-        se.commit()
-
-
 # Syncing Parquet with DB
 df = _df_from_db()
 df.to_parquet(AC_PARQUET, index=False, compression="zstd")
-
-
-def artist_countries(series: pd.Series) -> pd.Series:
-    """
-    Vectorised ISO-country lookup with on-disk/DB cache;
-    back-fills MBID + disambiguation when available.
-    """
-    cache_df = _load_ac_cache()
-    cached = cache_df.set_index("artist_name").to_dict("index")
-    missing = [a for a in series.unique() if a not in cached]
-    new_rows = []
-    for artist in missing:
-        mb_res = mbAPI.search_artist(artist, limit=1)
-        mb_row = mb_res[0] if mb_res else {}
-        new_rows.append(
-            dict(
-                artist_name=artist,
-                country=mb_row.get("country"),
-                mbid=mb_row.get("id"),
-                disambiguation_comment=mb_row.get("disambiguation"),
-            )
-        )
-    _upsert_artist_country(new_rows)
-    # Refreshing cache after insert
-    cache_df = _load_ac_cache()
-    cached = cache_df.set_index("artist_name").country.to_dict()
-    return series.map(cached)
-
-
-def top_n_artists_by_country(adatkeret, country, n=24):
-    """
-    Return the N most-played artists for one country,
-    sorted by descending play-count.
-    """
-    (adatkeret
-     .loc[adatkeret["Country"] == country, "Artist"]
-     .value_counts()
-     .head(n)
-     )
-
-
-# %%
-# =============================================================================
-# User‑country assignment to scrobbles (interval join)
-# =============================================================================
-def load_country_timeline(path: Path) -> pd.DataFrame:
-    tl = (
-        pd.read_parquet(path)
-        .rename(columns={"country_code": "UserCountry"})
-    )
-    tl["start_date"] = pd.to_datetime(tl["start_date"]).dt.normalize()
-    tl["end_date"] = pd.to_datetime(tl["end_date"]).dt.normalize()
-    tl.sort_values("start_date", inplace=True)
-    return tl
-
-
-def assign_user_country(datafr, timeline):
-    temp = datafr.copy()
-    temp["day"] = pd.to_datetime(temp["Datetime"], unit="s").dt.normalize()
-    out = pd.merge_asof(
-        temp.sort_values("day"),
-        timeline[["start_date", "UserCountry"]],
-        left_on="day",
-        right_on="start_date",
-        direction="backward",
-    )
-    return out["UserCountry"]
-
 
 # %%
 # -------------------------------------------------------------------------------------
@@ -344,7 +163,6 @@ with SessionLocal() as sess:
         .filter(ArtistVariantsCanonized.to_link.is_(True))
         .all()
     )
-SEPARATOR = "{"
 
 
 def _split_variants(raw: str) -> list[str]:
@@ -402,14 +220,14 @@ print(artist_counts.describe())
 if UC_PARQUET.exists():
     use = cli.choose_timeline()
     if use == "e":
-        uc_df = edit_country_timeline()
+        uc_df = cli.edit_country_timeline()
     elif use == "n":
         UC_PARQUET.unlink(missing_ok=True)
-        uc_df = edit_country_timeline()
+        uc_df = cli.edit_country_timeline()
     else:                           # "y"
         uc_df = pd.read_parquet(UC_PARQUET)
 else:
-    uc_df = edit_country_timeline()
+    uc_df = cli.edit_country_timeline()
 
 # %%
 # -------------------------------------------------------------------------------------
@@ -454,8 +272,8 @@ plt.tight_layout()
 # -------------------------------------------------------------------------------------
 #   STEP 6 – user-country analytics
 # -------------------------------------------------------------------------------------
-uc_df = load_country_timeline(UC_PARQUET)
-data["UserCountry"] = assign_user_country(data, uc_df)
+uc_df = io.load_country_timeline(UC_PARQUET)
+data["UserCountry"] = stats.assign_user_country(data, uc_df)
 user_country_count = data.UserCountry.value_counts().sort_values(ascending=False).to_frame()[:10]
 user_country_count = user_country_count.rename(columns={"UserCountry": "count"})
 plt.figure(figsize=(12, 6))

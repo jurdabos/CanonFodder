@@ -11,9 +11,10 @@ if '__file__' in globals():
     BASE_DIR = Path(__file__).resolve().parent
 else:
     BASE_DIR = Path.cwd()
-CSV_DIR = BASE_DIR / "CSV"
+CSV_DIR = BASE_DIR
 CSV_FILE = CSV_DIR / "T_ORSZAG.csv"
-PARQUET_DIR = BASE_DIR / "PQ"
+PROJECT_ROOT = BASE_DIR.parent
+PARQUET_DIR = PROJECT_ROOT / "PQ"
 PARQUET_OUT = PARQUET_DIR / "c.parquet"
 PARQUET_DIR.mkdir(parents=True, exist_ok=True)
 
