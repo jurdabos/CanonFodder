@@ -715,7 +715,6 @@ class CliInterface:
                 error_msg = error_msg[:w-11] + "..."
             self.stdscr.addstr(7, 4, error_msg, curses.color_pair(4))
             option_start_y = 9
-        
         options = [
             "1. Data Gathering - Fetch new scrobbles from Last.fm",
             "2. User Input / Canonization - Clean and normalize artist data",
@@ -723,10 +722,8 @@ class CliInterface:
             "4. FULL REFRESH - Drop & re-sync ALL scrobbles",
             "5. Exit"
         ]
-    
         for i, option in enumerate(options):
             self._animated_type(option_start_y + i, 4, option, color_pair=1, delay=0.01)
-
         # Draw instructions
         instructions = "Press a number key to select an option..."
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)

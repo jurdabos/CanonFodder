@@ -6,7 +6,7 @@ Run it as a Jupyter-style cells
 Per 2025‑04‑30
 -------------------------------------------------
 * **User‑country timeline stores ISO-2 country codes.
-* **Artist‑country lookup first hits the local *ArtistCountry* table or
+* **Artist‑country lookup first hits the local *ArtistInfo* table or
   `PQ/ac.parquet`**, then falls back to MusicBrainz if needed, and rewrites the
   cache + parquet on the fly.
 * Adds a fast, vectorised join that assigns a ``UserCountry`` column to every
@@ -23,7 +23,7 @@ import argparse
 load_dotenv()
 from DB import SessionLocal
 from DB.models import (
-    ArtistCountry,
+    ArtistInfo,
     ArtistVariantsCanonized,
 )
 from datetime import date, datetime
@@ -112,9 +112,9 @@ def _country_for_series(series: pd.Series, cache: dict[str, str | None]) -> pd.S
 
 
 def _df_from_db() -> pd.DataFrame:
-    """Pull the entire artistcountry table into a DataFrame."""
+    """Pull the entire ArtistInfo table into a DataFrame."""
     with SessionLocal() as sessio:
-        rows = sessio.scalars(select(ArtistCountry)).all()
+        rows = sessio.scalars(select(ArtistInfo)).all()
     if not rows:
         return pd.DataFrame(columns=AC_COLS)
     return pd.DataFrame(
@@ -238,9 +238,9 @@ ac_cache = (
     .set_index("artist_name")["country"]
     .to_dict()
 )
-data["ArtistCountry"] = _country_for_series(data["Artist"], ac_cache)
-country_count = data.ArtistCountry.value_counts().sort_values(ascending=False).to_frame()[:15]
-country_count = country_count.rename(columns={"ArtistCountry": "count"})
+data["ArtistInfo"] = _country_for_series(data["Artist"], ac_cache)
+country_count = data.ArtistInfo.value_counts().sort_values(ascending=False).to_frame()[:15]
+country_count = country_count.rename(columns={"ArtistInfo": "count"})
 plt.figure(figsize=(12, 6))
 ax = sns.barplot(
     x=country_count.index,
@@ -264,7 +264,7 @@ ax.set_xticks(range(len(country_count)))
 ax.set_xticklabels(country_count.index, rotation=45, ha="right", fontsize=12)
 ax.grid(True, axis="y", linestyle="--", alpha=0.7)
 ax.set_title("Top 15 Countries", fontsize=16)
-ax.set_xlabel("ArtistCountry", fontsize=14)
+ax.set_xlabel("ArtistInfo", fontsize=14)
 ax.set_ylabel("Count", fontsize=14)
 plt.tight_layout()
 

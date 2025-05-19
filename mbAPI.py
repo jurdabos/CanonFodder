@@ -227,6 +227,69 @@ def search_artist(
     )["artist-list"]
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Public high-level helper
+# ───────────────────────────────────────────────────────────────────────────
+def get_complete_artist_info(identifier: str) -> dict[str, Any]:
+    """
+    Return a fully-fledged artist record.
+    Parameters
+    ----------
+    identifier : str
+        Either a MusicBrainz UUID (mbid) **or** a human-readable artist name.
+    Returns
+    -------
+    dict
+        {
+            "id": <mbid>,
+            "name": <str>,
+            "country": <str | None>,
+            "aliases": [<str>, …],
+            "disambiguation": <str | None>,
+        }
+    """
+    init()  # ensure client and DB are ready
+    # ── 1) decide whether this is an MBID or a plain name ────────────────
+    is_mbid = bool(re.fullmatch(r"[0-9a-fA-F-]{36}", identifier))
+    # ── 2) hit local cache as fast as possible ────────────────────────────
+    if _session_maker is not None:
+        with _get_session() as sess:
+            if is_mbid:
+                cached = sess.get(MBArtistCache, identifier)
+            else:
+                cached = (
+                    sess.query(MBArtistCache)
+                    .filter(MBArtistCache.artist_name.ilike(identifier))
+                    .order_by(MBArtistCache.fetched_at.desc())
+                    .first()
+                )
+            if cached and cached.country:  # basic sanity
+                return {
+                    "id": cached.mbid,
+                    "name": cached.artist_name,
+                    "country": cached.country,
+                    "aliases": [],  # cache table has no aliases yet
+                    "disambiguation": cached.disambiguation,
+                }
+    # ── 3) remote calls ──────────────────────────────────────────────────
+    if is_mbid:
+        data = lookup_artist(identifier)
+    else:
+        mbid = lookup_mb_for(identifier)
+        if mbid is None:  # no MB hit ‑ still persist minimal row
+            _cache_artist({"name": identifier})
+            return {
+                "id": None,
+                "name": identifier,
+                "country": None,
+                "aliases": [],
+                "disambiguation": None,
+            }
+        data = lookup_artist(mbid)
+    # data has already been cached by lookup_artist()
+    return data
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

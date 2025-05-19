@@ -2,7 +2,7 @@
 Supplies small statistical helpers for feature selection and outlier checks.
 """
 from DB import SessionLocal
-from DB.models import ArtistCountry
+from DB.models import ArtistInfo
 from .io import PQ_DIR
 import mbAPI
 import numpy as np
@@ -16,9 +16,9 @@ AC_COLS = ["artist_name", "country", "mbid", "disambiguation_comment"]
 
 
 def _df_from_db() -> pd.DataFrame:
-    """Pull the entire artistcountry table into a DataFrame."""
+    """Pull the entire artist_info table into a DataFrame."""
     with SessionLocal() as sessio:
-        rows = sessio.scalars(select(ArtistCountry)).all()
+        rows = sessio.scalars(select(ArtistInfo)).all()
     if not rows:
         return pd.DataFrame(columns=AC_COLS)
     return pd.DataFrame(
@@ -47,7 +47,7 @@ def _load_ac_cache() -> pd.DataFrame:
         pq_mtime = AC_PARQUET.stat().st_mtime
         with SessionLocal() as session:
             db_mtime = session.scalar(
-                select(func.max(ArtistCountry.id))  # monotonic surrogate pk
+                select(func.max(ArtistInfo.id))  # monotonic surrogate pk
             ) or 0
         if pq_mtime > db_mtime:
             return pd.read_parquet(AC_PARQUET)
@@ -63,7 +63,7 @@ def _upsert_artist_country(new_rows: list[dict]) -> None:
     with SessionLocal() as se:
         for r in new_rows:
             obj = (
-                se.query(ArtistCountry)
+                se.query(ArtistInfo)
                 .filter_by(artist_name=r["artist_name"])
                 .one_or_none()
             )
@@ -75,7 +75,7 @@ def _upsert_artist_country(new_rows: list[dict]) -> None:
                 if not obj.country and r["country"]:
                     obj.country = r["country"]
             else:
-                se.add(ArtistCountry(**r))
+                se.add(ArtistInfo(**r))
         se.commit()
 
 

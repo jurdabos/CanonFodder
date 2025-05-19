@@ -2,15 +2,29 @@
 Defines all SQLAlchemy ORM ML used by CanonFodder.
 """
 from __future__ import annotations
-from datetime import date, datetime, UTC
+from datetime import date, datetime
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, func, String, Text, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from typing import Optional
 
 
 class Base(DeclarativeBase):
     """Serves as the common declarative base so metadata stays centralised"""
     pass
+
+
+class ArtistInfo(Base):
+    """Caches MusicBrainz artist information including country mappings and aliases"""
+    __tablename__ = "artist_info"
+    __table_args__ = (
+        UniqueConstraint("id", name="uq_artist_info"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    artist_name: Mapped[str] = mapped_column(String(750), index=True)
+    mbid: Mapped[Optional[str]] = mapped_column(String(36), unique=True, nullable=True)
+    disambiguation_comment: Mapped[Optional[str]] = mapped_column(String(558))
+    aliases: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(255))
 
 
 class ArtistVariantsCanonized(Base):
@@ -25,6 +39,22 @@ class ArtistVariantsCanonized(Base):
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class AsciiChar(Base):
+    """Lookup table with printable non-alphanumeric ASCII characters 33–126"""
+    __tablename__ = "ascii_chars"
+    ascii_code: Mapped[int] = mapped_column(primary_key=True)
+    ascii_char: Mapped[str] = mapped_column(String(1), unique=True, nullable=False)
+
+
+class CountryCode(Base):
+    """Lookup table with country codes, English country name and Hungarian country name"""
+    __tablename__ = "country_code"
+    iso2: Mapped[str] = mapped_column(String(2), primary_key=True, unique=True)
+    iso3: Mapped[str] = mapped_column(String(3), unique=True)
+    en_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=False)
+    hu_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=True)
 
 
 class Scrobble(Base):
@@ -42,19 +72,6 @@ class Scrobble(Base):
     track_title: Mapped[str] = mapped_column(String(350))
     play_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), index=True)
-
-
-class ArtistCountry(Base):
-    """Caches MusicBrainz artist → country mappings and optional MBID"""
-    __tablename__ = "artistcountry"
-    __table_args__ = (
-        UniqueConstraint("id", name="uq_artistcountry"),
-    )
-    id: Mapped[int] = mapped_column(primary_key=True)
-    artist_name: Mapped[str] = mapped_column(String(750), index=True)
-    mbid: Mapped[Optional[str]] = mapped_column(String(36), unique=True, nullable=True)
-    disambiguation_comment: Mapped[Optional[str]] = mapped_column(String(558))
-    country: Mapped[Optional[str]] = mapped_column(String(255))
 
 
 class UserCountry(Base):
@@ -87,19 +104,3 @@ class UserCountry(Base):
     def is_current(self) -> bool:
         """Returns true when end_date is null"""
         return self.end_date is None
-
-
-class AsciiChar(Base):
-    """Lookup table with printable non-alphanumeric ASCII characters 33–126"""
-    __tablename__ = "ascii_chars"
-    ascii_code: Mapped[int] = mapped_column(primary_key=True)
-    ascii_char: Mapped[str] = mapped_column(String(1), unique=True, nullable=False)
-
-
-class CountryCode(Base):
-    """Lookup table with country codes, English country name and Hungarian country name"""
-    __tablename__ = "country_code"
-    iso2: Mapped[str] = mapped_column(String(2), primary_key=True, unique=True)
-    iso3: Mapped[str] = mapped_column(String(3), unique=True)
-    en_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=False)
-    hu_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=True)

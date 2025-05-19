@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 import mbAPI
 from DB import SessionLocal
-from DB.models import ArtistVariantsCanonized, ArtistCountry
+from DB.models import ArtistVariantsCanonized, ArtistInfo
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +36,11 @@ def push_aliases(dry_run: bool = False) -> None:
         variants = [v for v in _variants(row) if v != row.canonical_name]
         if not variants:
             continue
-        # try MBID from ArtistCountry first – fallback to search
+        # try MBID from ArtistInfo first – fallback to search
         mbid = (
             SessionLocal()
-            .scalar(select(ArtistCountry.mbid)
-                    .where(ArtistCountry.artist_name == row.canonical_name))
+            .scalar(select(ArtistInfo.mbid)
+                    .where(ArtistInfo.artist_name == row.canonical_name))
         )
         if not mbid:
             res = mbAPI.search_artist(row.canonical_name, limit=1)

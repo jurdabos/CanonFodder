@@ -11,7 +11,7 @@ from mbAPI import lookup_mb_for
 load_dotenv(".env")
 from DB import get_session as _get_session, get_engine as _get_engine
 from datetime import datetime, UTC
-from .models import ArtistCountry, ArtistVariantsCanonized, AsciiChar, Scrobble
+from .models import ArtistInfo, ArtistVariantsCanonized, AsciiChar, Scrobble
 import numpy as np
 import pandas as pd
 import re
@@ -21,7 +21,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
-
+import time
 
 _COLUMN_ALIASES = {
     "Artist": "artist_name",
@@ -172,33 +172,6 @@ def bulk_insert_scrobbles_to_mysql(df, mysqlengine):
     bulk_insert_scrobbles(df, mysqlengine)
 
 
-def bulk_upsert_artist_country(session: Session, rows: list[dict]):
-    """
-    Insert many ArtistCountry rows; keep the first row per MBID.
-    Works on SQLite, Postgres and MySQL 8+ without per-call branching.
-    """
-    dialect = session.bind.dialect.name          # 'sqlite' | 'postgresql' | 'mysql'
-    if dialect == "sqlite":
-        stmt = (
-            sqlite_insert(ArtistCountry)
-            .values(rows)
-            .on_conflict_do_nothing(index_elements=["mbid"])
-        )
-    elif dialect == "postgresql":
-        stmt = (
-            pg_insert(ArtistCountry)
-            .values(rows)
-            .on_conflict_do_nothing(index_elements=["mbid"])
-        )
-    elif dialect == "mysql":
-        # MySQL 8: INSERT IGNORE … keeps the first row, silently discards dups
-        stmt = mysql_insert(ArtistCountry).values(rows).prefix_with("IGNORE")
-    else:                                         # fallback: do the safe thing
-        seen = {r.mbid for r in session.query(ArtistCountry.mbid)}
-        stmt = insert(ArtistCountry).values([r for r in rows if r["mbid"] not in seen])
-    session.execute(stmt)
-
-
 def insert_ignore(table, backend: str) -> Insert:
     """Return an INSERT that silently skips rows violating UNIQUE / PK."""
     if backend.startswith("mysql"):
@@ -220,6 +193,130 @@ def load_scrobble_table_from_db_to_df(engine) -> tuple[pd.DataFrame | None, str 
         return None, None
     df = pd.read_sql_table(table_name, engine)
     return df, table_name
+
+
+def populate_artist_info_from_scrobbles(session=None):
+    """
+    Populate the ArtistInfo table with data from MusicBrainz based on artists in Scrobble table
+    This function:
+    1. Gets all unique artists from the Scrobble table (using mbid if available, name otherwise)
+    2. For each artist, checks if they exist in ArtistInfo
+    3. If not, creates a new entry with data from MusicBrainz
+    4. If yes but missing data, updates with data from MusicBrainz
+    Returns:
+        tuple: (total_processed, new_entries, updated_entries)
+    """
+    from mbAPI import get_complete_artist_info
+    if session is None:
+        from DB import get_session
+        session = get_session()
+    # Getting all unique artists with MBIDs from Scrobble table
+    artists_with_mbid = session.query(
+        Scrobble.artist_mbid, 
+        Scrobble.artist_name
+    ).filter(
+        Scrobble.artist_mbid.isnot(None)
+    ).group_by(
+        Scrobble.artist_mbid
+    ).all()
+    # Getting all unique artist names without MBIDs
+    artists_without_mbid = session.query(
+        Scrobble.artist_name
+    ).filter(
+        Scrobble.artist_mbid.is_(None)
+    ).group_by(
+        Scrobble.artist_name
+    ).all()
+    total_processed = 0
+    new_entries = 0
+    updated_entries = 0
+    # Processing artists with MBIDs
+    for mbid, name in artists_with_mbid:
+        total_processed += 1
+        # Checking if artist exists in ArtistInfo
+        artist_info = session.query(ArtistInfo).filter(ArtistInfo.mbid == mbid).first()
+        if artist_info:
+            # Artist exists, checking if any data is missing
+            updated = False
+            if artist_info.country is None or artist_info.disambiguation_comment is None or artist_info.aliases is None:
+                # Getting complete info from MusicBrainz
+                info = get_complete_artist_info(artist_mbid=mbid, artist_name=name)
+                # Updating missing fields
+                if artist_info.country is None and info['country']:
+                    artist_info.country = info['country']
+                    updated = True
+                if artist_info.disambiguation_comment is None and info['disambiguation_comment']:
+                    artist_info.disambiguation_comment = info['disambiguation_comment']
+                    updated = True
+                if artist_info.aliases is None and info['aliases']:
+                    artist_info.aliases = info['aliases']
+                    updated = True
+            if updated:
+                updated_entries += 1
+        else:
+            # Artist doesn't exist; creating new entry
+            info = get_complete_artist_info(artist_mbid=mbid, artist_name=name)
+            new_artist = ArtistInfo(
+                artist_name=info['artist_name'] or name,
+                mbid=info['mbid'],
+                country=info['country'],
+                disambiguation_comment=info['disambiguation_comment'],
+                aliases=info['aliases']
+            )
+            session.add(new_artist)
+            new_entries += 1
+        # Committing every 10 records to avoid long transactions
+        if total_processed % 10 == 0:
+            session.commit()
+            # Rate limit to avoid overwhelming MusicBrainz API
+            time.sleep(1)
+    # Processing artists without MBIDs
+    for (name,) in artists_without_mbid:
+        total_processed += 1
+        # Checking if artist exists in ArtistInfo by name
+        artist_info = session.query(ArtistInfo).filter(ArtistInfo.artist_name == name).first()
+        if artist_info:
+            # Artist exists; checking if any data is missing
+            updated = False
+            if artist_info.country is None or artist_info.disambiguation_comment is None or artist_info.aliases is None:
+                # Getting complete info from MusicBrainz
+                info = get_complete_artist_info(artist_name=name)
+                # Updating missing fields
+                if artist_info.country is None and info['country']:
+                    artist_info.country = info['country']
+                    updated = True
+                if artist_info.disambiguation_comment is None and info['disambiguation_comment']:
+                    artist_info.disambiguation_comment = info['disambiguation_comment']
+                    updated = True
+                if artist_info.aliases is None and info['aliases']:
+                    artist_info.aliases = info['aliases']
+                    updated = True
+                # If we found an MBID and it's not set, we update it
+                if info['mbid'] and not artist_info.mbid:
+                    artist_info.mbid = info['mbid']
+                    updated = True
+            if updated:
+                updated_entries += 1
+        else:
+            # Artist doesn't exist; creating new entry
+            info = get_complete_artist_info(artist_name=name)
+            new_artist = ArtistInfo(
+                artist_name=info['artist_name'] or name,
+                mbid=info['mbid'],
+                country=info['country'],
+                disambiguation_comment=info['disambiguation_comment'],
+                aliases=info['aliases']
+            )
+            session.add(new_artist)
+            new_entries += 1
+        # Committing every 10 records to avoid long transactions
+        if total_processed % 10 == 0:
+            session.commit()
+            # Rate limit to avoid overwhelming MusicBrainz API
+            time.sleep(1)
+    # Final commit
+    session.commit()
+    return total_processed, new_entries, updated_entries
 
 
 def save_group(signature: str, canonical: str):

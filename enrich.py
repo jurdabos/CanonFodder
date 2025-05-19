@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from DB import engine, SessionLocal  # noqa: I202
-from DB.models import ArtistCountry, Scrobble
+from DB.models import ArtistInfo, Scrobble
 from DB.ops import insert_ignore
 import asyncio
 from corefunc import llm
@@ -28,7 +28,7 @@ def enrich_artist_country(*, batch: int = 100) -> None:
         unknown_q = (
             select(Scrobble.artist_name, Scrobble.artist_mbid)
             .distinct()
-            .where(~Scrobble.artist_name.in_(select(ArtistCountry.artist_name)))
+            .where(~Scrobble.artist_name.in_(select(ArtistInfo.artist_name)))
         )
         to_process = list(s.execute(unknown_q))
     for off in range(0, len(to_process), batch):
@@ -47,7 +47,7 @@ def enrich_artist_country(*, batch: int = 100) -> None:
             else:  # no network
                 ctry = dis = None
             rows.append(
-                ArtistCountry(
+                ArtistInfo(
                     artist_name=name,
                     mbid=mbid,
                     country=ctry,
@@ -56,7 +56,7 @@ def enrich_artist_country(*, batch: int = 100) -> None:
             )
         if not rows:
             continue
-        stmt = insert_ignore(ArtistCountry.__table__, backend)
+        stmt = insert_ignore(ArtistInfo.__table__, backend)
         payload = [r.__dict__ | {"id": None} for r in rows]  # id is autoincr
         with SessionLocal() as s:
             s.execute(stmt, payload)

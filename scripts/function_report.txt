@@ -50,7 +50,7 @@ DB\models.py
     Base
     ArtistVariantsCanonized
     Scrobble
-    ArtistCountry
+    ArtistInfo
     UserCountry
     AsciiChar
     CountryCode

@@ -7,7 +7,7 @@ load_dotenv()
 from datetime import datetime, UTC
 from DB import get_session as _get_session
 
-from DB.models import ArtistVariantsCanonized, ArtistCountry
+from DB.models import ArtistVariantsCanonized, ArtistInfo
 from DB import SessionLocal
 import getpass
 import hashlib
