@@ -4,7 +4,6 @@ A hybrid CLI/graphical approach with animated typing and steampunk-inspired aest
 The application maintains all functionality of the previous GUI while presenting
 a more console-like experience.
 """
-
 from __future__ import annotations
 import os
 import sys
@@ -15,21 +14,51 @@ import logging
 import curses
 import locale
 from pathlib import Path
-from typing import Callable
+from typing import Protocol, Optional
 import argparse
 import platform
 import signal
 from sqlalchemy import delete
-from dotenv import load_dotenv
+
+
+# ────────────────────────────────────────────────────────────────
+# Type definitions
+# ────────────────────────────────────────────────────────────────
+class ProgressCallback(Protocol):
+    """Protocol for progress callback functions."""
+
+    def __call__(self, task: str, percentage: float, message: Optional[str] = None) -> None:
+        """
+        Report progress of a task.
+        Parameters
+        ----------
+        task : str
+            Name of the current task
+        percentage : float
+            Progress percentage (0-100)
+        message : str, optional
+            Optional status message
+        """
+        ...
+
+
+def null_progress_callback(task: str, percentage: float, message: Optional[str] = None) -> None:
+    """No-op progress callback for when no callback is provided."""
+    pass
+
 
 # ────────────────────────────────────────────────────────────────
 # side-effect imports that need to run once at start-up
 # ────────────────────────────────────────────────────────────────
+from dotenv import load_dotenv
 load_dotenv()
-
 import lfAPI  # noqa: E402
-from DB import engine  # noqa: E402
-from DB.models import Base  # noqa: E402
+import mbAPI  # noqa: E402
+from DB import engine, SessionLocal  # noqa: E402
+from DB.models import Base, ArtistInfo  # noqa: E402
+from DB.ops import populate_artist_info_from_scrobbles
+from DB.models import ArtistInfo
+from sqlalchemy import select, func, text
 from corefunc import dataprofiler as dp  # noqa: E402
 from corefunc import canonizer as cz  # noqa: E402
 from helpers.cli import choose_lastfm_user, unify_artist_names_cli  # CLI integration  # noqa: E402
@@ -117,7 +146,7 @@ def init_colors():
 
 def run_data_gathering_workflow(
         username: str = None,
-        progress_callback: Callable[[str, float, str], None] = None
+        progress_callback: Optional[ProgressCallback] = None
 ) -> None:
     """
     Run the standard data gathering workflow.
@@ -125,12 +154,15 @@ def run_data_gathering_workflow(
     ----------
     username : str, optional
         Last.fm username to fetch data for. If None, will prompt for input.
-    progress_callback : callable, optional
+    progress_callback : ProgressCallback, optional
         Callback function for progress updates, receiving:
             task_name: str - Current task name
             percentage: float - Progress percentage (0-100)
             message: str - Optional status message
     """
+    # Use null callback if none provided
+    if progress_callback is None:
+        progress_callback = null_progress_callback
     # If no username provided, use CLI prompt (only in CLI mode)
     if username is None:
         logging.basicConfig(level=logging.INFO,
@@ -138,7 +170,7 @@ def run_data_gathering_workflow(
         username = choose_lastfm_user()
         if not username:
             print("No username provided, exiting.")
-            return
+            return None
     try:
         import os
         import json
@@ -180,7 +212,6 @@ def run_data_gathering_workflow(
         HERE = Path(__file__).resolve().parent
         JSON_DIR = HERE / "JSON"
         PALETTES_FILE = JSON_DIR / "palettes.json"
-        os.environ.pop("FLASK_APP", None)
         if progress_callback:
             progress_callback("Initializing", 10, "Loading color palettes")
         else:
@@ -225,18 +256,21 @@ def run_data_gathering_workflow(
 
         # Fetch scrobbles with progress updates
         class ProgressTracker:
-            def __init__(self):
+            def __init__(self, callback: ProgressCallback):
                 self.total_pages = 0
                 self.current_page = 0
+                self.callback = callback
 
             def update(self, current_page, total_pages=None):
                 if total_pages is not None:
                     self.total_pages = total_pages
                 self.current_page = current_page
-                if self.total_pages > 0 and progress_callback:
+                if self.total_pages > 0:
                     percentage = 30 + (self.current_page / self.total_pages) * 40
                     msg = f"Page {self.current_page}/{self.total_pages}"
-                    progress_callback("Fetching from Last.fm API", percentage, msg)
+                    self.callback("Fetching from Last.fm API", percentage, msg)
+
+        tracker = ProgressTracker(progress_callback)
 
         df_recent = lfAPI.fetch_scrobbles_since(username, latest_ts)
         # ─── API stage ──────────────
@@ -278,11 +312,15 @@ def run_data_gathering_workflow(
             progress_callback("Storing results", 90, "Updating statistics")
         else:
             print("\nRunning data profiling...")
-        # ascii table stats
-        seed_ascii_chars(engine)
-        logging.info(ascii_freq(engine))
+        progress_callback("Enriching", 92, "Populating artist metadata…")
+        try:
+            populate_artist_info_from_scrobbles(progress_cb=progress_callback)
+        except Exception as exc:
+            progress_callback("Warning", 92, f"Artist enrichment failed: {exc}")
+        progress_callback("Complete", 94, "Full refresh done")
+
         if progress_callback:
-            progress_callback("Finalizing", 90, "Saving to parquet files")
+            progress_callback("Finalizing", 96, "Saving to parquet files")
         # Save to single consolidated parquet file
         dump_parquet(df_recent, constant=True)
         # Run data profiling
@@ -342,6 +380,15 @@ def get_db_statistics():
           ROUND(COUNT(CASE WHEN artist_mbid IS NOT NULL AND TRIM(artist_mbid) != '' THEN 1 END) / COUNT(*) * 100, 2) AS non_null_percentage,
           ROUND(COUNT(CASE WHEN artist_mbid IS NULL OR TRIM(artist_mbid) = '' THEN 1 END) / COUNT(*) * 100, 2) AS null_percentage
         FROM scrobble
+        UNION ALL
+        SELECT
+          'artist_aliases' AS column_name,
+          COUNT(*) AS total_rows,
+          COUNT(CASE WHEN aliases IS NOT NULL AND TRIM(aliases) != '' THEN 1 END) AS non_null_count,
+          COUNT(CASE WHEN aliases IS NULL OR TRIM(aliases) = '' THEN 1 END) AS null_count,
+          ROUND(COUNT(CASE WHEN aliases IS NOT NULL AND TRIM(aliases) != '' THEN 1 END) / COUNT(*) * 100, 2) AS non_null_percentage,
+          ROUND(COUNT(CASE WHEN aliases IS NULL OR TRIM(aliases) = '' THEN 1 END) / COUNT(*) * 100, 2) AS null_percentage
+        FROM artist_info
         UNION ALL
         SELECT
           'album_title',
@@ -685,11 +732,9 @@ class CliInterface:
                 ]
                 header_row = " ".join(headers)
                 self.stdscr.addstr(8, 4, header_row, curses.color_pair(2) | curses.A_BOLD)
-                
-                # Add a line separator
+                # Adding a line separator
                 self.stdscr.addstr(9, 4, "─" * (len(header_row)), curses.color_pair(2))
-                
-                # Display each row of statistics
+                # Displaying each row of statistics
                 for i, row in db_stats.iterrows():
                     if i < 5:  # Limit to 5 rows to save space
                         row_text = (
@@ -701,8 +746,6 @@ class CliInterface:
                             f"{row['null_percentage']:>8.2f}"
                         )
                         self.stdscr.addstr(10 + i, 4, row_text, curses.color_pair(1))
-                
-                # Add spacing after the table
                 option_start_y = 16
             else:
                 # If no statistics available, display a message
@@ -720,27 +763,24 @@ class CliInterface:
             "2. User Input / Canonization - Clean and normalize artist data",
             "3. Statistics & Visualizations - View insights and reports",
             "4. FULL REFRESH - Drop & re-sync ALL scrobbles",
-            "5. Exit"
+            "5. Refresh Artist Aliases - Update all MusicBrainz aliases",
+            "6. Exit"
         ]
         for i, option in enumerate(options):
             self._animated_type(option_start_y + i, 4, option, color_pair=1, delay=0.01)
         # Draw instructions
         instructions = "Press a number key to select an option..."
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
-
         # Bottom border
         self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
-
         # Handle menu selection
         while True:
             # Highlight the menu options to clarify selection
             for i, option in enumerate(options):
                 self.stdscr.addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
             self.stdscr.refresh()
-
             c = self.stdscr.getch()
-
             if c == ord('1'):
                 self._run_data_gathering()
                 return
@@ -753,7 +793,10 @@ class CliInterface:
             elif c == ord('4'):  # ← flush + refetch
                 self._run_full_refresh();
                 return
-            elif c == ord('5') or c in (ord('q'), 27):
+            elif c == ord('5'):  # ← refresh aliases
+                self._run_aliases_refresh();
+                return
+            elif c == ord('6') or c in (ord('q'), 27):
                 return
 
     def _show_progress_screen(self, title):
@@ -776,30 +819,41 @@ class CliInterface:
         self.stdscr.addstr(10, 2, "Status: Starting up...", curses.color_pair(1))
         self.stdscr.refresh()
 
-        # Return the progress update function to be used as a callback
-        def update_progress(task, percentage, message=None):
-            # Update task name
-            self.stdscr.addstr(4, 2, " " * (w - 4))  # Clear the line
-            self.stdscr.addstr(4, 2, f"Task: {task}", curses.color_pair(1))
-            # Update progress bar
-            filled_width = int((percentage / 100) * bar_width)
-            self.stdscr.addstr(7, 3, "█" * filled_width + " " * (bar_width - filled_width), curses.color_pair(3))
-            # Show percentage
-            percent_str = f" {percentage:.1f}% "
-            percent_pos = min(3 + filled_width - len(percent_str) // 2, w - len(percent_str) - 3)
-            if percent_pos < 3:
-                percent_pos = 3
-            self.stdscr.addstr(7, percent_pos, percent_str, curses.color_pair(7))
-            # Update status message
-            if message:
-                self.stdscr.addstr(10, 2, " " * (w - 4))  # Clear the line
-                status_text = f"Status: {message}"
-                # Truncate if too long
-                if len(status_text) > w - 4:
-                    status_text = status_text[:w - 7] + "..."
-                self.stdscr.addstr(10, 2, status_text, curses.color_pair(1))
-            self.stdscr.refresh()
-        return update_progress
+        # Return a proper progress callback class instance
+        class CursesProgressCallback:
+            def __init__(self, stdscr, width, bar_width):
+                self.stdscr = stdscr
+                self.width = width
+                self.bar_width = bar_width
+                
+            def __call__(self, task: str, percentage: float, message: Optional[str] = None) -> None:
+                # Update task name
+                self.stdscr.addstr(4, 2, " " * (self.width - 4))  # Clear the line
+                self.stdscr.addstr(4, 2, f"Task: {task}", curses.color_pair(1))
+                
+                # Update progress bar
+                filled_width = int((percentage / 100) * self.bar_width)
+                self.stdscr.addstr(7, 3, "█" * filled_width + " " * (self.bar_width - filled_width), curses.color_pair(3))
+                
+                # Show percentage
+                percent_str = f" {percentage:.1f}% "
+                percent_pos = min(3 + filled_width - len(percent_str) // 2, self.width - len(percent_str) - 3)
+                if percent_pos < 3:
+                    percent_pos = 3
+                self.stdscr.addstr(7, percent_pos, percent_str, curses.color_pair(7))
+                
+                # Update status message
+                if message:
+                    self.stdscr.addstr(10, 2, " " * (self.width - 4))  # Clear the line
+                    status_text = f"Status: {message}"
+                    # Truncate if too long
+                    if len(status_text) > self.width - 4:
+                        status_text = status_text[:self.width - 7] + "..."
+                    self.stdscr.addstr(10, 2, status_text, curses.color_pair(1))
+                
+                self.stdscr.refresh()
+                
+        return CursesProgressCallback(self.stdscr, w, bar_width)
 
     def _run_data_gathering(self):
         """Run the data gathering workflow with progress updates."""
@@ -874,6 +928,97 @@ class CliInterface:
         self.stdscr.getch()
         # Return to main menu
         self._show_main_menu()
+        
+    def _run_aliases_refresh(self):
+        """Refresh artist aliases from MusicBrainz."""
+        progress_callback = self._show_progress_screen("REFRESH ARTIST ALIASES")
+        
+        def run_task():
+            try:
+                progress_callback("Initializing", 5, "Checking database...")
+                
+                # Get count of artists with MBIDs
+                
+                with SessionLocal() as session:
+                    total_artists = session.execute(
+                        select(func.count()).where(ArtistInfo.mbid.is_not(None))
+                    ).scalar_one()
+                    
+                    progress_callback("Scanning", 10, f"Found {total_artists} artists with MBIDs")
+                    
+                    # Get all artists with MBIDs
+                    artists = session.execute(
+                        select(ArtistInfo).where(ArtistInfo.mbid.is_not(None))
+                    ).scalars().all()
+                    
+                    if not artists:
+                        progress_callback("Complete", 100, "No artists with MBIDs found")
+                        return
+                    
+                    # Process each artist
+                    success_count = 0
+                    error_count = 0
+                    
+                    for i, artist in enumerate(artists):
+                        percentage = 10 + (i / total_artists) * 85
+                        progress_callback("Updating", percentage, f"Processing {artist.artist_name} ({i+1}/{total_artists})")
+                        
+                        try:
+                            # Get aliases from MusicBrainz
+                            aliases = mbAPI.get_aliases(artist.mbid)
+                            
+                            # Update artist record
+                            if aliases:
+                                aliases_str = ','.join(aliases)
+                                artist.aliases = aliases_str
+                                session.commit()
+                                success_count += 1
+                            else:
+                                # Empty string to mark as processed
+                                artist.aliases = ""
+                                session.commit()
+                        except Exception as e:
+                            error_count += 1
+                            progress_callback("Error", percentage, f"Error with {artist.artist_name}: {str(e)}")
+                    
+                    # Show completion message
+                    progress_callback("Complete", 95, f"Updated {success_count} artists ({error_count} errors)")
+                    
+                    # Get final stats
+                    non_empty_count = session.execute(
+                        select(func.count()).where(
+                            ArtistInfo.aliases.is_not(None),
+                            ArtistInfo.aliases != ""
+                        )
+                    ).scalar_one()
+                    
+                    progress_callback("Complete", 100, f"Done! {non_empty_count} artists now have aliases")
+                    
+            except Exception as e:
+                progress_callback("Error", 100, f"Operation failed: {str(e)}")
+        
+        # Run the task in a thread
+        thread = threading.Thread(target=run_task)
+        thread.daemon = True
+        thread.start()
+        
+        # Wait for the thread to complete
+        while thread.is_alive():
+            c = self.stdscr.getch()
+            if c == 27:  # ESC key
+                h, w = self.stdscr.getmaxyx()
+                self.stdscr.addstr(12, 2, "Attempting to cancel operation...",
+                               curses.color_pair(4) | curses.A_BOLD)
+                self.stdscr.refresh()
+                thread.join(timeout=0.1)
+        
+        # Wait for keypress
+        self.stdscr.addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
+        self.stdscr.refresh()
+        self.stdscr.getch()
+        
+        # Return to main menu
+        self._show_main_menu()
 
     def _run_statistics(self):
         """Placeholder for statistics workflow."""
@@ -914,7 +1059,7 @@ class CliInterface:
         def task():
             from DB import SessionLocal
             from DB.models import Scrobble
-            from sqlalchemy import text, inspect
+            from sqlalchemy import inspect
             # 1) Hard-delete every row (TRUNCATE preferred where available)
             progress("Clearing table", 5, "Dropping existing rows…")
             try:
@@ -934,10 +1079,17 @@ class CliInterface:
             progress("Fetching", 10, "Requesting full history from API")
             # 3) Call existing pipeline – empty table → fetches everything
             run_data_gathering_workflow(self.username, progress)
+            # 4) Enrich freshly fetched scrobbles with MB artist meta
+            progress("Enriching", 90, "Populating artist metadata…")
+            try:
+                populate_artist_info_from_scrobbles(progress_cb=progress)
+            except Exception as exc:  # fail-safe; don’t abort 1TUI
+                progress("Warning", 95, f"Artist enrichment failed: {exc}")
             progress("Complete", 100, "Full refresh done")
-        t = threading.Thread(target=task, daemon=True); t.start()
+        t = threading.Thread(target=task, daemon=True)
+        t.start()
         while t.is_alive():
-            if self.stdscr.getch() == 27:        # allow ESC cancel display
+            if self.stdscr.getch() == 27:        # to allow ESC cancel display
                 pass
         self.stdscr.getch()
         self._show_main_menu()
@@ -970,19 +1122,209 @@ def _cli_entry() -> int:
         help="Fetch missing artist_mbid values from Last.fm API.",
     )
     parser.add_argument(
+        "--refresh-aliases",
+        action="store_true",
+        help="Refresh artist aliases from MusicBrainz API.",
+    )
+    parser.add_argument(
+        "--debug-artist-aliases",
+        type=str,
+        help="Debug alias retrieval for a specific artist (provide artist name or MBID)",
+    )
+    parser.add_argument(
         "--username",
         type=str,
         help="Last.fm username to use with --enrich-artist-mbid or --legacy-cli",
     )
     args = parser.parse_args()
-
     # Check for special operations
-    if args.enrich_artist_mbid:
-        # Get username from args, env, or config
-        username = args.username or os.getenv("LASTFM_USER")
+    if args.debug_artist_aliases:
+        print(f"Debugging aliases for: {args.debug_artist_aliases}")
+        import mbAPI
+        import re
+        from pprint import pprint
         
+        is_mbid = bool(re.fullmatch(r"[0-9a-fA-F-]{36}", args.debug_artist_aliases))
+        
+        if is_mbid:
+            print(f"Looking up artist by MBID: {args.debug_artist_aliases}")
+            try:
+                aliases = mbAPI.get_aliases(args.debug_artist_aliases)
+                artist_data = mbAPI.lookup_artist(args.debug_artist_aliases, with_aliases=True)
+                print(f"Artist: {artist_data.get('name')}")
+                print(f"Found {len(aliases)} aliases:")
+                for alias in aliases:
+                    print(f"  - {alias}")
+                
+                # Check DB record
+                from DB import SessionLocal
+                from DB.models import ArtistInfo
+                from sqlalchemy import select
+                
+                with SessionLocal() as session:
+                    db_artist = session.execute(
+                        select(ArtistInfo).where(ArtistInfo.mbid == args.debug_artist_aliases)
+                    ).scalar_one_or_none()
+                    
+                    if db_artist:
+                        print("\nDatabase record:")
+                        print(f"  Name: {db_artist.artist_name}")
+                        print(f"  MBID: {db_artist.mbid}")
+                        print(f"  Aliases: {db_artist.aliases or 'None'}")
+                        
+                        # Count actual aliases
+                        if db_artist.aliases:
+                            db_aliases = db_artist.aliases.split(',')
+                            print(f"  Alias count: {len(db_aliases)}")
+                    else:
+                        print("\nNo database record found!")
+                        
+            except Exception as e:
+                print(f"Error: {e}")
+        else:
+            print(f"Looking up artist by name: {args.debug_artist_aliases}")
+            try:
+                # First search for the artist
+                search_results = mbAPI.search_artist(args.debug_artist_aliases, limit=5)
+                
+                if not search_results:
+                    print("No artists found with that name")
+                    return 1
+                    
+                print(f"Found {len(search_results)} matching artists:")
+                for i, artist in enumerate(search_results):
+                    print(f"{i+1}. {artist['name']} ({artist['id']})")
+                    if 'disambiguation' in artist and artist['disambiguation']:
+                        print(f"   {artist['disambiguation']}")
+                
+                # Ask which one to check
+                if len(search_results) > 1:
+                    choice = input("\nEnter number to check aliases (or press Enter for #1): ")
+                    idx = 0
+                    if choice.strip():
+                        try:
+                            idx = int(choice) - 1
+                            if idx < 0 or idx >= len(search_results):
+                                print("Invalid choice, using #1")
+                                idx = 0
+                        except ValueError:
+                            print("Invalid choice, using #1")
+                            idx = 0
+                else:
+                    idx = 0
+                
+                # Get aliases for selected artist
+                selected_mbid = search_results[idx]['id']
+                aliases = mbAPI.get_aliases(selected_mbid)
+                print(f"\nFound {len(aliases)} aliases for {search_results[idx]['name']}:")
+                for alias in aliases:
+                    print(f"  - {alias}")
+                    
+                # Check DB record
+                from DB import SessionLocal
+                from DB.models import ArtistInfo
+                from sqlalchemy import select
+                
+                with SessionLocal() as session:
+                    db_artist = session.execute(
+                        select(ArtistInfo).where(ArtistInfo.mbid == selected_mbid)
+                    ).scalar_one_or_none()
+                    
+                    if db_artist:
+                        print("\nDatabase record:")
+                        print(f"  Name: {db_artist.artist_name}")
+                        print(f"  MBID: {db_artist.mbid}")
+                        print(f"  Aliases: {db_artist.aliases or 'None'}")
+                        
+                        # Count actual aliases
+                        if db_artist.aliases:
+                            db_aliases = db_artist.aliases.split(',')
+                            print(f"  Alias count: {len(db_aliases)}")
+                    else:
+                        print("\nNo database record found!")
+            except Exception as e:
+                print(f"Error: {e}")
+        return 0
+    if args.refresh_aliases:
+        print("Refreshing artist aliases from MusicBrainz...")
+        import mbAPI
+        from DB import SessionLocal
+        from DB.models import ArtistInfo
+        from sqlalchemy import select, func
+        from tqdm import tqdm
+        with SessionLocal() as session:
+            # First, count total artists with MBIDs
+            total_artists = session.execute(
+                select(func.count()).where(ArtistInfo.mbid.is_not(None))
+            ).scalar_one()
+            # Counting artists with empty aliases
+            empty_aliases = session.execute(
+                select(func.count()).where(
+                    ArtistInfo.mbid.is_not(None),
+                    (ArtistInfo.aliases.is_(None) | (ArtistInfo.aliases == ""))
+                )
+            ).scalar_one()
+            print(f"Database has {total_artists} artists with MBIDs")
+            print(f"Found {empty_aliases} artists with empty aliases")
+            # Asking for confirmation if all artists should be refreshed
+            refresh_all = False
+            if empty_aliases < total_artists:
+                choice = input("Do you want to refresh ALL artists (y) or only those with empty aliases (n)? [y/N] ")
+                refresh_all = choice.lower() == 'y'
+            # Getting artists to process based on user choice
+            if refresh_all:
+                print(f"Refreshing ALL {total_artists} artists...")
+                query = select(ArtistInfo).where(ArtistInfo.mbid.is_not(None))
+                artists = session.execute(query).scalars().all()
+            else:
+                print(f"Refreshing {empty_aliases} artists with empty aliases...")
+                query = select(ArtistInfo).where(
+                    ArtistInfo.mbid.is_not(None),
+                    (ArtistInfo.aliases.is_(None) | (ArtistInfo.aliases == ""))
+                )
+                artists = session.execute(query).scalars().all()
+            # Processing each artist with a progress bar
+            success_count = 0
+            error_count = 0
+            for artist in tqdm(artists, desc="Fetching aliases"):
+                try:
+                    # Getting complete artist info including aliases
+                    artist_data = mbAPI.lookup_artist(artist.mbid, with_aliases=True)
+                    # Updating the database record with aliases
+                    if artist_data and "aliases" in artist_data and artist_data["aliases"]:
+                        aliases_str = ",".join(artist_data["aliases"])
+                        artist.aliases = aliases_str
+                        session.commit()
+                        success_count += 1
+                    else:
+                        # If no aliases found but lookup was successful, marking as processed with empty aliases
+                        session.commit()
+                except Exception as e:
+                    error_count += 1
+                    print(f"Error processing {artist.artist_name}: {e}")
+            # Displaying summary
+            print("\nAliases refresh completed:")
+            print(f"  ✅ Successfully updated: {success_count} artists")
+            if error_count > 0:
+                print(f"  ❌ Errors: {error_count} artists")
+            else:
+                print("  No errors encountered!")
+        # Final check - counting non-empty aliases
+        with SessionLocal() as session:
+            non_empty_count = session.execute(
+                select(func.count()).where(
+                    ArtistInfo.mbid.is_not(None),
+                    ArtistInfo.aliases.is_not(None),
+                    ArtistInfo.aliases != ""
+                )
+            ).scalar_one()
+            print(f"Database now has {non_empty_count} artists with aliases")
+        return 0
+    if args.enrich_artist_mbid:
+        # Getting username from args, env, or config
+        username = args.username or os.getenv("LASTFM_USER")
         if not username:
-            # Try to read from config file
+            # Trying to read from config file
             config_path = Path.home() / ".canonrc"
             if config_path.exists():
                 try:
@@ -993,51 +1335,42 @@ def _cli_entry() -> int:
                                 break
                 except Exception:
                     pass
-
         if not username:
             print("No username provided. Please specify with --username or set LASTFM_USER environment variable.")
             return 1
-
         print(f"Enriching artist_mbid values for {username}...")
         import lfAPI
-
         # Setup console progress display
         from tqdm import tqdm
         pbar = tqdm(total=100, desc="Fetching MBIDs")
-        
-        def progress_callback(task, percentage, message=None):
-            pbar.n = percentage
-            if message:
-                pbar.set_description(f"{task}: {message}")
-            else:
-                pbar.set_description(task)
-            pbar.refresh()
-        
-        result = lfAPI.enrich_artist_mbids(username, progress_callback)
-        
+        class TqdmProgressCallback:
+            def __call__(self, task: str, percentage: float, message: Optional[str] = None) -> None:
+                pbar.n = percentage
+                if message:
+                    pbar.set_description(f"{task}: {message}")
+                else:
+                    pbar.set_description(task)
+                pbar.refresh()
+        result = lfAPI.enrich_artist_mbids(username, TqdmProgressCallback())
         pbar.close()
-        
         if result["status"] == "success":
             print(f"✅ Success: {result['message']}")
         else:
             print(f"❌ Error: {result['message']}")
         return 0
-
-    # For backward compatibility, treat --cli the same as --legacy-cli
+    # For backward compatibility, treating --cli the same as --legacy-cli
     if args.legacy_cli or args.cli:
         # In legacy CLI mode, let the function handle username input directly
         # If username was provided, pass it to the function
         return run_data_gathering_workflow(args.username) or 0
     else:
-        # Initialize terminal colors
+        # Initializing terminal colors
         init_colors()
-
-        # Set global animation flag
+        # Setting global animation flag
         if args.no_animation:
             global DISABLE_ANIMATIONS
             DISABLE_ANIMATIONS = True
-
-        # Start the CLI interface
+        # Starting the CLI interface
         start_gui()
         return 0
 
@@ -1045,8 +1378,6 @@ def _cli_entry() -> int:
 if __name__ == "__main__":
     # Define global animation flag
     DISABLE_ANIMATIONS = False
-
     # Handle Ctrl+C gracefully
     signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
-
     sys.exit(_cli_entry())

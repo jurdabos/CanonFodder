@@ -40,6 +40,83 @@ def _parquet_name(stamp: datetime | None = None, *, constant: bool = False) -> P
     return PQ_DIR / f"scrobbles_{stamp:%Y%m%d_%H%M%S}.parquet"
 
 
+def append_or_create_parquet(df: pd.DataFrame, path: Path) -> None:
+    """
+    Appends data to an existing parquet file or creates a new one if it doesn't exist
+    Args:
+        df: DataFrame containing the data to append
+        path: Path to the parquet file
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    # Column name mappings between Last.fm API and CanonFodder DB
+    column_mappings = {
+        # Last.fm API → CanonFodder DB
+        "Artist": "artist_name",
+        "Song": "track_title",
+        "Album": "album_title",
+        "artist mbid": "artist_mbid",
+        # Ensuring we also handle the canonical names
+        "artist_name": "artist_name", 
+        "track_title": "track_title",
+        "album_title": "album_title",
+        "artist_mbid": "artist_mbid"
+    }
+    # Creating a normalized copy of the dataframe
+    normalized_df = df.copy()
+    # Normalizing column names in the new dataframe
+    for original, normalized in column_mappings.items():
+        if original in normalized_df.columns and normalized not in normalized_df.columns:
+            normalized_df[normalized] = normalized_df[original]
+    # Handling timestamp/play_time conversion
+    if "play_time" not in normalized_df.columns and "uts" in normalized_df.columns:
+        normalized_df["play_time"] = pd.to_datetime(normalized_df["uts"], unit="s", utc=True)
+    if path.exists():
+        # Reading existing data
+        existing_df = pd.read_parquet(path)
+        # Normalizing column names in the existing dataframe
+        normalized_existing = existing_df.copy()
+        for original, normalized in column_mappings.items():
+            if original in normalized_existing.columns and normalized not in normalized_existing.columns:
+                normalized_existing[normalized] = normalized_existing[original]
+        # Standard deduplication columns in order of priority
+        dedup_candidates = [
+            # These three together form a unique key in the database
+            ["artist_name", "track_title", "play_time"],
+            # Fall back to just artist and track if no play_time
+            ["artist_name", "track_title"],
+            # Last resort - just artist name
+            ["artist_name"]
+        ]
+        # Finding the first set of deduplication columns that exists in both dataframes
+        dedup_cols = None
+        for candidate_cols in dedup_candidates:
+            if all(col in normalized_df.columns for col in candidate_cols) and \
+               all(col in normalized_existing.columns for col in candidate_cols):
+                dedup_cols = candidate_cols
+                break
+        if dedup_cols:
+            logger.info(f"Deduplicating with columns: {dedup_cols}")
+            # Combining and deduplicate using normalized columns
+            combined_normalized = pd.concat([normalized_existing, normalized_df])
+            # Keep the latest version of each record
+            combined_normalized = combined_normalized.drop_duplicates(subset=dedup_cols, keep="last")
+            # Preserving all original columns from both dataframes
+            all_columns = list(set(existing_df.columns).union(set(df.columns)))
+            combined_df = combined_normalized[
+                [col for col in all_columns if col in combined_normalized.columns]
+            ]
+        else:
+            logger.warning("No common deduplication columns found, concatenating without deduplication")
+            combined_df = pd.concat([existing_df, normalized_df])
+        combined_df.to_parquet(path, index=False)
+        print(f"[io] parquet updated with {len(df)} rows → {path} (total: {len(combined_df)} rows)")
+    else:
+        # Just write the new data, but ensure it has normalized column names for future consistency
+        normalized_df.to_parquet(path, index=False)
+        print(f"[io] new parquet created with {len(df)} rows → {path}")
+
+
 def dump_latest_table_to_parquet() -> None:
     """
     Materialises the newest DB scrobble table as a parquet file.
@@ -51,39 +128,6 @@ def dump_latest_table_to_parquet() -> None:
     pq_file = PQ_DIR / f"scrobbles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
     df_db.to_parquet(pq_file, index=False)
     print(f"Latest scrobble table persisted → {pq_file}")
-
-
-def append_or_create_parquet(df: pd.DataFrame, path: Path) -> None:
-    """
-    Appends data to an existing parquet file or creates a new one if it doesn't exist
-    Args:
-        df: DataFrame containing the data to append
-        path: Path to the parquet file
-    """
-    if path.exists():
-        # Read existing data and concatenate with new data
-        existing_df = pd.read_parquet(path)
-        # Create a column that can be used to identify duplicates across both dataframes
-        if "uts" in df.columns and "play_time" in df.columns:
-            # If we have both, use both for best deduplication
-            dedup_cols = ["artist_name", "track_title", "play_time"]
-        elif "uts" in df.columns:
-            # Convert uts to play_time for deduplication if needed
-            df["play_time"] = pd.to_datetime(df["uts"], unit="s", utc=True)
-            dedup_cols = ["artist_name", "track_title", "play_time"]
-        else:
-            # Fallback to whatever columns are available
-            dedup_cols = ["artist_name", "track_title"]
-            if "play_time" in df.columns:
-                dedup_cols.append("play_time")
-        # Combine and deduplicate
-        combined_df = pd.concat([existing_df, df]).drop_duplicates(subset=dedup_cols, keep="last")
-        combined_df.to_parquet(path, index=False)
-        print(f"[io] parquet updated with {len(df)} rows → {path} (total: {len(combined_df)} rows)")
-    else:
-        # Just write the new data
-        df.to_parquet(path, index=False)
-        print(f"[io] new parquet created with {len(df)} rows → {path}")
 
 
 def dump_parquet(df: pd.DataFrame | None = None,

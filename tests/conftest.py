@@ -35,7 +35,59 @@ def session(tmp_sqlite_url, monkeypatch):
     Session = DB.get_session
     with Session() as sess:
         yield sess
+"""
+Pytest configuration and shared fixtures.
+"""
+import pytest
+import sys
+import os
+import pandas as pd
+from unittest.mock import MagicMock
 
+# Add the parent directory to sys.path so we can import the main module
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+
+@pytest.fixture
+def sample_scrobble_df():
+    """Provide a sample DataFrame with scrobbles for testing."""
+    return pd.DataFrame({
+        'artist_name': ['Artist1', 'Artist2', 'Artist3'],
+        'artist_mbid': ['mbid1', 'mbid2', ''],
+        'track_title': ['Track1', 'Track2', 'Track3'],
+        'album_title': ['Album1', 'Album2', 'Album3'],
+        'play_time': [
+            pd.Timestamp('2023-01-01'),
+            pd.Timestamp('2023-01-02'),
+            pd.Timestamp('2023-01-03')
+        ]
+    })
+
+
+@pytest.fixture
+def mock_progress_callback():
+    """Provide a mock progress callback for testing."""
+    callback = MagicMock()
+    return callback
+
+
+@pytest.fixture
+def mock_session():
+    """Provide a mock database session for testing."""
+    mock = MagicMock()
+    # Configure the mock to return itself from context manager methods
+    mock.__enter__.return_value = mock
+    mock.__exit__.return_value = None
+    return mock
+
+
+@pytest.fixture
+def mock_engine():
+    """Provide a mock SQLAlchemy engine for testing."""
+    mock = MagicMock()
+    # Configure the mock to handle with statement
+    mock.connect.return_value.__enter__.return_value = mock.connect.return_value
+    return mock
 
 @pytest.fixture
 def toy_scrobbles(session):

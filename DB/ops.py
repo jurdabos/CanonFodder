@@ -22,6 +22,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
 import time
+from typing import Any, Iterable, Sequence, Callable
+
 
 _COLUMN_ALIASES = {
     "Artist": "artist_name",
@@ -195,128 +197,188 @@ def load_scrobble_table_from_db_to_df(engine) -> tuple[pd.DataFrame | None, str 
     return df, table_name
 
 
-def populate_artist_info_from_scrobbles(session=None):
+def populate_artist_info_from_scrobbles(
+    session=None,
+    progress_cb=None,
+    max_artists: int | None = None,
+    debug: bool = False,
+    **_: dict,
+) -> tuple[int, int, int]:
     """
-    Populate the ArtistInfo table with data from MusicBrainz based on artists in Scrobble table
-    This function:
-    1. Gets all unique artists from the Scrobble table (using mbid if available, name otherwise)
-    2. For each artist, checks if they exist in ArtistInfo
-    3. If not, creates a new entry with data from MusicBrainz
-    4. If yes but missing data, updates with data from MusicBrainz
-    Returns:
-        tuple: (total_processed, new_entries, updated_entries)
+    Synchronise the ArtistInfo table with the unique artists referenced in Scrobble.
+    Steps
+    -----
+    1. Collect all unique artists from Scrobble (MBID first, then raw name).
+    2. For every artist:
+       • If an ArtistInfo entry exists – update missing details.
+       • Otherwise – create a brand-new ArtistInfo record.
+    3. Report progress through an optional callback.
+    Parameters
+    ----------
+    session : sqlalchemy.orm.Session | None
+        Database session.  A new one is created when *None*.
+    progress_cb : Callable[[str, int, str], None] | None
+        Callback invoked as ``progress_cb(phase, percent, message)``.
+    max_artists : int | None
+        Optional hard limit (used mainly for tests).
+    debug : bool
+        Enable very verbose logging when *True*.
+    Returns
+    -------
+    tuple[int, int, int]
+        ``(processed, created, updated)`` counts.
     """
-    from mbAPI import get_complete_artist_info
-    if session is None:
-        from DB import get_session
-        session = get_session()
-    # Getting all unique artists with MBIDs from Scrobble table
-    artists_with_mbid = session.query(
-        Scrobble.artist_mbid, 
-        Scrobble.artist_name
-    ).filter(
-        Scrobble.artist_mbid.isnot(None)
-    ).group_by(
-        Scrobble.artist_mbid
-    ).all()
-    # Getting all unique artist names without MBIDs
-    artists_without_mbid = session.query(
-        Scrobble.artist_name
-    ).filter(
-        Scrobble.artist_mbid.is_(None)
-    ).group_by(
-        Scrobble.artist_name
-    ).all()
-    total_processed = 0
-    new_entries = 0
-    updated_entries = 0
-    # Processing artists with MBIDs
-    for mbid, name in artists_with_mbid:
-        total_processed += 1
-        # Checking if artist exists in ArtistInfo
-        artist_info = session.query(ArtistInfo).filter(ArtistInfo.mbid == mbid).first()
-        if artist_info:
-            # Artist exists, checking if any data is missing
-            updated = False
-            if artist_info.country is None or artist_info.disambiguation_comment is None or artist_info.aliases is None:
-                # Getting complete info from MusicBrainz
-                info = get_complete_artist_info(artist_mbid=mbid, artist_name=name)
-                # Updating missing fields
-                if artist_info.country is None and info['country']:
-                    artist_info.country = info['country']
-                    updated = True
-                if artist_info.disambiguation_comment is None and info['disambiguation_comment']:
-                    artist_info.disambiguation_comment = info['disambiguation_comment']
-                    updated = True
-                if artist_info.aliases is None and info['aliases']:
-                    artist_info.aliases = info['aliases']
-                    updated = True
-            if updated:
-                updated_entries += 1
-        else:
-            # Artist doesn't exist; creating new entry
-            info = get_complete_artist_info(artist_mbid=mbid, artist_name=name)
-            new_artist = ArtistInfo(
-                artist_name=info['artist_name'] or name,
-                mbid=info['mbid'],
-                country=info['country'],
-                disambiguation_comment=info['disambiguation_comment'],
-                aliases=info['aliases']
+    # ------------------------------------------------------------------ setup
+    import logging
+    logger = logging.getLogger("populate_artist_info")
+    if debug:
+        logger.setLevel(logging.DEBUG)
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
+        logger.addHandler(handler)
+    from mbAPI import get_complete_artist_info  # local import to avoid circulars
+    from DB import get_session
+    from DB.models import Scrobble, ArtistInfo  # type: ignore  # noqa: F401
+    session = session or get_session()
+
+    # ----------------------------------------------------------- helper funcs
+    def _emit_progress(message: str, pct: int | None = None) -> None:
+        if progress_cb:
+            percent = (
+                pct
+                if pct is not None
+                else int(
+                    (processed * 85)
+                    / max(1, len(with_mbid) + len(without_mbid))
+                )
             )
-            session.add(new_artist)
-            new_entries += 1
-        # Committing every 10 records to avoid long transactions
-        if total_processed % 10 == 0:
-            session.commit()
-            # Rate limit to avoid overwhelming MusicBrainz API
-            time.sleep(1)
-    # Processing artists without MBIDs
-    for (name,) in artists_without_mbid:
-        total_processed += 1
-        # Checking if artist exists in ArtistInfo by name
-        artist_info = session.query(ArtistInfo).filter(ArtistInfo.artist_name == name).first()
-        if artist_info:
-            # Artist exists; checking if any data is missing
-            updated = False
-            if artist_info.country is None or artist_info.disambiguation_comment is None or artist_info.aliases is None:
-                # Getting complete info from MusicBrainz
-                info = get_complete_artist_info(artist_name=name)
-                # Updating missing fields
-                if artist_info.country is None and info['country']:
-                    artist_info.country = info['country']
-                    updated = True
-                if artist_info.disambiguation_comment is None and info['disambiguation_comment']:
-                    artist_info.disambiguation_comment = info['disambiguation_comment']
-                    updated = True
-                if artist_info.aliases is None and info['aliases']:
-                    artist_info.aliases = info['aliases']
-                    updated = True
-                # If we found an MBID and it's not set, we update it
-                if info['mbid'] and not artist_info.mbid:
-                    artist_info.mbid = info['mbid']
-                    updated = True
-            if updated:
-                updated_entries += 1
-        else:
-            # Artist doesn't exist; creating new entry
-            info = get_complete_artist_info(artist_name=name)
-            new_artist = ArtistInfo(
-                artist_name=info['artist_name'] or name,
-                mbid=info['mbid'],
-                country=info['country'],
-                disambiguation_comment=info['disambiguation_comment'],
-                aliases=info['aliases']
+            progress_cb("Enriching", percent, message)
+
+    # ---------------------------------------------------------- gather input
+    with_mbid_q = (
+        session.query(Scrobble.artist_mbid, Scrobble.artist_name)
+        .filter(Scrobble.artist_mbid.isnot(None))
+        .group_by(Scrobble.artist_mbid)
+    )
+    without_mbid_q = (
+        session.query(Scrobble.artist_name)
+        .filter(Scrobble.artist_mbid.is_(None))
+        .group_by(Scrobble.artist_name)
+    )
+    if max_artists:
+        logger.debug("Applying artist limit: %s", max_artists)
+        with_mbid = with_mbid_q.limit(max_artists).all()
+        without_mbid = without_mbid_q.limit(max_artists).all()
+    else:
+        with_mbid = with_mbid_q.all()
+        without_mbid = without_mbid_q.all()
+    logger.info(
+        "Discovered %d artists with MBID and %d without",
+        len(with_mbid),
+        len(without_mbid),
+    )
+    # -------------------------------------------------------------- main loop
+    processed = created = updated = 0
+    _emit_progress("Processing artists with MBIDs …")
+    # ---------- pass 1 : artists that already provide an MBID
+    for mbid, raw_name in with_mbid:
+        processed += 1
+        _emit_progress(f"{raw_name} ({mbid})")
+        try:
+            ai: ArtistInfo | None = (
+                session.query(ArtistInfo).filter_by(mbid=mbid).one_or_none()
             )
-            session.add(new_artist)
-            new_entries += 1
-        # Committing every 10 records to avoid long transactions
-        if total_processed % 10 == 0:
+            if ai:
+                # Update missing columns
+                fields_missing = any(
+                    getattr(ai, fld) in (None, "")
+                    for fld in ("country", "disambiguation_comment", "aliases")
+                )
+                if fields_missing:
+                    info = get_complete_artist_info(identifier=mbid)
+                    logger.debug("MB response for %s: %s", mbid, info)
+                    if ai.country in (None, "") and info.get("country"):
+                        ai.country = info["country"]
+                    if (
+                        ai.disambiguation_comment in (None, "")
+                        and info.get("disambiguation")
+                    ):
+                        ai.disambiguation_comment = info["disambiguation"]
+
+                    if ai.aliases in (None, "") and info.get("aliases"):
+                        aliases = info["aliases"]
+                        ai.aliases = ",".join(aliases) if isinstance(aliases, list) else str(aliases)
+                    updated += 1
+            else:
+                # Brand-new entry
+                info = get_complete_artist_info(identifier=mbid)
+                aliases_raw = info.get("aliases", [])
+                aliases_str = ",".join(aliases_raw) if isinstance(aliases_raw, list) else str(aliases_raw or "")
+                session.add(
+                    ArtistInfo(
+                        artist_name=info.get("name", raw_name),
+                        mbid=info.get("id", mbid),
+                        country=info.get("country"),
+                        disambiguation_comment=info.get("disambiguation"),
+                        aliases=aliases_str,
+                    )
+                )
+                created += 1
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Failed processing artist %s (%s): %s", raw_name, mbid, exc)
+            session.rollback()
+            continue
+        if processed % 100 == 0:  # commit in batches
             session.commit()
-            # Rate limit to avoid overwhelming MusicBrainz API
-            time.sleep(1)
-    # Final commit
+            logger.debug("Committed batch (%d processed)", processed)
+    # ---------- pass 2 : artists that *lack* an MBID
+    _emit_progress("Processing artists without MBIDs …", 90)
+    for (raw_name,) in without_mbid:
+        processed += 1
+        _emit_progress(raw_name)
+        try:
+            ai: ArtistInfo | None = (
+                session.query(ArtistInfo)
+                .filter_by(artist_name=raw_name, mbid=None)
+                .one_or_none()
+            )
+            if not ai:
+                # MusicBrainz lookup by name
+                info = get_complete_artist_info(identifier=raw_name)
+                if not info:
+                    logger.debug("No MB data for '%s'; skipping", raw_name)
+                    continue
+                aliases_raw = info.get("aliases", [])
+                aliases_str = ",".join(aliases_raw) if isinstance(aliases_raw, list) else str(aliases_raw or "")
+                session.add(
+                    ArtistInfo(
+                        artist_name=info.get("name", raw_name),
+                        mbid=info.get("id"),  # may still be None
+                        country=info.get("country"),
+                        disambiguation_comment=info.get("disambiguation"),
+                        aliases=aliases_str,
+                    )
+                )
+                created += 1
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Failed processing artist '%s': %s", raw_name, exc)
+            session.rollback()
+            continue
+        if processed % 100 == 0:
+            session.commit()
+    # ---------------------------------------------------------------- finish
     session.commit()
-    return total_processed, new_entries, updated_entries
+    _emit_progress("Completed", 100)
+    logger.info(
+        "populate_artist_info_from_scrobbles → processed=%d, created=%d, updated=%d",
+        processed,
+        created,
+        updated,
+    )
+    return processed, created, updated
 
 
 def save_group(signature: str, canonical: str):
