@@ -26,7 +26,6 @@ Thumbs.db
 *.pkl
 *.h5
 *.csv
-*.json
 .junie/
 
 # Ignore sensitive or environment-specific configurations

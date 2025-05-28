@@ -58,7 +58,7 @@ GROUP BY album_title;
 # Query unique artist name variants containing a specified string
 SELECT DISTINCT artist_name FROM scrobble WHERE artist_name LIKE '%anna%' GROUP BY artist_name;
 
-# Query certain the scrobble counts of given artists, e. g. before a festival
+# Query certain the scrobble counts of given artists, e. g. before a festival (this could also be functionized)
 SELECT
   CASE
     WHEN artist_name LIKE '%Faixa%' THEN 'Faixa'

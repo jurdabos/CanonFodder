@@ -194,6 +194,7 @@ def load_scrobble_table_from_db_to_df(engine) -> tuple[pd.DataFrame | None, str 
     if table_name not in inspect(engine).get_table_names():
         return None, None
     df = pd.read_sql_table(table_name, engine)
+    df = df.drop(columns=['id'])
     return df, table_name
 
 

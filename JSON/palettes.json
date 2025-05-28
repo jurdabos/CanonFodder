@@ -1,0 +1,589 @@
+{
+  "palettes": [
+        {
+      "paletteName": "colorpalette_2",
+      "colors": [
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "cmyk": [0, 55, 67, 36],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "cmyk": [45, 18, 0, 10],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "lab": [74, -9, -27]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_3",
+      "colors": [
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "cmyk": [10, 0, 32, 4],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "cmyk": [0, 55, 67, 36],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "cmyk": [45, 18, 0, 10],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "lab": [74, -9, -27]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_4",
+      "colors": [
+        {
+          "position": 1,
+          "name": "Caribbean Current",
+          "hex": "16697a",
+          "rgb": [22, 105, 122],
+          "cmyk": [82, 14, 0, 52],
+          "hsb": [190, 82, 48],
+          "hsl": [190, 69, 28],
+          "lab": [41, -17, -16]
+        },
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "cmyk": [10, 0, 32, 4],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "cmyk": [0, 55, 67, 36],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "cmyk": [45, 18, 0, 10],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "lab": [74, -9, -27]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_5",
+      "colors": [
+        {
+          "position": 1,
+          "name": "Caribbean Current",
+          "hex": "16697a",
+          "rgb": [22, 105, 122],
+          "hsb": [190, 82, 48],
+          "hsl": [190, 69, 28],
+          "cmyk": [82, 14, 0, 52],
+          "lab": [41, -17, -16]
+        },
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "cmyk": [10, 0, 32, 4],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "cmyk": [0, 55, 67, 36],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "cmyk": [45, 18, 0, 10],
+          "lab": [74, -9, -27]
+        },
+        {
+          "position": 5,
+          "name": "Pale Dogwood",
+          "hex": "e6beae",
+          "rgb": [230, 190, 174],
+          "hsb": [17, 24, 90],
+          "hsl": [17, 53, 79],
+          "cmyk": [0, 17, 24, 10],
+          "lab": [80, 12, 13]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_6",
+      "colors": [
+        {
+          "position": 1,
+          "name": "Caribbean Current",
+          "hex": "16697a",
+          "rgb": [22, 105, 122],
+          "hsb": [190, 82, 48],
+          "hsl": [190, 69, 28],
+          "cmyk": [82, 14, 0, 52],
+          "lab": [41, -17, -16]
+        },
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "cmyk": [10, 0, 32, 4],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 2.5,
+          "name": "Lion",
+          "hex": "bf9f6f",
+          "rgb": [191, 159, 111],
+          "hsb": [36, 42, 75],
+          "hsl": [36, 38, 59],
+          "cmyk": [0, 17, 42, 25],
+          "lab": [67, 5, 29]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "cmyk": [0, 55, 67, 36],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "cmyk": [45, 18, 0, 10],
+          "lab": [74, -9, -27]
+        },
+        {
+          "position": 5,
+          "name": "Pale Dogwood",
+          "hex": "e6beae",
+          "rgb": [230, 190, 174],
+          "hsb": [17, 24, 90],
+          "hsl": [17, 53, 79],
+          "cmyk": [0, 17, 24, 10],
+          "lab": [80, 12, 13]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_7",
+      "colors": [
+        {
+          "position": 1,
+          "name": "Caribbean Current",
+          "hex": "16697a",
+          "rgb": [22, 105, 122],
+          "hsb": [190, 82, 48],
+          "hsl": [190, 69, 28],
+          "cmyk": [82, 14, 0, 52],
+          "lab": [41, -17, -16]
+        },
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "cmyk": [10, 0, 32, 4],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 2.5,
+          "name": "Lion",
+          "hex": "bf9f6f",
+          "rgb": [191, 159, 111],
+          "hsb": [36, 42, 75],
+          "hsl": [36, 38, 59],
+          "cmyk": [0, 17, 42, 25],
+          "lab": [67, 5, 29]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "cmyk": [0, 55, 67, 36],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 3.5,
+          "name": "Taupe gray",
+          "hex": "90838e",
+          "rgb": [144, 131, 142],
+          "hsb": [309, 9, 56],
+          "hsl": [309, 6, 54],
+          "cmyk": [0, 9, 1, 44],
+          "lab": [56, 7, -4]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "cmyk": [45, 18, 0, 10],
+          "lab": [74, -9, -27]
+        },
+        {
+          "position": 5,
+          "name": "Pale Dogwood",
+          "hex": "e6beae",
+          "rgb": [230, 190, 174],
+          "hsb": [17, 24, 90],
+          "hsl": [17, 53, 79],
+          "cmyk": [0, 17, 24, 10],
+          "lab": [80, 12, 13]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_8",
+      "colors": [
+        {
+          "position": 1,
+          "name": "Caribbean Current",
+          "hex": "16697a",
+          "rgb": [22, 105, 122],
+          "hsb": [190, 82, 48],
+          "hsl": [190, 69, 28],
+          "cmyk": [82, 14, 0, 52],
+          "lab": [41, -17, -16]
+        },
+        {
+          "position": 1.5,
+          "name": "Cambridge blue",
+          "hex": "79af91",
+          "rgb": [121, 175, 145],
+          "hsb": [147, 31, 69],
+          "hsl": [147, 25, 58],
+          "cmyk": [31, 0, 17, 31],
+          "lab": [67, -24, 10]
+        },
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "cmyk": [10, 0, 32, 4],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 2.5,
+          "name": "Lion",
+          "hex": "bf9f6f",
+          "rgb": [191, 159, 111],
+          "hsb": [36, 42, 75],
+          "hsl": [36, 38, 59],
+          "cmyk": [0, 17, 42, 25],
+          "lab": [67, 5, 29]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "cmyk": [0, 55, 67, 36],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 3.5,
+          "name": "Taupe gray",
+          "hex": "90838e",
+          "rgb": [144, 131, 142],
+          "cmyk": [0, 9, 1, 44],
+          "hsb": [309, 9, 56],
+          "hsl": [309, 6, 54],
+          "lab": [56, 7, -4]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "cmyk": [45, 18, 0, 10],
+          "lab": [74, -9, -27]
+        },
+        {
+          "position": 5,
+          "name": "Pale Dogwood",
+          "hex": "e6beae",
+          "rgb": [230, 190, 174],
+          "hsb": [17, 24, 90],
+          "hsl": [17, 53, 79],
+          "cmyk": [0, 17, 24, 10],
+          "lab": [80, 12, 13]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_9",
+      "colors": [
+        {
+          "position": 1,
+          "name": "Caribbean Current",
+          "hex": "16697a",
+          "rgb": [22, 105, 122],
+          "hsb": [190, 82, 48],
+          "hsl": [190, 69, 28],
+          "cmyk": [82, 14, 0, 52],
+          "lab": [41, -17, -16]
+        },
+        {
+          "position": 1.5,
+          "name": "Cambridge blue",
+          "hex": "79af91",
+          "rgb": [121, 175, 145],
+          "cmyk": [31, 0, 17, 31],
+          "hsb": [147, 31, 69],
+          "hsl": [147, 25, 58],
+          "lab": [67, -24, 10]
+        },
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "cmyk": [10, 0, 32, 4],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 2.5,
+          "name": "Lion",
+          "hex": "bf9f6f",
+          "rgb": [191, 159, 111],
+          "cmyk": [0, 17, 42, 25],
+          "hsb": [36, 42, 75],
+          "hsl": [36, 38, 59],
+          "lab": [67, 5, 29]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "cmyk": [0, 55, 67, 36],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 3.5,
+          "name": "Taupe gray",
+          "hex": "90838e",
+          "rgb": [144, 131, 142],
+          "cmyk": [0, 9, 1, 44],
+          "hsb": [309, 9, 56],
+          "hsl": [309, 6, 54],
+          "lab": [56, 7, -4]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "cmyk": [45, 18, 0, 10],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "lab": [74, -9, -27]
+        },
+        {
+          "position": 4.5,
+          "name": "French gray",
+          "hex": "b2bdca",
+          "rgb": [178, 189, 202],
+          "cmyk": [12, 6, 0, 21],
+          "hsb": [212, 12, 79],
+          "hsl": [212, 18, 75],
+          "lab": [76, -1, -8]
+        },
+        {
+          "position": 5,
+          "name": "Pale Dogwood",
+          "hex": "e6beae",
+          "rgb": [230, 190, 174],
+          "cmyk": [0, 17, 24, 10],
+          "hsb": [17, 24, 90],
+          "hsl": [17, 53, 79],
+          "lab": [80, 12, 13]
+        }
+      ]
+    },
+    {
+      "paletteName": "colorpalette_10",
+      "colors": [
+        {
+          "position": 1,
+          "name": "Caribbean Current",
+          "hex": "16697a",
+          "rgb": [22, 105, 122],
+          "cmyk": [82, 14, 0, 52],
+          "hsb": [190, 82, 48],
+          "hsl": [190, 69, 28],
+          "lab": [41, -17, -16]
+        },
+        {
+          "position": 1.5,
+          "name": "Cambridge blue",
+          "hex": "79af91",
+          "rgb": [121, 175, 145],
+          "cmyk": [31, 0, 17, 31],
+          "hsb": [147, 31, 69],
+          "hsl": [147, 25, 58],
+          "lab": [67, -24, 10]
+        },
+        {
+          "position": 2,
+          "name": "Mindaro",
+          "hex": "dbf4a7",
+          "rgb": [219, 244, 167],
+          "cmyk": [10, 0, 32, 4],
+          "hsb": [79, 32, 96],
+          "hsl": [79, 78, 81],
+          "lab": [93, -21, 34]
+        },
+        {
+          "position": 2.5,
+          "name": "Lion",
+          "hex": "bf9f6f",
+          "rgb": [191, 159, 111],
+          "cmyk": [0, 17, 42, 25],
+          "hsb": [36, 42, 75],
+          "hsl": [36, 38, 59],
+          "lab": [67, 5, 29]
+        },
+        {
+          "position": 3,
+          "name": "Chestnut",
+          "hex": "a24936",
+          "rgb": [162, 73, 54],
+          "cmyk": [0, 55, 67, 36],
+          "hsb": [11, 67, 64],
+          "hsl": [11, 50, 42],
+          "lab": [42, 35, 29]
+        },
+        {
+          "position": 3.25,
+          "name": "Rose taupe",
+          "hex": "996662",
+          "rgb": [153, 102, 98],
+          "cmyk": [0, 33, 36, 40],
+          "hsb": [4, 36, 60],
+          "hsl": [4, 22, 49],
+          "lab": [48, 20, 11]
+        },
+        {
+          "position": 3.5,
+          "name": "Taupe gray",
+          "hex": "90838e",
+          "rgb": [144, 131, 142],
+          "cmyk": [0, 9, 1, 44],
+          "hsb": [309, 9, 56],
+          "hsl": [309, 6, 54],
+          "lab": [56, 7, -4]
+        },
+        {
+          "position": 4,
+          "name": "Maya Blue",
+          "hex": "7ebce6",
+          "rgb": [126, 188, 230],
+          "cmyk": [45, 18, 0, 10],
+          "hsb": [204, 45, 90],
+          "hsl": [204, 68, 70],
+          "lab": [74, -9, -27]
+        },
+        {
+          "position": 4.5,
+          "name": "French gray",
+          "hex": "b2bdca",
+          "rgb": [178, 189, 202],
+          "cmyk": [12, 6, 0, 21],
+          "hsb": [212, 12, 79],
+          "hsl": [212, 18, 75],
+          "lab": [76, -1, -8]
+        },
+        {
+          "position": 5,
+          "name": "Pale Dogwood",
+          "hex": "e6beae",
+          "rgb": [230, 190, 174],
+          "cmyk": [0, 17, 24, 10],
+          "hsb": [17, 24, 90],
+          "hsl": [17, 53, 79],
+          "lab": [80, 12, 13]
+        }
+      ]
+    }
+  ]
+}

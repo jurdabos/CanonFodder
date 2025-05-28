@@ -13,12 +13,196 @@ import threading
 import logging
 import curses
 import locale
+import shutil
 from pathlib import Path
-from typing import Protocol, Optional
+from typing import Protocol, Optional, Dict, Any, List, Callable
 import argparse
 import platform
 import signal
 from sqlalchemy import delete
+
+
+class ProgressManager:
+    """
+    Manages progress display with more granular updates, especially for
+    long-running operations like Last.fm scrobble fetching.
+    """
+
+    def __init__(self):
+        self.terminal_width = shutil.get_terminal_size().columns
+        self.current_progress = 0
+        self.target_progress = 100
+        self.task_name = ""
+        self.message = ""
+        self.sub_progress = 0
+        self.sub_total = 0
+        self._lock = threading.Lock()
+
+    def start_task(self, task_name: str, initial_progress: int = 0) -> None:
+        """Start a new task with the given name and initial progress."""
+        with self._lock:
+            self.task_name = task_name
+            self.current_progress = initial_progress
+            self.message = ""
+            self.sub_progress = 0
+            self.sub_total = 0
+            self._display_progress()
+
+    def update_progress(self, progress: int, message: str = "") -> None:
+        """Update the overall progress and optional message."""
+        with self._lock:
+            self.current_progress = min(progress, 100)
+            if message:
+                self.message = message
+            self._display_progress()
+
+    def update_subtask(self, current: int, total: int, message: str = "") -> None:
+        """
+        Update progress for a subtask (like fetching X of Y scrobbles).
+        This will interpolate progress within the current task segment.
+        """
+        with self._lock:
+            self.sub_progress = current
+            self.sub_total = total
+            if message:
+                self.message = message
+            self._display_progress()
+
+    def increment_progress(self, amount: int = 1, message: str = "") -> None:
+        """Increment progress by the specified amount."""
+        with self._lock:
+            self.current_progress = min(self.current_progress + amount, 100)
+            if message:
+                self.message = message
+            self._display_progress()
+
+    def complete_task(self, message: str = "Task completed") -> None:
+        """Mark the current task as complete."""
+        with self._lock:
+            self.current_progress = 100
+            self.message = message
+            self.sub_progress = 0
+            self.sub_total = 0
+            self._display_progress()
+
+    def _display_progress(self) -> None:
+        """Display the current progress with a proper progress bar."""
+        # Calculate actual progress considering subtask if applicable
+        actual_progress = self.current_progress
+        if self.sub_total > 0:
+            # Calculating percentage within the current progress segment
+            segment_size = 30  # Last.fm typically takes 30% of overall progress
+            sub_percent = (self.sub_progress / self.sub_total) if self.sub_total > 0 else 0
+            # Adjusting the progress within its segment
+            start_progress = self.current_progress - segment_size
+            actual_progress = start_progress + (sub_percent * segment_size)
+        # Formatting the message to prevent truncation
+        status_message = self.message
+        if status_message:
+            # Calculating available width for message
+            # Progress bar takes about 100 chars
+            max_msg_width = self.terminal_width - 110
+            if len(status_message) > max_msg_width > 10:
+                # If we need to truncate, do it intelligently
+                half_width = (max_msg_width - 3) // 2
+                status_message = f"{status_message[:half_width]}...{status_message[-half_width:]}"
+        # Creating the progress bar
+        bar_width = 100
+        filled_length = int(bar_width * actual_progress / 100)
+        bar = f"│{'█' * filled_length}{' ' * (bar_width - filled_length)}│"
+        # Displaying progress information
+        sys.stdout.write("\r" + " " * self.terminal_width + "\r")  # to clear line
+        # Task name
+        sys.stdout.write(f"Task: {self.task_name}")
+        sys.stdout.write("\n")
+        # Progress bar with percentage
+        progress_display = f"┌{'─' * (bar_width + 2)}┐\n{bar} {actual_progress:.1f}%\n└{'─' * (bar_width + 2)}┘"
+        sys.stdout.write(progress_display)
+        sys.stdout.write("\n")
+        # Status message (avoid truncation)
+        if status_message:
+            sys.stdout.write(f"Status: {status_message}")
+        sys.stdout.flush()
+
+
+# Global progress manager instance
+progress_manager = ProgressManager()
+
+
+def fetch_lastfm_with_progress(username: str, start_progress: int = 30, progress_range: int = 30) -> List[
+    Dict[str, Any]]:
+    """
+    Fetch Last.fm data with detailed progress updates.
+    Args:
+        username: Last.fm username
+        start_progress: The starting point for progress percentage
+        progress_range: How much of the total progress this operation represents
+    Returns:
+        List of scrobble data from Last.fm
+    """
+    from lfAPI import get_recent_tracks_with_progress
+
+    # Defining a progress callback that updates our progress manager
+    def progress_update(current: int, total: int, message: str) -> None:
+        progress_manager.update_subtask(current, total, message)
+
+    # Starting the task
+    progress_manager.update_progress(start_progress, f"Fetching Last.fm data for {username}...")
+    # Fetching the data with progress updates
+    try:
+        scrobbles = get_recent_tracks_with_progress(
+            username=username,
+            limit=200,  # Maximum allowed by Last.fm API
+            progress_callback=progress_update
+        )
+        # Task complete
+        progress_manager.update_progress(
+            start_progress + progress_range,
+            f"Fetched {len(scrobbles)} scrobbles from Last.fm"
+        )
+        return scrobbles
+    except Exception as e:
+        progress_manager.update_progress(
+            start_progress,
+            f"Error fetching Last.fm data: {str(e)}"
+        )
+        raise
+
+
+def format_sql_for_display(sql: str, max_width: Optional[int] = None) -> str:
+    """
+    Format SQL statement for display, ensuring it's not truncated and is readable.
+    Args:
+        sql: The SQL statement to format
+        max_width: Maximum width to display (defaults to terminal width)
+    Returns:
+        Formatted SQL ready for display
+    """
+    if not sql:
+        return ""
+    # Getting terminal width if not specified
+    if max_width is None:
+        max_width = shutil.get_terminal_size().columns - 10  # Leave some margin
+    # If SQL is already short enough, return it as is
+    if len(sql) <= max_width:
+        return sql
+    # For longer SQL, try to format it in a more readable way
+    # Split into components but ensure we don't exceed max width
+    sql_parts = sql.split()
+    result = []
+    current_line = []
+    for part in sql_parts:
+        # If adding this part would exceed width, start a new line
+        if current_line and len(" ".join(current_line + [part])) > max_width:
+            result.append(" ".join(current_line))
+            current_line = [part]
+        else:
+            current_line.append(part)
+    # Adding the last line
+    if current_line:
+        result.append(" ".join(current_line))
+    # Joining with newlines for display
+    return "\n".join(result)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -51,6 +235,7 @@ def null_progress_callback(task: str, percentage: float, message: Optional[str] 
 # side-effect imports that need to run once at start-up
 # ────────────────────────────────────────────────────────────────
 from dotenv import load_dotenv
+
 load_dotenv()
 import lfAPI  # noqa: E402
 import mbAPI  # noqa: E402

@@ -175,9 +175,8 @@ def latest_parquet(*, return_df: bool = False, use_constant: bool = True):
                 df = pd.read_parquet(constant_file)
                 return df, constant_file
             return constant_file
-    
-    # Fall back to legacy timestamped files if constant file doesn't exist or use_constant=False
-    files = sorted(PQ_DIR.glob("scrobbles_*.parquet"), reverse=True)
+    # If last.fm API fetch lacks in quality, we fall back to LB JSON fetch
+    files = sorted(PQ_DIR.glob("jurda_scrobble.parquet"), reverse=True)
     if not files:
         return (None, None) if return_df else None
     newest = files[0]

@@ -5,8 +5,8 @@ CanonFodder is a data-engineering pipeline with the following building blocks in
     — Evaluation DB: .parquet files offering a tiny analytics stack in a star schema where scrobble is the fact table
     — BI frontend: an interactive menu launched from main.py where the user can launch data harvest, and see visuals
 
-For all EDA and frontend visualizations, we want to use our
-custom colour palettes to be found at JSON/palettes.json.
+For all EDA and frontend visualizations, we want to use our custom colour palettes to be found at JSON/palettes.json.
+I have created a set of info for colorpalette_{n} from 1 < n < 11 using https://coolors.co/16697a-dbf4a7-a24936-7ebce6-e6beae.
 You can see the functions used in each relevant file in scripts/function_report.txt.
 You can see the whole BI architecture planned in BI_architecture.mmd.
 

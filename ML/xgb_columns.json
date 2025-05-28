@@ -1,0 +1,13 @@
+[
+  "partial_ratio",
+  "QRatio",
+  "ratio",
+  "token_set_ratio",
+  "token_sort_ratio",
+  "WRatio",
+  "sig_len",
+  "n_variants",
+  "avg_name_len",
+  "max_name_len",
+  "var_len"
+]

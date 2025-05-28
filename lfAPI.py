@@ -20,10 +20,9 @@ import os
 import pandas as pd
 from pathlib import Path
 from sqlalchemy import select, or_
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import typing
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Optional
 
 # Import the reference and timeline models only when the type checker needs them
 if typing.TYPE_CHECKING:  # pragma: no cover
@@ -112,6 +111,62 @@ def _fetch_country_from_lastfm(username: str) -> str:
         return code
 
 
+# --------------------------------------------------------------
+# Thin last.fm-specific wrapper around HTTP.client's make_request
+# --------------------------------------------------------------
+def _paginate(method: str, **params) -> list[dict]:
+    """
+    Handle pagination for Last.fm API calls.
+    Returns all pages of results combined into a single list.
+
+    Parameters
+    ----------
+    method : str
+        Last.fm API method name
+    **params
+        Any parameters to pass to the Last.fm API
+
+    Returns
+    -------
+    list[dict]
+        Combined list of items from all paginated responses
+    """
+    page = 1
+    results = []
+    total_pages = 1  # Will be updated after first request
+
+    while page <= total_pages:
+        params_with_page = params.copy()
+        params_with_page["page"] = page
+
+        response = lastfm_request(method, **params_with_page)
+
+        # Extract the result key based on method
+        result_key = method.split('.')[-1]
+        if method == "user.getRecentTracks":
+            items = response.get("recenttracks", {}).get("track", [])
+            attr = response.get("recenttracks", {}).get("@attr", {})
+        else:
+            # For other methods, try to determine the key dynamically
+            items_key = f"{result_key.lower()}s"  # e.g., "artists" for "getArtists"
+            items = response.get(items_key, {}).get(result_key.lower(), [])
+            attr = response.get(items_key, {}).get("@attr", {})
+
+        # Add items to our results
+        results.extend(items)
+
+        # Update total pages from response metadata
+        total_pages = int(attr.get("totalPages", "1"))
+
+        # If we're on the last page, or there are no more pages, break
+        if page >= total_pages or not items:
+            break
+
+        page += 1
+
+    return results
+
+
 def _update_user_country(session: Session, new_code: str) -> bool:
     """
     Persist the new country if it differs from *today’s* entry.
@@ -148,14 +203,12 @@ def enrich_artist_mbids(username, progress_callback=None):
     Fetch artist MBIDs from Last.fm API and update the database.
     This function gets recent tracks for the user and extracts artist MBIDs,
     then updates the database with these values.
-    
     Parameters
     ----------
     username : str
         Last.fm username
     progress_callback : callable, optional
         Callback for progress updates (task_name, percentage, message)
-        
     Returns
     -------
     dict
@@ -164,10 +217,8 @@ def enrich_artist_mbids(username, progress_callback=None):
     try:
         from sqlalchemy import text
         from DB import engine, SessionLocal
-
         if progress_callback:
             progress_callback("Initializing", 0, "Starting artist MBID enrichment")
-
         # First, get a count of artists without MBIDs in the database
         with engine.connect() as conn:
             missing_count_query = text("""
@@ -175,45 +226,36 @@ def enrich_artist_mbids(username, progress_callback=None):
                 FROM scrobble 
                 WHERE artist_mbid IS NULL OR artist_mbid = ''
             """)
-            
             missing_count = conn.execute(missing_count_query).scalar() or 0
-            
             if missing_count == 0:
                 return {
                     "status": "success", 
                     "message": "No artists missing MBIDs in database",
                     "enriched": 0
                 }
-                
             if progress_callback:
                 progress_callback("Analyzing", 5, f"Found {missing_count} artists without MBIDs")
-            
-            # Get the list of artists needing MBIDs
+            # Getting the list of artists needing MBIDs
             artists_query = text("""
                 SELECT DISTINCT artist_name 
                 FROM scrobble 
                 WHERE artist_mbid IS NULL OR artist_mbid = '' 
                 ORDER BY artist_name
             """)
-            
             artists = [row[0] for row in conn.execute(artists_query).fetchall()]
-            
-        # Process in batches to avoid overwhelming the API
+        # Processing in batches to avoid overwhelming the API
         batch_size = 50
         total_enriched = 0
         artist_mbid_map = {}
-        
         for i in range(0, len(artists), batch_size):
             batch = artists[i:i+batch_size]
-            
             if progress_callback:
                 percentage = 5 + (i / len(artists)) * 45
                 progress_callback("Fetching", percentage, f"Getting MBIDs for artists {i+1}-{i+len(batch)} of {len(artists)}")
-            
-            # Get recent tracks for each artist
+            # Getting recent tracks for each artist
             for artist_name in batch:
                 try:
-                    # Use the user's recent tracks to find MBIDs for this artist
+                    # Using the user's recent tracks to find MBIDs for this artist
                     params = {
                         'method': 'user.getrecenttracks',
                         'user': username,
@@ -242,7 +284,6 @@ def enrich_artist_mbids(username, progress_callback=None):
                                 'api_key': LASTFM_API_KEY,
                                 'format': 'json'
                             }
-                            
                             response = requests.get(LASTFM_API_URL, params=params)
                             data = response.json()
                             if 'artist' in data and 'mbid' in data['artist'] and data['artist']['mbid']:
@@ -256,7 +297,7 @@ def enrich_artist_mbids(username, progress_callback=None):
             if artist_mbid_map:
                 if progress_callback:
                     progress_callback("Updating", 50 + (i / len(artists)) * 45, 
-                                     f"Updating database with {len(artist_mbid_map)} MBIDs")
+                                      f"Updating database with {len(artist_mbid_map)} MBIDs")
                 with engine.connect() as conn:
                     conn.execute(text("BEGIN"))
                     try:
@@ -375,15 +416,12 @@ def fetch_recent(limit: int = 1000) -> pd.DataFrame:
 def fetch_recent_tracks_all_pages(user: str) -> pd.DataFrame:
     """Return all scrobbles for *user* as a DataFrame."""
     tracks = _paginate("user.getRecentTracks", user=user, limit=200)
-
     if not tracks:
         logging.warning("No tracks returned for user %s", user)
         return pd.DataFrame()
-
-    # Apply _clean_track to each track
+    # Applying _clean_track to each track
     batch = [_clean_track(t) for t in tracks]
     batch = [b for b in batch if b]  # to drop Nones
-
     return pd.DataFrame(batch)
 
 
@@ -398,7 +436,7 @@ def fetch_scrobbles_since(username: str,
     page = 1
     rows: list[dict] = []
     while True:
-        # Use lastfm_request with method as the first argument and named parameters after
+        # Using lastfm_request with method as the first argument and named parameters after
         params = {
             "user": username,
             "limit": PER_PAGE,
@@ -471,62 +509,6 @@ def iso2_for_en_name(session: Session, en_name: str) -> str | None:
     return None
 
 
-# --------------------------------------------------------------
-# Thin last.fm-specific wrapper around HTTP.client's make_request
-# --------------------------------------------------------------
-def _paginate(method: str, **params) -> list[dict]:
-    """
-    Handle pagination for Last.fm API calls.
-    Returns all pages of results combined into a single list.
-    
-    Parameters
-    ----------
-    method : str
-        Last.fm API method name
-    **params
-        Any parameters to pass to the Last.fm API
-        
-    Returns
-    -------
-    list[dict]
-        Combined list of items from all paginated responses
-    """
-    page = 1
-    results = []
-    total_pages = 1  # Will be updated after first request
-
-    while page <= total_pages:
-        params_with_page = params.copy()
-        params_with_page["page"] = page
-
-        response = lastfm_request(method, **params_with_page)
-
-        # Extract the result key based on method
-        result_key = method.split('.')[-1]
-        if method == "user.getRecentTracks":
-            items = response.get("recenttracks", {}).get("track", [])
-            attr = response.get("recenttracks", {}).get("@attr", {})
-        else:
-            # For other methods, try to determine the key dynamically
-            items_key = f"{result_key.lower()}s"  # e.g., "artists" for "getArtists"
-            items = response.get(items_key, {}).get(result_key.lower(), [])
-            attr = response.get(items_key, {}).get("@attr", {})
-
-        # Add items to our results
-        results.extend(items)
-
-        # Update total pages from response metadata
-        total_pages = int(attr.get("totalPages", "1"))
-
-        # If we're on the last page, or there are no more pages, break
-        if page >= total_pages or not items:
-            break
-
-        page += 1
-
-    return results
-
-
 def lastfm_request(
         method: str,
         *,
@@ -536,6 +518,7 @@ def lastfm_request(
         limit: Optional[int] = None,
         from_ts: Optional[int] = None,  # Added parameter to handle 'from' timestamp
         timeout: int = 10,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
         **kwargs  # Additional parameters
 ) -> Dict[str, Any]:
     """
@@ -556,6 +539,9 @@ def lastfm_request(
         Unix timestamp to fetch scrobbles from (used instead of 'from' to avoid Python keyword)
     timeout : int
         Request timeout in seconds
+    progress_callback : callable, optional
+        Function that receives progress updates as (current, total, message)
+        Used to report progress during long-running operations like pagination
     **kwargs
         Any additional parameters to pass to the Last.fm API
     Returns
@@ -595,6 +581,16 @@ def lastfm_request(
     # Add any additional parameters
     q.update(kwargs)
     # --- HTTP request ---------------------------------------------------------
+    # Report progress if callback provided
+    if progress_callback and method == "user.getRecentTracks" and page is not None:
+        # For scrobble fetching, report which page we're requesting
+        msg = f"Requesting page {page}"
+        if limit:
+            msg += f" (limit: {limit})"
+        if "from" in q:
+            msg += f" from timestamp: {q['from']}"
+        progress_callback(page, page, msg)
+    
     r = make_request(url=LASTFM_API_URL,
                      params=q,
                      headers={"User-Agent": USER_AGENT},
@@ -621,6 +617,83 @@ def lastfm_request(
                           json_body.get("message", "No message"),
                           r.url)
     return json_body  # type: ignore[return-value]
+    
+    
+def get_recent_tracks_with_progress(
+    username: str,
+    limit: int = 200,
+    from_timestamp: Optional[int] = None,
+    to_timestamp: Optional[int] = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    ) -> typing.List[Dict[str, Any]]:
+    """
+    Enhanced version of get_recent_tracks that provides detailed progress updates.
+    Parameters
+    ----------
+    username : str
+        Last.fm username
+    limit : int
+        Number of tracks per page (max 200)
+    from_timestamp : int, optional
+        Unix timestamp to fetch scrobbles from
+    to_timestamp : int, optional
+        Unix timestamp to fetch scrobbles to
+    progress_callback : callable, optional
+        Callback function to report progress (current, total, message)
+    Returns
+    -------
+    List[Dict[str, Any]]
+        List of scrobble records
+    """
+    # Initializing parameters for first request
+    params = {"extended": 1, "limit": limit}
+    if from_timestamp:
+        params["from"] = from_timestamp
+    if to_timestamp:
+        params["to"] = to_timestamp
+    # First request to get total pages
+    response = lastfm_request(
+        "user.getRecentTracks",
+        user=username,
+        page=1,
+        limit=limit,
+        progress_callback=progress_callback,
+        **params
+    )
+    # Extracting metadata
+    metadata = response.get("recenttracks", {}).get("@attr", {})
+    total_pages = int(metadata.get("totalPages", 0))
+    total_tracks = int(metadata.get("total", 0))
+    if progress_callback:
+        progress_callback(1, total_pages, f"Fetching page 1 of {total_pages} ({total_tracks} tracks total)")
+    # Storing all tracks in this list
+    all_tracks = []
+    # Extracting tracks from the first page
+    tracks = response.get("recenttracks", {}).get("track", [])
+    if not isinstance(tracks, list):
+        tracks = [tracks]
+    all_tracks.extend(tracks)
+    # Fetching remaining pages
+    for page in range(2, total_pages + 1):
+        if progress_callback:
+            progress_callback(page, total_pages, f"Fetching page {page} of {total_pages} ({len(all_tracks)}/{total_tracks} tracks)")
+        response = lastfm_request(
+            "user.getRecentTracks",
+            user=username,
+            page=page,
+            limit=limit,
+            progress_callback=progress_callback,
+            **params
+        )
+        tracks = response.get("recenttracks", {}).get("track", [])
+        if not isinstance(tracks, list):
+            tracks = [tracks]
+        all_tracks.extend(tracks)
+        # Introducing a small delay to avoid hitting rate limits
+        time.sleep(0.2)
+    if progress_callback:
+        progress_callback(total_pages, total_pages, f"Completed fetching {len(all_tracks)} tracks")
+    return all_tracks
 
 
 class LastFMError(RuntimeError):
