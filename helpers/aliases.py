@@ -12,7 +12,7 @@ from typing import Sequence
 
 from sqlalchemy import select
 
-import mbAPI
+from HTTP import mbAPI
 from DB import SessionLocal
 from DB.models import ArtistVariantsCanonized, ArtistInfo
 

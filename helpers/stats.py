@@ -1,15 +1,16 @@
 """
 Supplies small statistical helpers for feature selection and outlier checks.
 """
-from DB import SessionLocal
+from DB import SessionLocal, engine
 from DB.models import ArtistInfo
 from .io import PQ_DIR
-import mbAPI
+import logging
+from HTTP import mbAPI
 import numpy as np
 import pandas as pd
 import re
 from sklearn.metrics import confusion_matrix, classification_report
-from sqlalchemy import select, text, func
+from sqlalchemy import select, text, func, inspect
 from tabulate import tabulate
 AC_PARQUET = PQ_DIR / "ac.parquet"
 AC_COLS = ["artist_name", "country", "mbid", "disambiguation_comment"]
@@ -108,7 +109,11 @@ def artist_countries(series: pd.Series) -> pd.Series:
 
 def assign_user_country(datafr, timeline):
     temp = datafr.copy()
-    temp["day"] = pd.to_datetime(temp["Datetime"], unit="s").dt.normalize()
+    temp["day"] = (
+        pd.to_datetime(temp["Datetime"], unit="s", errors="coerce")
+        .dt.normalize()
+    )
+    temp = temp.dropna(subset=["day"])
     out = pd.merge_asof(
         temp.sort_values("day"),
         timeline[["start_date", "UserCountry"]],
@@ -289,5 +294,71 @@ def winsorization_outliers(df):
         q3 = np.percentile(df, 99)
         if n > q3 or n < q1:
             out.append(n)
-    print("Outliers:", out)
     return out
+
+
+def get_db_statistics():
+    """
+    Get statistics about the database tables.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with statistics about the database tables
+    """
+    try:
+        # Get the inspector
+        inspector = inspect(engine)
+
+        # Get table names
+        table_names = inspector.get_table_names()
+
+        # Focus on the scrobble table
+        if 'scrobble' not in table_names:
+            return None
+
+        # Get column information for the scrobble table
+        columns = inspector.get_columns('scrobble')
+        column_names = [col['name'] for col in columns]
+
+        # Create a DataFrame to store statistics
+        stats_data = []
+
+        # Connect to the database and get statistics
+        with engine.connect() as conn:
+            # Get total row count
+            total_rows = conn.execute(text("SELECT COUNT(*) FROM scrobble")).scalar()
+
+            if total_rows == 0:
+                return None
+
+            # Get statistics for each column
+            for col_name in column_names:
+                # Count non-null values
+                non_null_count = conn.execute(
+                    text(f"SELECT COUNT(*) FROM scrobble WHERE {col_name} IS NOT NULL")
+                ).scalar()
+
+                # Calculate null count and percentages
+                null_count = total_rows - non_null_count
+                non_null_percentage = (non_null_count / total_rows) * 100
+                null_percentage = (null_count / total_rows) * 100
+
+                # Add to statistics data
+                stats_data.append({
+                    'column_name': col_name,
+                    'total_rows': total_rows,
+                    'non_null_count': non_null_count,
+                    'null_count': null_count,
+                    'non_null_percentage': non_null_percentage,
+                    'null_percentage': null_percentage
+                })
+
+        # Create DataFrame from statistics data
+        stats_df = pd.DataFrame(stats_data)
+
+        return stats_df
+
+    except Exception as e:
+        logging.error(f"Error getting database statistics: {e}")
+        return None

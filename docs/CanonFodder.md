@@ -34,7 +34,7 @@ Code is provided to allow for users to opt for Postgres or sqlite.
 4. user_country: id, country_code, start_date, end_date
 
 Eval DB = .parquet files overwritten periodically and on-demand from DB
-1. scrobble.parquet: artist_name, album_title, track_title, play_time
+1. scrobble.parquet: artist_name, album_title, track_title, play_time, artist_mbid
 2. artist_info.parquet: artist_name, disambiguation_comment, country
 3. avc.parquet: artist_variants, canonical_name, to_link, comment, stamp
 4. uc.parquet: country_code, start_date, end_date

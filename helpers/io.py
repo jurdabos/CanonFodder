@@ -62,6 +62,9 @@ def append_or_create_parquet(df: pd.DataFrame, path: Path) -> None:
         "album_title": "album_title",
         "artist_mbid": "artist_mbid"
     }
+    # Define the expected column order (matching what's used in profile.py)
+    expected_column_order = ["artist_name", "album_title", "play_time", "track_title", "artist_mbid"]
+
     # Creating a normalized copy of the dataframe
     normalized_df = df.copy()
     # Normalizing column names in the new dataframe
@@ -109,9 +112,20 @@ def append_or_create_parquet(df: pd.DataFrame, path: Path) -> None:
         else:
             logger.warning("No common deduplication columns found, concatenating without deduplication")
             combined_df = pd.concat([existing_df, normalized_df])
+        # Ensure columns are in the expected order before saving
+        available_expected_columns = [col for col in expected_column_order if col in combined_df.columns]
+        other_columns = [col for col in combined_df.columns if col not in expected_column_order]
+        final_column_order = available_expected_columns + other_columns
+        combined_df = combined_df[final_column_order]
         combined_df.to_parquet(path, index=False)
         print(f"[io] parquet updated with {len(df)} rows → {path} (total: {len(combined_df)} rows)")
     else:
+        # Ensure columns are in the expected order before saving
+        available_expected_columns = [col for col in expected_column_order if col in normalized_df.columns]
+        other_columns = [col for col in normalized_df.columns if col not in expected_column_order]
+        final_column_order = available_expected_columns + other_columns
+        normalized_df = normalized_df[final_column_order]
+
         # Just write the new data, but ensure it has normalized column names for future consistency
         normalized_df.to_parquet(path, index=False)
         print(f"[io] new parquet created with {len(df)} rows → {path}")
@@ -148,12 +162,19 @@ def dump_parquet(df: pd.DataFrame | None = None,
         df, _tbl = load_scrobble_table_from_db_to_df(engine)
         if df is None:
             raise RuntimeError("No scrobble table available to dump.")
+    # Define the expected column order (matching what's used in profile.py)
+    expected_column_order = ["artist_name", "album_title", "play_time", "track_title", "artist_mbid"]
+    # Ensure columns are in the expected order before saving
+    available_expected_columns = [col for col in expected_column_order if col in df.columns]
+    other_columns = [col for col in df.columns if col not in expected_column_order]
+    final_column_order = available_expected_columns + other_columns
+    df_ordered = df[final_column_order]
     out = _parquet_name(stamp, constant=constant)
     if constant:
-        append_or_create_parquet(df, out)
+        append_or_create_parquet(df_ordered, out)
     else:
-        # Legacy behavior - create a new timestamped file
-        df.to_parquet(out, index=False)
+        # Legacy behavior - create a new timestamped file, but still ensure column order
+        df_ordered.to_parquet(out, index=False)
         print(f"[io] parquet written → {out}")
     return out
 

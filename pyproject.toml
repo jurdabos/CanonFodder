@@ -1,7 +1,11 @@
+# This is a minimal pyproject.toml file that points to the config directory
+# The actual configuration is in config/pyproject.toml
+
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# Include the pytest configuration from config/pyproject.toml
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
@@ -9,6 +13,7 @@ python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --cov=. --cov-report=term-missing"
 
+# Include the coverage configuration from config/pyproject.toml
 [tool.coverage.run]
 source = ["."]
 omit = [
@@ -16,7 +21,7 @@ omit = [
     "venv/*",
     "env/*",
     "*/site-packages/*",
-    "setup.py",
+    "config/*",
 ]
 
 [tool.coverage.report]

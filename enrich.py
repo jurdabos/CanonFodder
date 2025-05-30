@@ -7,7 +7,7 @@ from DB.ops import insert_ignore
 import asyncio
 from corefunc import llm
 import logging
-from mbAPI import search_artist, _cache_artist  # noqa  (private ok inside project)
+from HTTP.mbAPI import search_artist, _cache_artist  # noqa  (private ok inside project)
 import os
 import pandas as pd
 from pathlib import Path

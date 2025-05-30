@@ -1,16 +1,14 @@
-from setuptools import find_packages, setup
+# This file is deprecated and will be removed in a future release.
+# Please use the setup.py file in the config directory instead.
+# For development installation, run: pip install -e config/
 
-with open("requirements.txt", "r") as f:
-    requirements = f.read().splitlines()
+print("Warning: This setup.py file is deprecated and should not be used.")
+print("Please use the setup.py file in the config directory instead.")
+print("For development installation, run: pip install -e config/")
+print("The CanonFodder.egg-info directory in the project root is not needed and can be safely deleted.")
 
-setup(
-    name='CanonFodder',
-    packages=find_packages(exclude=['examples']),
-    version='1.3',
-    license='MIT',
-    description='Code base for a written assignment in the field of Data Quality and Data Wrangling at IU',
-    author='Torda Balázs',
-    author_email='balazs.torda@iu-study.org',
-    url='https://github.com/jurdabos/canonfodder',
-    install_requires=requirements,
+# Raise an error to prevent installation from the project root
+raise RuntimeError(
+    "Installation from the project root is not supported. "
+    "Please use 'pip install -e config/' instead."
 )

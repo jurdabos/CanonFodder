@@ -7,1277 +7,36 @@ a more console-like experience.
 from __future__ import annotations
 import os
 import sys
-import time
-import random
-import threading
 import logging
-import curses
-import locale
-import shutil
-from pathlib import Path
-from typing import Protocol, Optional, Dict, Any, List, Callable
 import argparse
 import platform
 import signal
-from sqlalchemy import delete
+import re
+import threading
+from pathlib import Path
+from typing import Optional
+from sqlalchemy import delete, select, text, func
 
+# Import from helpers
+from helpers.progress import ProgressCallback, null_progress_callback
+from helpers.cli_interface import CliInterface, Colors, init_colors, start_gui, get_db_statistics
+from helpers.formatting import format_sql_for_display
+from helpers.cli import choose_lastfm_user
 
-class ProgressManager:
-    """
-    Manages progress display with more granular updates, especially for
-    long-running operations like Last.fm scrobble fetching.
-    """
+# Import from corefunc
+from corefunc.workflow import run_data_gathering_workflow
 
-    def __init__(self):
-        self.terminal_width = shutil.get_terminal_size().columns
-        self.current_progress = 0
-        self.target_progress = 100
-        self.task_name = ""
-        self.message = ""
-        self.sub_progress = 0
-        self.sub_total = 0
-        self._lock = threading.Lock()
+# Import from HTTP
+from HTTP.lfAPI import fetch_lastfm_with_progress
 
-    def start_task(self, task_name: str, initial_progress: int = 0) -> None:
-        """Start a new task with the given name and initial progress."""
-        with self._lock:
-            self.task_name = task_name
-            self.current_progress = initial_progress
-            self.message = ""
-            self.sub_progress = 0
-            self.sub_total = 0
-            self._display_progress()
-
-    def update_progress(self, progress: int, message: str = "") -> None:
-        """Update the overall progress and optional message."""
-        with self._lock:
-            self.current_progress = min(progress, 100)
-            if message:
-                self.message = message
-            self._display_progress()
-
-    def update_subtask(self, current: int, total: int, message: str = "") -> None:
-        """
-        Update progress for a subtask (like fetching X of Y scrobbles).
-        This will interpolate progress within the current task segment.
-        """
-        with self._lock:
-            self.sub_progress = current
-            self.sub_total = total
-            if message:
-                self.message = message
-            self._display_progress()
-
-    def increment_progress(self, amount: int = 1, message: str = "") -> None:
-        """Increment progress by the specified amount."""
-        with self._lock:
-            self.current_progress = min(self.current_progress + amount, 100)
-            if message:
-                self.message = message
-            self._display_progress()
-
-    def complete_task(self, message: str = "Task completed") -> None:
-        """Mark the current task as complete."""
-        with self._lock:
-            self.current_progress = 100
-            self.message = message
-            self.sub_progress = 0
-            self.sub_total = 0
-            self._display_progress()
-
-    def _display_progress(self) -> None:
-        """Display the current progress with a proper progress bar."""
-        # Calculate actual progress considering subtask if applicable
-        actual_progress = self.current_progress
-        if self.sub_total > 0:
-            # Calculating percentage within the current progress segment
-            segment_size = 30  # Last.fm typically takes 30% of overall progress
-            sub_percent = (self.sub_progress / self.sub_total) if self.sub_total > 0 else 0
-            # Adjusting the progress within its segment
-            start_progress = self.current_progress - segment_size
-            actual_progress = start_progress + (sub_percent * segment_size)
-        # Formatting the message to prevent truncation
-        status_message = self.message
-        if status_message:
-            # Calculating available width for message
-            # Progress bar takes about 100 chars
-            max_msg_width = self.terminal_width - 110
-            if len(status_message) > max_msg_width > 10:
-                # If we need to truncate, do it intelligently
-                half_width = (max_msg_width - 3) // 2
-                status_message = f"{status_message[:half_width]}...{status_message[-half_width:]}"
-        # Creating the progress bar
-        bar_width = 100
-        filled_length = int(bar_width * actual_progress / 100)
-        bar = f"│{'█' * filled_length}{' ' * (bar_width - filled_length)}│"
-        # Displaying progress information
-        sys.stdout.write("\r" + " " * self.terminal_width + "\r")  # to clear line
-        # Task name
-        sys.stdout.write(f"Task: {self.task_name}")
-        sys.stdout.write("\n")
-        # Progress bar with percentage
-        progress_display = f"┌{'─' * (bar_width + 2)}┐\n{bar} {actual_progress:.1f}%\n└{'─' * (bar_width + 2)}┘"
-        sys.stdout.write(progress_display)
-        sys.stdout.write("\n")
-        # Status message (avoid truncation)
-        if status_message:
-            sys.stdout.write(f"Status: {status_message}")
-        sys.stdout.flush()
-
-
-# Global progress manager instance
-progress_manager = ProgressManager()
-
-
-def fetch_lastfm_with_progress(username: str, start_progress: int = 30, progress_range: int = 30) -> List[
-    Dict[str, Any]]:
-    """
-    Fetch Last.fm data with detailed progress updates.
-    Args:
-        username: Last.fm username
-        start_progress: The starting point for progress percentage
-        progress_range: How much of the total progress this operation represents
-    Returns:
-        List of scrobble data from Last.fm
-    """
-    from lfAPI import get_recent_tracks_with_progress
-
-    # Defining a progress callback that updates our progress manager
-    def progress_update(current: int, total: int, message: str) -> None:
-        progress_manager.update_subtask(current, total, message)
-
-    # Starting the task
-    progress_manager.update_progress(start_progress, f"Fetching Last.fm data for {username}...")
-    # Fetching the data with progress updates
-    try:
-        scrobbles = get_recent_tracks_with_progress(
-            username=username,
-            limit=200,  # Maximum allowed by Last.fm API
-            progress_callback=progress_update
-        )
-        # Task complete
-        progress_manager.update_progress(
-            start_progress + progress_range,
-            f"Fetched {len(scrobbles)} scrobbles from Last.fm"
-        )
-        return scrobbles
-    except Exception as e:
-        progress_manager.update_progress(
-            start_progress,
-            f"Error fetching Last.fm data: {str(e)}"
-        )
-        raise
-
-
-def format_sql_for_display(sql: str, max_width: Optional[int] = None) -> str:
-    """
-    Format SQL statement for display, ensuring it's not truncated and is readable.
-    Args:
-        sql: The SQL statement to format
-        max_width: Maximum width to display (defaults to terminal width)
-    Returns:
-        Formatted SQL ready for display
-    """
-    if not sql:
-        return ""
-    # Getting terminal width if not specified
-    if max_width is None:
-        max_width = shutil.get_terminal_size().columns - 10  # Leave some margin
-    # If SQL is already short enough, return it as is
-    if len(sql) <= max_width:
-        return sql
-    # For longer SQL, try to format it in a more readable way
-    # Split into components but ensure we don't exceed max width
-    sql_parts = sql.split()
-    result = []
-    current_line = []
-    for part in sql_parts:
-        # If adding this part would exceed width, start a new line
-        if current_line and len(" ".join(current_line + [part])) > max_width:
-            result.append(" ".join(current_line))
-            current_line = [part]
-        else:
-            current_line.append(part)
-    # Adding the last line
-    if current_line:
-        result.append(" ".join(current_line))
-    # Joining with newlines for display
-    return "\n".join(result)
-
-
-# ────────────────────────────────────────────────────────────────
-# Type definitions
-# ────────────────────────────────────────────────────────────────
-class ProgressCallback(Protocol):
-    """Protocol for progress callback functions."""
-
-    def __call__(self, task: str, percentage: float, message: Optional[str] = None) -> None:
-        """
-        Report progress of a task.
-        Parameters
-        ----------
-        task : str
-            Name of the current task
-        percentage : float
-            Progress percentage (0-100)
-        message : str, optional
-            Optional status message
-        """
-        ...
-
-
-def null_progress_callback(task: str, percentage: float, message: Optional[str] = None) -> None:
-    """No-op progress callback for when no callback is provided."""
-    pass
-
-
-# ────────────────────────────────────────────────────────────────
-# side-effect imports that need to run once at start-up
-# ────────────────────────────────────────────────────────────────
-from dotenv import load_dotenv
-
-load_dotenv()
-import lfAPI  # noqa: E402
-import mbAPI  # noqa: E402
-from DB import engine, SessionLocal  # noqa: E402
-from DB.models import Base, ArtistInfo  # noqa: E402
+# Import from DB
+from DB import SessionLocal
+from DB.models import ArtistInfo, Scrobble, Base
 from DB.ops import populate_artist_info_from_scrobbles
-from DB.models import ArtistInfo
-from sqlalchemy import select, func, text
-from corefunc import dataprofiler as dp  # noqa: E402
-from corefunc import canonizer as cz  # noqa: E402
-from helpers.cli import choose_lastfm_user, unify_artist_names_cli  # CLI integration  # noqa: E402
 
-# ────────────────────────────────────────────────────────────────
-# GLOBAL CONSTANTS
-# ────────────────────────────────────────────────────────────────
-APP_TITLE = "CanonFodder"
-WELCOME_TEXT = (
-    "CanonFodder is a SINGLE-USER installation – one database, one Last.fm user.\n\n"
-    "To analyse another account you currently need to install CanonFodder again "
-    "into a separate directory (or virtualenv) so the databases do not overlap.\n\n"
-    "Please enter the Last.fm user name that shall be analysed in THIS installation."
-)
-
-# Color definitions for the steampunk-inspired CLI interface
-COLORS = {
-    # Original colors
-    "WHITE": "#FFFFFF",
-    "BLACK": "#000000",
-    "TEAL": "#16697A",  # Caribbean Current
-    "LIME": "#DBF4A7",  # Mindaro
-    "RUST": "#A24936",  # Chestnut
-    "BLUE": "#7EBCE6",  # Maya Blue
-    "PEACH": "#E6BEAE",  # Pale Dogwood
-
-    # New colors from Coolors palette
-    "SAGE": "#79AF91",  # Cambridge Blue
-    "SAND": "#BF9F6F",  # Lion
-    "MAUVE": "#996662",  # Rose Taupe
-    "SLATE": "#90838E",  # Taupe Gray
-    "SILVER": "#B2BDCA"  # French Gray
-}
-
-
-# Terminal color codes (ANSI escape sequences)
-# Not all terminals support true color, so we use approximations
-class Colors:
-    RESET = "\033[0m"
-    WHITE = "\033[97m"
-    BLACK = "\033[30m"
-    TEAL = "\033[36m"  # Caribbean Current
-    LIME = "\033[92m"  # Mindaro
-    RUST = "\033[31m"  # Chestnut
-    BLUE = "\033[94m"  # Maya Blue
-    PEACH = "\033[93m"  # Pale Dogwood
-    SAGE = "\033[32m"  # Cambridge Blue
-    SAND = "\033[33m"  # Lion
-    MAUVE = "\033[35m"  # Rose Taupe
-    SLATE = "\033[90m"  # Taupe Gray
-    SILVER = "\033[37m"  # French Gray
-
-    # Background colors
-    BG_BLACK = "\033[40m"
-    BG_WHITE = "\033[107m"
-    BG_TEAL = "\033[46m"
-    BG_LIME = "\033[102m"
-    BG_RUST = "\033[41m"
-    BG_BLUE = "\033[104m"
-    BG_PEACH = "\033[103m"
-    BG_SAGE = "\033[42m"
-    BG_SAND = "\033[43m"
-    BG_MAUVE = "\033[45m"
-    BG_SLATE = "\033[100m"
-    BG_SILVER = "\033[47m"
-
-    # Text styles
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
-    BLINK = "\033[5m"
-    REVERSE = "\033[7m"
-
-
-# Initialize color support based on platform
-def init_colors():
-    if platform.system() == "Windows":
-        # Enable ANSI colors on Windows
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
-        except Exception:
-            pass  # Fail silently if Windows color initialization fails
-
-
-def run_data_gathering_workflow(
-        username: str = None,
-        progress_callback: Optional[ProgressCallback] = None
-) -> None:
-    """
-    Run the standard data gathering workflow.
-    Parameters
-    ----------
-    username : str, optional
-        Last.fm username to fetch data for. If None, will prompt for input.
-    progress_callback : ProgressCallback, optional
-        Callback function for progress updates, receiving:
-            task_name: str - Current task name
-            percentage: float - Progress percentage (0-100)
-            message: str - Optional status message
-    """
-    # Use null callback if none provided
-    if progress_callback is None:
-        progress_callback = null_progress_callback
-    # If no username provided, use CLI prompt (only in CLI mode)
-    if username is None:
-        logging.basicConfig(level=logging.INFO,
-                            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        username = choose_lastfm_user()
-        if not username:
-            print("No username provided, exiting.")
-            return None
-    try:
-        import os
-        import json
-        import pandas as pd
-        import seaborn as sns
-        import matplotlib
-        matplotlib.use("TkAgg")
-        from DB import engine, SessionLocal
-        from DB.ops import (
-            ascii_freq,
-            bulk_insert_scrobbles,
-            load_scrobble_table_from_db_to_df,
-            seed_ascii_chars
-        )
-        from helpers.io import (
-            dump_parquet,
-            latest_parquet,
-            register_custom_palette
-        )
-        from helpers.cli import (
-            yes_no
-        )
-        import helpers.aliases as mb_alias
-        import mbAPI
-        # Configure logging - normal StreamHandler so logs appear in console too
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(message)s",
-            handlers=[logging.StreamHandler()],
-        )
-        # Report progress if callback provided
-        if progress_callback:
-            progress_callback("Initializing", 5, "Setting up environment")
-        # ─── Set-up ─────────────────────────────────
-        Base.metadata.create_all(engine)
-        pd.options.display.max_columns = None
-        pd.options.display.max_rows = None
-        pd.set_option("display.width", 200)
-        HERE = Path(__file__).resolve().parent
-        JSON_DIR = HERE / "JSON"
-        PALETTES_FILE = JSON_DIR / "palettes.json"
-        if progress_callback:
-            progress_callback("Initializing", 10, "Loading color palettes")
-        else:
-            print(f"\nFetching recent scrobbles for {username}...")
-        # Load custom palette
-        try:
-            with PALETTES_FILE.open("r", encoding="utf-8") as fh:
-                custom_palettes = json.load(fh)["palettes"]
-            custom_colors = register_custom_palette("colorpalette_5", custom_palettes)
-            sns.set_style(style="whitegrid")
-            sns.set_palette(sns.color_palette(custom_colors))
-            cmap = sns.diverging_palette(220, 10, as_cmap=True)
-        except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
-            logging.warning(f"Could not load custom palette: {e}")
-            # Use default style if palettes file can't be loaded
-            sns.set_style(style="whitegrid")
-            custom_colors = None
-        if progress_callback:
-            progress_callback("Checking database", 15, "Looking for existing scrobbles")
-        # Find newest scrobble timestamp already in DB
-        try:
-            df_db, _tbl = load_scrobble_table_from_db_to_df(engine)
-            latest_ts: int | None = None
-            if df_db is not None and not df_db.empty:
-                latest_ts = int(df_db["play_time"].max().timestamp())
-                logging.info("DB already holds %s scrobbles – newest at %s",
-                             len(df_db), df_db['play_time'].max())
-                if progress_callback:
-                    progress_callback("Checking database", 25, f"Found {len(df_db)} scrobbles in database")
-            else:
-                if progress_callback:
-                    progress_callback("Checking database", 25, "No existing scrobbles found")
-        except Exception as e:
-            logging.error(f"Error accessing database: {e}")
-            latest_ts = None
-            if progress_callback:
-                progress_callback("Checking database", 25, "Error querying database")
-        logging.info("Fetching scrobbles from Last.fm API%s …",
-                     f' since {latest_ts}' if latest_ts else '')
-        if progress_callback:
-            progress_callback("Fetching from Last.fm API", 30, "Connecting to Last.fm")
-
-        # Fetch scrobbles with progress updates
-        class ProgressTracker:
-            def __init__(self, callback: ProgressCallback):
-                self.total_pages = 0
-                self.current_page = 0
-                self.callback = callback
-
-            def update(self, current_page, total_pages=None):
-                if total_pages is not None:
-                    self.total_pages = total_pages
-                self.current_page = current_page
-                if self.total_pages > 0:
-                    percentage = 30 + (self.current_page / self.total_pages) * 40
-                    msg = f"Page {self.current_page}/{self.total_pages}"
-                    self.callback("Fetching from Last.fm API", percentage, msg)
-
-        tracker = ProgressTracker(progress_callback)
-
-        df_recent = lfAPI.fetch_scrobbles_since(username, latest_ts)
-        # ─── API stage ──────────────
-        if df_recent.empty:
-            logging.info("No NEW scrobbles since last run – nothing to do.")
-            if progress_callback:
-                progress_callback("Complete", 100, "No new scrobbles to process")
-            else:
-                print("No NEW scrobbles since last run – nothing to do.")
-            return 0 if username is None else None  # For CLI compatibility
-        if progress_callback:
-            progress_callback("Processing data", 75, f"Processing {len(df_recent)} scrobbles")
-        else:
-            print(f"Added {len(df_recent)} new scrobbles to the database.")
-        # Insert into database
-        if progress_callback:
-            progress_callback("Storing results", 80, "Inserting into database")
-        bulk_insert_scrobbles(df_recent, engine)
-        # Update country information
-        if not progress_callback:
-            print("\nUpdating country information...")
-            try:
-                with SessionLocal() as session:
-                    updated = lfAPI.sync_user_country(session, username)
-                    if updated:
-                        print("Country information updated.")
-                    else:
-                        print("Country information is already up-to-date.")
-            except Exception as e:
-                print(f"Error updating country information: {str(e)}")
-        elif progress_callback:
-            try:
-                with SessionLocal() as session:
-                    updated = lfAPI.sync_user_country(session, username)
-                    progress_callback("Storing results", 85, "Country information updated")
-            except Exception as e:
-                progress_callback("Storing results", 85, f"Error updating country: {str(e)}")
-        if progress_callback:
-            progress_callback("Storing results", 90, "Updating statistics")
-        else:
-            print("\nRunning data profiling...")
-        progress_callback("Enriching", 92, "Populating artist metadata…")
-        try:
-            populate_artist_info_from_scrobbles(progress_cb=progress_callback)
-        except Exception as exc:
-            progress_callback("Warning", 92, f"Artist enrichment failed: {exc}")
-        progress_callback("Complete", 94, "Full refresh done")
-
-        if progress_callback:
-            progress_callback("Finalizing", 96, "Saving to parquet files")
-        # Save to single consolidated parquet file
-        dump_parquet(df_recent, constant=True)
-        # Run data profiling
-        if not progress_callback:
-            try:
-                dp.run_profiling()
-                print("Data profiling completed.")
-            except Exception as e:
-                print(f"Error during data profiling: {str(e)}")
-        logging.info("Data gathering finished successfully.")
-        if progress_callback:
-            progress_callback("Complete", 100, "Data gathering completed successfully")
-        else:
-            print("\nWorkflow completed successfully.")
-        return 0 if username is None else None  # Return value for CLI compatibility
-
-    except KeyError as e:
-        # Specific handling for common errors
-        error_msg = f"Data format error: {str(e)}"
-        logging.exception(f"Data structure error in data gathering workflow: {error_msg}")
-        if progress_callback:
-            progress_callback("Error", 100, error_msg)
-        else:
-            print(error_msg)
-            print("This may indicate an issue with the Last.fm API response format.")
-        raise  # Re-raise to be caught by the calling function
-    except Exception as e:
-        # More detailed error information for general exceptions
-        import traceback
-        error_details = traceback.format_exc()
-        error_msg = f"Error: {str(e)}"
-        logging.exception(f"Unexpected error in data gathering workflow: {error_msg}\n{error_details}")
-        if progress_callback:
-            progress_callback("Error", 100, error_msg)
-        else:
-            print(error_msg)
-            print("Check the log file for more details.")
-        raise  # Re-raise to be caught by the calling function
-
-
-# ────────────────────────────────────────────────────────────────
-# CLI-based interface starter
-# ────────────────────────────────────────────────────────────────
-def get_db_statistics():
-    """Fetch and format database statistics."""
-    try:
-        from DB import engine
-        from sqlalchemy import text
-        import pandas as pd
-        # SQL query similar to the one in DB/testerqueries.sql
-        stats_query = """
-        SELECT
-          'artist_mbid' AS column_name,
-          COUNT(*) AS total_rows,
-          COUNT(CASE WHEN artist_mbid IS NOT NULL AND TRIM(artist_mbid) != '' THEN 1 END) AS non_null_count,
-          COUNT(CASE WHEN artist_mbid IS NULL OR TRIM(artist_mbid) = '' THEN 1 END) AS null_count,
-          ROUND(COUNT(CASE WHEN artist_mbid IS NOT NULL AND TRIM(artist_mbid) != '' THEN 1 END) / COUNT(*) * 100, 2) AS non_null_percentage,
-          ROUND(COUNT(CASE WHEN artist_mbid IS NULL OR TRIM(artist_mbid) = '' THEN 1 END) / COUNT(*) * 100, 2) AS null_percentage
-        FROM scrobble
-        UNION ALL
-        SELECT
-          'artist_aliases' AS column_name,
-          COUNT(*) AS total_rows,
-          COUNT(CASE WHEN aliases IS NOT NULL AND TRIM(aliases) != '' THEN 1 END) AS non_null_count,
-          COUNT(CASE WHEN aliases IS NULL OR TRIM(aliases) = '' THEN 1 END) AS null_count,
-          ROUND(COUNT(CASE WHEN aliases IS NOT NULL AND TRIM(aliases) != '' THEN 1 END) / COUNT(*) * 100, 2) AS non_null_percentage,
-          ROUND(COUNT(CASE WHEN aliases IS NULL OR TRIM(aliases) = '' THEN 1 END) / COUNT(*) * 100, 2) AS null_percentage
-        FROM artist_info
-        UNION ALL
-        SELECT
-          'album_title',
-          COUNT(*),
-          COUNT(CASE WHEN album_title IS NOT NULL AND TRIM(album_title) != '' THEN 1 END),
-          COUNT(CASE WHEN album_title IS NULL OR TRIM(album_title) = '' THEN 1 END),
-          ROUND(COUNT(CASE WHEN album_title IS NOT NULL AND TRIM(album_title) != '' THEN 1 END) / COUNT(*) * 100, 2),
-          ROUND(COUNT(CASE WHEN album_title IS NULL OR TRIM(album_title) = '' THEN 1 END) / COUNT(*) * 100, 2)
-        FROM scrobble
-        UNION ALL
-        SELECT
-          'track_title',
-          COUNT(*),
-          COUNT(CASE WHEN track_title IS NOT NULL AND TRIM(track_title) != '' THEN 1 END),
-          COUNT(CASE WHEN track_title IS NULL OR TRIM(track_title) = '' THEN 1 END),
-          ROUND(COUNT(CASE WHEN track_title IS NOT NULL AND TRIM(track_title) != '' THEN 1 END) / COUNT(*) * 100, 2),
-          ROUND(COUNT(CASE WHEN track_title IS NULL OR TRIM(track_title) = '' THEN 1 END) / COUNT(*) * 100, 2)
-        FROM scrobble
-        UNION ALL
-        SELECT
-          'artist_name',
-          COUNT(*),
-          COUNT(CASE WHEN artist_name IS NOT NULL AND TRIM(artist_name) != '' THEN 1 END),
-          COUNT(CASE WHEN artist_name IS NULL OR TRIM(artist_name) = '' THEN 1 END),
-          ROUND(COUNT(CASE WHEN artist_name IS NOT NULL AND TRIM(artist_name) != '' THEN 1 END) / COUNT(*) * 100, 2),
-          ROUND(COUNT(CASE WHEN artist_name IS NULL OR TRIM(artist_name) = '' THEN 1 END) / COUNT(*) * 100, 2)
-        FROM scrobble
-        UNION ALL
-        SELECT
-          'play_time',
-          COUNT(*),
-          COUNT(CASE WHEN play_time IS NOT NULL THEN 1 END),
-          COUNT(CASE WHEN play_time IS NULL THEN 1 END),
-          ROUND(COUNT(CASE WHEN play_time IS NOT NULL THEN 1 END) / COUNT(*) * 100, 2),
-          ROUND(COUNT(CASE WHEN play_time IS NULL THEN 1 END) / COUNT(*) * 100, 2)
-        FROM scrobble
-        """
-        with engine.connect() as connection:
-            result = connection.execute(text(stats_query))
-            df = pd.DataFrame(result.fetchall(), columns=result.keys())
-        return df
-    except Exception as e:
-        logging.error(f"Error fetching database statistics: {e}")
-        return None
-
-
-def start_gui():
-    """Start the CanonFodder CLI-based interface."""
-    # Initialize and start the CLI interface
-    cli = CliInterface()
-    cli.start()
-
-
-# ────────────────────────────────────────────────────────────────
-# CLI interface implementation
-# ────────────────────────────────────────────────────────────────
-
-class CliInterface:
-    """
-    CLI-based interface for CanonFodder with animated typing and 
-    steampunk-inspired terminal aesthetics.
-    """
-
-    def __init__(self):
-        """Initialize the CLI interface."""
-        self.username = None
-        self.stdscr = None
-        # Check for saved username
-        self._load_username()
-
-    def _load_username(self):
-        """Load username from environment or config file."""
-        self.username = os.getenv("LASTFM_USER")
-
-        # Check for config file if not found in environment
-        if not self.username:
-            config_path = Path.home() / ".canonrc"
-            if config_path.exists():
-                try:
-                    with open(config_path, "r") as f:
-                        for line in f:
-                            if line.startswith("username="):
-                                self.username = line.split("=")[1].strip()
-                                break
-                except Exception as e:
-                    logging.warning(f"Failed to read config file: {e}")
-
-    @staticmethod
-    def _save_username(username):
-        """Save username to environment and config file."""
-        # Save to environment for current session
-        os.environ["LASTFM_USER"] = username
-
-        # Try to save to config file for persistence
-        try:
-            config_path = Path.home() / ".canonrc"
-            if config_path.exists():
-                with open(config_path, "r") as f:
-                    lines = f.readlines()
-
-                # Update existing username line or add new one
-                username_line_found = False
-                for i, line in enumerate(lines):
-                    if line.startswith("username="):
-                        lines[i] = f"username={username}\n"
-                        username_line_found = True
-                        break
-
-                if not username_line_found:
-                    lines.append(f"username={username}\n")
-
-                with open(config_path, "w") as f:
-                    f.writelines(lines)
-            else:
-                # Create new config file
-                with open(config_path, "w") as f:
-                    f.write(f"username={username}\n")
-        except Exception as e:
-            logging.warning(f"Failed to save username to config: {e}")
-
-    def start(self):
-        """Start the CLI interface with curses."""
-        # Configure locale for proper UTF-8 support
-        locale.setlocale(locale.LC_ALL, '')
-
-        # Start the curses application
-        curses.wrapper(self._main_loop)
-
-    def _main_loop(self, stdscr):
-        """Main application loop with curses screen."""
-        self.stdscr = stdscr
-
-        # Configure curses
-        curses.curs_set(0)  # Hide cursor
-        curses.start_color()
-        curses.use_default_colors()
-
-        # Initialize color pairs
-        self._init_color_pairs()
-
-        # Clear screen
-        self.stdscr.clear()
-
-        # Show welcome screen or main menu based on username
-        if self.username:
-            self._show_main_menu()
-        else:
-            self._show_welcome_screen()
-
-    @staticmethod
-    def _init_color_pairs():
-        """Initialize curses color pairs for the interface."""
-        # Basic colors - these numbers need to be between 0-7 for base colors
-        # and 8-15 for bright variants in most terminals
-        curses.init_pair(1, curses.COLOR_WHITE, -1)    # White on default
-        curses.init_pair(2, curses.COLOR_CYAN, -1)     # Teal/Cyan on default
-        curses.init_pair(3, curses.COLOR_GREEN, -1)    # Green/Lime on default
-        curses.init_pair(4, curses.COLOR_RED, -1)      # Rust/Red on default
-        curses.init_pair(5, curses.COLOR_BLUE, -1)     # Blue on default
-        curses.init_pair(6, curses.COLOR_YELLOW, -1)   # Peach/Yellow on default
-        curses.init_pair(11, curses.COLOR_MAGENTA, -1) # Mauve/Rose on default
-        curses.init_pair(12, curses.COLOR_BLACK, -1)   # Black on default
-        
-        # Additional colors - using extended color pairs where available
-        # Not all terminals support these extended colors, so these are a best-effort
-        try:
-            # Dark green for Sage
-            curses.init_pair(13, 28, -1)  # Dark green for Sage
-            # Brown/gold for Sand
-            curses.init_pair(14, 130, -1) # Brown/gold for Sand
-            # Gray for Slate
-            curses.init_pair(15, 244, -1) # Gray for Slate
-            # Light gray for Silver
-            curses.init_pair(16, 250, -1) # Light gray for Silver
-        except:
-            # Fallback to basic colors if extended colors aren't available
-            curses.init_pair(13, curses.COLOR_GREEN, -1)   # Sage (fallback)
-            curses.init_pair(14, curses.COLOR_YELLOW, -1)  # Sand (fallback)
-            curses.init_pair(15, curses.COLOR_WHITE, -1)   # Slate (fallback)
-            curses.init_pair(16, curses.COLOR_WHITE, -1)   # Silver (fallback)
-    
-        # Highlight pairs
-        curses.init_pair(7, curses.COLOR_BLACK, curses.COLOR_WHITE)   # White highlight
-        curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_CYAN)    # Cyan highlight
-        curses.init_pair(9, curses.COLOR_BLACK, curses.COLOR_GREEN)   # Green highlight
-        curses.init_pair(10, curses.COLOR_BLACK, curses.COLOR_RED)    # Red highlight
-        
-        # Additional highlight pairs
-        try:
-            curses.init_pair(17, curses.COLOR_BLACK, curses.COLOR_MAGENTA)  # Mauve highlight
-            curses.init_pair(18, curses.COLOR_BLACK, curses.COLOR_YELLOW)   # Sand highlight
-            curses.init_pair(19, curses.COLOR_BLACK, 244)                   # Slate highlight
-            curses.init_pair(20, curses.COLOR_BLACK, 250)                   # Silver highlight
-        except:
-            # Fallbacks
-            curses.init_pair(17, curses.COLOR_BLACK, curses.COLOR_MAGENTA)  # Mauve highlight
-            curses.init_pair(18, curses.COLOR_BLACK, curses.COLOR_YELLOW)   # Sand highlight
-            curses.init_pair(19, curses.COLOR_BLACK, curses.COLOR_WHITE)    # Slate highlight
-            curses.init_pair(20, curses.COLOR_BLACK, curses.COLOR_WHITE)    # Silver highlight
-
-    def _animated_type(self, y, x, text, color_pair=0, delay=0.03, highlight=False):
-        """Type text with animation effect."""
-        if DISABLE_ANIMATIONS:
-            # If animations disabled, just print the text immediately
-            attr = curses.A_BOLD if highlight else 0
-            self.stdscr.addstr(y, x, text, curses.color_pair(color_pair) | attr)
-            self.stdscr.refresh()
-            return
-
-        for i, char in enumerate(text):
-            attr = curses.A_BOLD if highlight else 0
-            self.stdscr.addstr(y, x + i, char, curses.color_pair(color_pair) | attr)
-            self.stdscr.refresh()
-            time.sleep(delay * random.uniform(0.5, 1.5))
-
-    def _show_welcome_screen(self):
-        """Display the welcome screen and username prompt."""
-        self.stdscr.clear()
-        h, w = self.stdscr.getmaxyx()
-
-        # Draw ASCII art title
-        title_lines = ["CanonFodder Terminal Interface"]
-
-        # Calculate starting position to center the title
-        start_y = max(1, (h - len(title_lines) - 10) // 2)
-
-        # Display title with animation
-        for i, line in enumerate(title_lines):
-            self._animated_type(start_y + i, max(0, (w - len(line)) // 2),
-                                line, color_pair=2, delay=0.004)
-
-        # Display welcome text
-        welcome_text = WELCOME_TEXT.split('\n')
-
-        # Add a blank line after the title
-        start_y += len(title_lines) + 2
-
-        # Display each line of the welcome text
-        for i, line in enumerate(welcome_text):
-            wrapped_lines = [line[j:j + w - 4] for j in range(0, len(line), w - 4)]
-            for j, wrapped in enumerate(wrapped_lines):
-                y_pos = start_y + i + j
-                if y_pos < h - 3:  # Ensure we don't write past the bottom
-                    self._animated_type(y_pos, 2, wrapped, color_pair=1, delay=0.01)
-
-        # Prompt for username
-        prompt_y = start_y + len(welcome_text) + len([w for l in welcome_text for w in l.split('\n')]) + 2
-        if prompt_y >= h - 3:
-            prompt_y = h - 3
-
-        self._animated_type(prompt_y, 2, "Last.fm username: ", color_pair=3, highlight=True)
-
-        # Enable cursor for input
-        curses.curs_set(1)
-        curses.echo()
-
-        # Get username input
-        username = ""
-        username_x = 18  # Length of "Last.fm username: "
-
-        while True:
-            self.stdscr.move(prompt_y, 2 + username_x + len(username))
-            c = self.stdscr.getch()
-
-            if c == ord('\n'):  # Enter key
-                break
-            elif c == 27:  # ESC key
-                # Restore cursor state before returning
-                curses.noecho()
-                curses.curs_set(0)
-                return None  # Explicit return None on ESC
-            elif c == curses.KEY_BACKSPACE or c == 127:  # Backspace
-                if username:
-                    username = username[:-1]
-                    self.stdscr.addstr(prompt_y, 2 + username_x + len(username), " ")
-                    self.stdscr.refresh()
-            elif 32 <= c <= 126:  # Printable ASCII
-                username += chr(c)
-
-        # Disable cursor and echo
-        curses.noecho()
-        curses.curs_set(0)
-
-        # Validate username
-        if not username.strip():
-            # Show error message
-            self.stdscr.addstr(prompt_y + 1, 2, "Username cannot be empty! Press any key to try again.",
-                               curses.color_pair(4) | curses.A_BOLD)
-            self.stdscr.refresh()
-            self.stdscr.getch()
-            return self._show_welcome_screen()
-
-        # Save the username
-        self.username = username.strip()
-        self._save_username(self.username)
-
-        # Show success message and continue to main menu
-        self._animated_type(prompt_y + 1, 2, f"Welcome, {self.username}! Loading main menu...",
-                            color_pair=3, highlight=True)
-        time.sleep(0.5)  # Shorter pause before continuing to menu
-
-        # Show main menu
-        return self._show_main_menu()
-
-    def _show_main_menu(self):
-        """Display the main menu with options."""
-        self.stdscr.clear()
-        h, w = self.stdscr.getmaxyx()
-
-        # Draw menu header
-        header = f"// CANONFODDER TERMINAL INTERFACE //"
-        subheader = f"// LOGGED IN AS: {self.username}"
-
-        self._animated_type(1, (w - len(header)) // 2, header, color_pair=2, highlight=True, delay=0.01)
-        self._animated_type(2, (w - len(subheader)) // 2, subheader, color_pair=2, delay=0.01)
-
-        # Draw separator
-        separator = "═" * (w - 2)
-        self.stdscr.addstr(3, 1, separator, curses.color_pair(2))
-
-        # Menu options
-        menu_title = "MAIN MENU"
-        self._animated_type(5, (w - len(menu_title)) // 2, menu_title, color_pair=1, highlight=True, delay=0.01)
-
-        # Fetch and display database statistics
-        try:
-            db_stats = get_db_statistics()
-            if db_stats is not None and not db_stats.empty:
-                # Display database statistics table
-                stats_title = "SCROBBLES IN DB"
-                self._animated_type(7, 4, stats_title, color_pair=3, highlight=True, delay=0.01)
-                
-                # Table headers with padding to ensure alignment
-                headers = [
-                    "Column".ljust(12),
-                    "Total".rjust(8),
-                    "Non-Null".rjust(10),
-                    "Null".rjust(8),
-                    "Non-Null %".rjust(11),
-                    "Null %".rjust(8)
-                ]
-                header_row = " ".join(headers)
-                self.stdscr.addstr(8, 4, header_row, curses.color_pair(2) | curses.A_BOLD)
-                # Adding a line separator
-                self.stdscr.addstr(9, 4, "─" * (len(header_row)), curses.color_pair(2))
-                # Displaying each row of statistics
-                for i, row in db_stats.iterrows():
-                    if i < 5:  # Limit to 5 rows to save space
-                        row_text = (
-                            f"{row['column_name']:<12} "
-                            f"{row['total_rows']:>8} "
-                            f"{row['non_null_count']:>10} "
-                            f"{row['null_count']:>8} "
-                            f"{row['non_null_percentage']:>11.2f} "
-                            f"{row['null_percentage']:>8.2f}"
-                        )
-                        self.stdscr.addstr(10 + i, 4, row_text, curses.color_pair(1))
-                option_start_y = 16
-            else:
-                # If no statistics available, display a message
-                self.stdscr.addstr(7, 4, "No database statistics available", curses.color_pair(4))
-                option_start_y = 9
-        except Exception as e:
-            # If there's an error, display it and continue
-            error_msg = f"Error displaying statistics: {str(e)}"
-            if len(error_msg) > w - 8:
-                error_msg = error_msg[:w-11] + "..."
-            self.stdscr.addstr(7, 4, error_msg, curses.color_pair(4))
-            option_start_y = 9
-        options = [
-            "1. Data Gathering - Fetch new scrobbles from Last.fm",
-            "2. User Input / Canonization - Clean and normalize artist data",
-            "3. Statistics & Visualizations - View insights and reports",
-            "4. FULL REFRESH - Drop & re-sync ALL scrobbles",
-            "5. Refresh Artist Aliases - Update all MusicBrainz aliases",
-            "6. Exit"
-        ]
-        for i, option in enumerate(options):
-            self._animated_type(option_start_y + i, 4, option, color_pair=1, delay=0.01)
-        # Draw instructions
-        instructions = "Press a number key to select an option..."
-        self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
-        # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
-        self.stdscr.refresh()
-        # Handle menu selection
-        while True:
-            # Highlight the menu options to clarify selection
-            for i, option in enumerate(options):
-                self.stdscr.addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
-            self.stdscr.refresh()
-            c = self.stdscr.getch()
-            if c == ord('1'):
-                self._run_data_gathering()
-                return
-            elif c == ord('2'):
-                self._run_canonization()
-                return
-            elif c == ord('3'):
-                self._run_statistics()
-                return
-            elif c == ord('4'):  # ← flush + refetch
-                self._run_full_refresh();
-                return
-            elif c == ord('5'):  # ← refresh aliases
-                self._run_aliases_refresh();
-                return
-            elif c == ord('6') or c in (ord('q'), 27):
-                return
-
-    def _show_progress_screen(self, title):
-        """Show a progress screen for long-running operations."""
-        self.stdscr.clear()
-        h, w = self.stdscr.getmaxyx()
-        # Draw title
-        self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
-        # Draw separator
-        separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
-        # Initial progress message
-        self.stdscr.addstr(4, 2, "Initializing...", curses.color_pair(1))
-        # Draw progress bar outline
-        bar_width = w - 6
-        self.stdscr.addstr(6, 2, "┌" + "─" * bar_width + "┐", curses.color_pair(1))
-        self.stdscr.addstr(7, 2, "│" + " " * bar_width + "│", curses.color_pair(1))
-        self.stdscr.addstr(8, 2, "└" + "─" * bar_width + "┘", curses.color_pair(1))
-        # Additional status message area
-        self.stdscr.addstr(10, 2, "Status: Starting up...", curses.color_pair(1))
-        self.stdscr.refresh()
-
-        # Return a proper progress callback class instance
-        class CursesProgressCallback:
-            def __init__(self, stdscr, width, bar_width):
-                self.stdscr = stdscr
-                self.width = width
-                self.bar_width = bar_width
-                
-            def __call__(self, task: str, percentage: float, message: Optional[str] = None) -> None:
-                # Update task name
-                self.stdscr.addstr(4, 2, " " * (self.width - 4))  # Clear the line
-                self.stdscr.addstr(4, 2, f"Task: {task}", curses.color_pair(1))
-                
-                # Update progress bar
-                filled_width = int((percentage / 100) * self.bar_width)
-                self.stdscr.addstr(7, 3, "█" * filled_width + " " * (self.bar_width - filled_width), curses.color_pair(3))
-                
-                # Show percentage
-                percent_str = f" {percentage:.1f}% "
-                percent_pos = min(3 + filled_width - len(percent_str) // 2, self.width - len(percent_str) - 3)
-                if percent_pos < 3:
-                    percent_pos = 3
-                self.stdscr.addstr(7, percent_pos, percent_str, curses.color_pair(7))
-                
-                # Update status message
-                if message:
-                    self.stdscr.addstr(10, 2, " " * (self.width - 4))  # Clear the line
-                    status_text = f"Status: {message}"
-                    # Truncate if too long
-                    if len(status_text) > self.width - 4:
-                        status_text = status_text[:self.width - 7] + "..."
-                    self.stdscr.addstr(10, 2, status_text, curses.color_pair(1))
-                
-                self.stdscr.refresh()
-                
-        return CursesProgressCallback(self.stdscr, w, bar_width)
-
-    def _run_data_gathering(self):
-        """Run the data gathering workflow with progress updates."""
-        # Show progress screen
-        progress_callback = self._show_progress_screen("DATA GATHERING")
-
-        # Run in a thread to keep UI responsive
-        def run_task():
-            try:
-                run_data_gathering_workflow(self.username, progress_callback)
-                # Show completion message
-                haa, duplavee = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
-                self.stdscr.addstr(12, 2, "Data gathering completed successfully!",
-                                   curses.color_pair(3) | curses.A_BOLD)
-                self.stdscr.addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
-                self.stdscr.refresh()
-            except Exception as e:
-                # Show error message
-                haa, duplavee = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
-                error_msg = f"Error: {str(e)}"
-                # Truncate if too long
-                if len(error_msg) > duplavee - 4:
-                    error_msg = error_msg[:duplavee - 7] + "..."
-                self.stdscr.addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
-                self.stdscr.addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
-                self.stdscr.refresh()
-                logging.exception("Error during data gathering")
-        # Start the task in a separate thread
-        thread = threading.Thread(target=run_task)
-        thread.daemon = True
-        thread.start()
-        # Wait for the thread to complete
-        while thread.is_alive():
-            # Check for key press to cancel (ESC key)
-            c = self.stdscr.getch()
-            if c == 27:  # ESC key
-                h, w = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, "Attempting to cancel operation...",
-                                   curses.color_pair(4) | curses.A_BOLD)
-                self.stdscr.refresh()
-                # Can't forcibly stop the thread, but we can signal it's done
-                thread.join(timeout=0.1)
-                if thread.is_alive():
-                    # If thread is still running, wait for it to finish naturally
-                    self.stdscr.addstr(13, 2, "Please wait for current operation to complete...",
-                                       curses.color_pair(1))
-                    self.stdscr.refresh()
-        # Wait for a keypress before returning to menu
-        self.stdscr.getch()
-        # Return to main menu
-        self._show_main_menu()
-
-    def _run_canonization(self):
-        """Placeholder for canonization workflow."""
-        self.stdscr.clear()
-        h, w = self.stdscr.getmaxyx()
-        # Draw title
-        title = "USER INPUT / CANONIZATION"
-        self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
-        # Draw separator
-        separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
-        # Display message
-        message = "This feature will be implemented in a future update."
-        self._animated_type(4, (w - len(message)) // 2, message, color_pair=1, delay=0.01)
-        # Instructions
-        instructions = "Press any key to return to the menu..."
-        self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
-        # Wait for keypress
-        self.stdscr.getch()
-        # Return to main menu
-        self._show_main_menu()
-        
-    def _run_aliases_refresh(self):
-        """Refresh artist aliases from MusicBrainz."""
-        progress_callback = self._show_progress_screen("REFRESH ARTIST ALIASES")
-        
-        def run_task():
-            try:
-                progress_callback("Initializing", 5, "Checking database...")
-                
-                # Get count of artists with MBIDs
-                
-                with SessionLocal() as session:
-                    total_artists = session.execute(
-                        select(func.count()).where(ArtistInfo.mbid.is_not(None))
-                    ).scalar_one()
-                    
-                    progress_callback("Scanning", 10, f"Found {total_artists} artists with MBIDs")
-                    
-                    # Get all artists with MBIDs
-                    artists = session.execute(
-                        select(ArtistInfo).where(ArtistInfo.mbid.is_not(None))
-                    ).scalars().all()
-                    
-                    if not artists:
-                        progress_callback("Complete", 100, "No artists with MBIDs found")
-                        return
-                    
-                    # Process each artist
-                    success_count = 0
-                    error_count = 0
-                    
-                    for i, artist in enumerate(artists):
-                        percentage = 10 + (i / total_artists) * 85
-                        progress_callback("Updating", percentage, f"Processing {artist.artist_name} ({i+1}/{total_artists})")
-                        
-                        try:
-                            # Get aliases from MusicBrainz
-                            aliases = mbAPI.get_aliases(artist.mbid)
-                            
-                            # Update artist record
-                            if aliases:
-                                aliases_str = ','.join(aliases)
-                                artist.aliases = aliases_str
-                                session.commit()
-                                success_count += 1
-                            else:
-                                # Empty string to mark as processed
-                                artist.aliases = ""
-                                session.commit()
-                        except Exception as e:
-                            error_count += 1
-                            progress_callback("Error", percentage, f"Error with {artist.artist_name}: {str(e)}")
-                    
-                    # Show completion message
-                    progress_callback("Complete", 95, f"Updated {success_count} artists ({error_count} errors)")
-                    
-                    # Get final stats
-                    non_empty_count = session.execute(
-                        select(func.count()).where(
-                            ArtistInfo.aliases.is_not(None),
-                            ArtistInfo.aliases != ""
-                        )
-                    ).scalar_one()
-                    
-                    progress_callback("Complete", 100, f"Done! {non_empty_count} artists now have aliases")
-                    
-            except Exception as e:
-                progress_callback("Error", 100, f"Operation failed: {str(e)}")
-        
-        # Run the task in a thread
-        thread = threading.Thread(target=run_task)
-        thread.daemon = True
-        thread.start()
-        
-        # Wait for the thread to complete
-        while thread.is_alive():
-            c = self.stdscr.getch()
-            if c == 27:  # ESC key
-                h, w = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, "Attempting to cancel operation...",
-                               curses.color_pair(4) | curses.A_BOLD)
-                self.stdscr.refresh()
-                thread.join(timeout=0.1)
-        
-        # Wait for keypress
-        self.stdscr.addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
-        self.stdscr.refresh()
-        self.stdscr.getch()
-        
-        # Return to main menu
-        self._show_main_menu()
-
-    def _run_statistics(self):
-        """Placeholder for statistics workflow."""
-        self.stdscr.clear()
-        h, w = self.stdscr.getmaxyx()
-        # Draw title
-        title = "STATISTICS & VISUALIZATIONS"
-        self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
-        # Draw separator
-        separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
-        # Display message
-        message = "This feature will be implemented in a future update."
-        self._animated_type(4, (w - len(message)) // 2, message, color_pair=1, delay=0.01)
-        # Instructions
-        instructions = "Press any key to return to the menu..."
-        self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
-        # Wait for keypress
-        self.stdscr.getch()
-        # Return to main menu
-        self._show_main_menu()
-
-    def _run_full_refresh(self):
-        """Flush *scrobble* and pull a complete history from Last.fm."""
-        # Ask for confirmation – destructive!
-        confirm_text = "This will DELETE every scrobble in the database. Proceed? (y/N) "
-        self.stdscr.clear()
-        self._animated_type(2, 2, confirm_text, color_pair=4, highlight=True)
-        self.stdscr.refresh()
-        curses.echo(); curses.curs_set(1)
-        ch = self.stdscr.getstr(2, 2 + len(confirm_text)).decode().lower()
-        curses.noecho(); curses.curs_set(0)
-        if ch != 'y':
-            self._show_main_menu(); return
-        # Re-use the nice progress screen
-        progress = self._show_progress_screen("FULL REFRESH")
-
-        def task():
-            from DB import SessionLocal
-            from DB.models import Scrobble
-            from sqlalchemy import inspect
-            # 1) Hard-delete every row (TRUNCATE preferred where available)
-            progress("Clearing table", 5, "Dropping existing rows…")
-            try:
-                with SessionLocal() as sess:
-                    dialect = sess.bind.dialect.name
-                    if dialect in ("mysql", "postgresql"):
-                        sess.execute(text("TRUNCATE TABLE scrobble"))
-                    else:   # SQLite has no TRUNCATE
-                        sess.execute(delete(Scrobble))
-                    sess.commit()
-            except Exception as exc:
-                progress("Error", 100, f"Purging failed: {exc}")
-                return
-            # 2) Vacuum / reset autoinc if SQLite
-            if sess.bind.dialect.name == "sqlite":
-                sess.execute(text("VACUUM")); sess.commit()
-            progress("Fetching", 10, "Requesting full history from API")
-            # 3) Call existing pipeline – empty table → fetches everything
-            run_data_gathering_workflow(self.username, progress)
-            # 4) Enrich freshly fetched scrobbles with MB artist meta
-            progress("Enriching", 90, "Populating artist metadata…")
-            try:
-                populate_artist_info_from_scrobbles(progress_cb=progress)
-            except Exception as exc:  # fail-safe; don’t abort 1TUI
-                progress("Warning", 95, f"Artist enrichment failed: {exc}")
-            progress("Complete", 100, "Full refresh done")
-        t = threading.Thread(target=task, daemon=True)
-        t.start()
-        while t.is_alive():
-            if self.stdscr.getch() == 27:        # to allow ESC cancel display
-                pass
-        self.stdscr.getch()
-        self._show_main_menu()
+# Import API modules
+from HTTP import lfAPI
+from HTTP import mbAPI
 
 
 # ────────────────────────────────────────────────────────────────
@@ -1322,15 +81,14 @@ def _cli_entry() -> int:
         help="Last.fm username to use with --enrich-artist-mbid or --legacy-cli",
     )
     args = parser.parse_args()
+
     # Check for special operations
     if args.debug_artist_aliases:
         print(f"Debugging aliases for: {args.debug_artist_aliases}")
-        import mbAPI
-        import re
         from pprint import pprint
-        
+
         is_mbid = bool(re.fullmatch(r"[0-9a-fA-F-]{36}", args.debug_artist_aliases))
-        
+
         if is_mbid:
             print(f"Looking up artist by MBID: {args.debug_artist_aliases}")
             try:
@@ -1340,30 +98,26 @@ def _cli_entry() -> int:
                 print(f"Found {len(aliases)} aliases:")
                 for alias in aliases:
                     print(f"  - {alias}")
-                
+
                 # Check DB record
-                from DB import SessionLocal
-                from DB.models import ArtistInfo
-                from sqlalchemy import select
-                
                 with SessionLocal() as session:
                     db_artist = session.execute(
                         select(ArtistInfo).where(ArtistInfo.mbid == args.debug_artist_aliases)
                     ).scalar_one_or_none()
-                    
+
                     if db_artist:
                         print("\nDatabase record:")
                         print(f"  Name: {db_artist.artist_name}")
                         print(f"  MBID: {db_artist.mbid}")
                         print(f"  Aliases: {db_artist.aliases or 'None'}")
-                        
+
                         # Count actual aliases
                         if db_artist.aliases:
                             db_aliases = db_artist.aliases.split(',')
                             print(f"  Alias count: {len(db_aliases)}")
                     else:
                         print("\nNo database record found!")
-                        
+
             except Exception as e:
                 print(f"Error: {e}")
         else:
@@ -1371,17 +125,17 @@ def _cli_entry() -> int:
             try:
                 # First search for the artist
                 search_results = mbAPI.search_artist(args.debug_artist_aliases, limit=5)
-                
+
                 if not search_results:
                     print("No artists found with that name")
                     return 1
-                    
+
                 print(f"Found {len(search_results)} matching artists:")
                 for i, artist in enumerate(search_results):
                     print(f"{i+1}. {artist['name']} ({artist['id']})")
                     if 'disambiguation' in artist and artist['disambiguation']:
                         print(f"   {artist['disambiguation']}")
-                
+
                 # Ask which one to check
                 if len(search_results) > 1:
                     choice = input("\nEnter number to check aliases (or press Enter for #1): ")
@@ -1397,30 +151,26 @@ def _cli_entry() -> int:
                             idx = 0
                 else:
                     idx = 0
-                
+
                 # Get aliases for selected artist
                 selected_mbid = search_results[idx]['id']
                 aliases = mbAPI.get_aliases(selected_mbid)
                 print(f"\nFound {len(aliases)} aliases for {search_results[idx]['name']}:")
                 for alias in aliases:
                     print(f"  - {alias}")
-                    
+
                 # Check DB record
-                from DB import SessionLocal
-                from DB.models import ArtistInfo
-                from sqlalchemy import select
-                
                 with SessionLocal() as session:
                     db_artist = session.execute(
                         select(ArtistInfo).where(ArtistInfo.mbid == selected_mbid)
                     ).scalar_one_or_none()
-                    
+
                     if db_artist:
                         print("\nDatabase record:")
                         print(f"  Name: {db_artist.artist_name}")
                         print(f"  MBID: {db_artist.mbid}")
                         print(f"  Aliases: {db_artist.aliases or 'None'}")
-                        
+
                         # Count actual aliases
                         if db_artist.aliases:
                             db_aliases = db_artist.aliases.split(',')
@@ -1430,18 +180,17 @@ def _cli_entry() -> int:
             except Exception as e:
                 print(f"Error: {e}")
         return 0
+
     if args.refresh_aliases:
         print("Refreshing artist aliases from MusicBrainz...")
-        import mbAPI
-        from DB import SessionLocal
-        from DB.models import ArtistInfo
-        from sqlalchemy import select, func
         from tqdm import tqdm
+
         with SessionLocal() as session:
             # First, count total artists with MBIDs
             total_artists = session.execute(
                 select(func.count()).where(ArtistInfo.mbid.is_not(None))
             ).scalar_one()
+
             # Counting artists with empty aliases
             empty_aliases = session.execute(
                 select(func.count()).where(
@@ -1449,13 +198,16 @@ def _cli_entry() -> int:
                     (ArtistInfo.aliases.is_(None) | (ArtistInfo.aliases == ""))
                 )
             ).scalar_one()
+
             print(f"Database has {total_artists} artists with MBIDs")
             print(f"Found {empty_aliases} artists with empty aliases")
+
             # Asking for confirmation if all artists should be refreshed
             refresh_all = False
             if empty_aliases < total_artists:
                 choice = input("Do you want to refresh ALL artists (y) or only those with empty aliases (n)? [y/N] ")
                 refresh_all = choice.lower() == 'y'
+
             # Getting artists to process based on user choice
             if refresh_all:
                 print(f"Refreshing ALL {total_artists} artists...")
@@ -1468,13 +220,16 @@ def _cli_entry() -> int:
                     (ArtistInfo.aliases.is_(None) | (ArtistInfo.aliases == ""))
                 )
                 artists = session.execute(query).scalars().all()
+
             # Processing each artist with a progress bar
             success_count = 0
             error_count = 0
+
             for artist in tqdm(artists, desc="Fetching aliases"):
                 try:
                     # Getting complete artist info including aliases
                     artist_data = mbAPI.lookup_artist(artist.mbid, with_aliases=True)
+
                     # Updating the database record with aliases
                     if artist_data and "aliases" in artist_data and artist_data["aliases"]:
                         aliases_str = ",".join(artist_data["aliases"])
@@ -1487,6 +242,7 @@ def _cli_entry() -> int:
                 except Exception as e:
                     error_count += 1
                     print(f"Error processing {artist.artist_name}: {e}")
+
             # Displaying summary
             print("\nAliases refresh completed:")
             print(f"  ✅ Successfully updated: {success_count} artists")
@@ -1494,6 +250,7 @@ def _cli_entry() -> int:
                 print(f"  ❌ Errors: {error_count} artists")
             else:
                 print("  No errors encountered!")
+
         # Final check - counting non-empty aliases
         with SessionLocal() as session:
             non_empty_count = session.execute(
@@ -1503,8 +260,11 @@ def _cli_entry() -> int:
                     ArtistInfo.aliases != ""
                 )
             ).scalar_one()
+
             print(f"Database now has {non_empty_count} artists with aliases")
+
         return 0
+
     if args.enrich_artist_mbid:
         # Getting username from args, env, or config
         username = args.username or os.getenv("LASTFM_USER")
@@ -1520,14 +280,17 @@ def _cli_entry() -> int:
                                 break
                 except Exception:
                     pass
+
         if not username:
             print("No username provided. Please specify with --username or set LASTFM_USER environment variable.")
             return 1
+
         print(f"Enriching artist_mbid values for {username}...")
-        import lfAPI
+
         # Setup console progress display
         from tqdm import tqdm
         pbar = tqdm(total=100, desc="Fetching MBIDs")
+
         class TqdmProgressCallback:
             def __call__(self, task: str, percentage: float, message: Optional[str] = None) -> None:
                 pbar.n = percentage
@@ -1536,13 +299,17 @@ def _cli_entry() -> int:
                 else:
                     pbar.set_description(task)
                 pbar.refresh()
+
         result = lfAPI.enrich_artist_mbids(username, TqdmProgressCallback())
         pbar.close()
+
         if result["status"] == "success":
             print(f"✅ Success: {result['message']}")
         else:
             print(f"❌ Error: {result['message']}")
+
         return 0
+
     # For backward compatibility, treating --cli the same as --legacy-cli
     if args.legacy_cli or args.cli:
         # In legacy CLI mode, let the function handle username input directly
@@ -1551,18 +318,18 @@ def _cli_entry() -> int:
     else:
         # Initializing terminal colors
         init_colors()
+
         # Setting global animation flag
         if args.no_animation:
-            global DISABLE_ANIMATIONS
-            DISABLE_ANIMATIONS = True
+            import helpers.cli_interface as cli
+            cli.DISABLE_ANIMATIONS = True
+
         # Starting the CLI interface
         start_gui()
         return 0
 
 
 if __name__ == "__main__":
-    # Define global animation flag
-    DISABLE_ANIMATIONS = False
     # Handle Ctrl+C gracefully
     signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
     sys.exit(_cli_entry())

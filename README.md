@@ -1,71 +1,150 @@
-# Overview
+# CanonFodder
 
-Author: Torda Balázs  
-Title: CanonFodder
+## Project Overview
 
+CanonFodder is a reproducible data engineering pipeline that ingests music listening events (scrobbles), enriches them with metadata, stores them in a relational data warehouse, and offers interactive analytics and visualization.
 
-## What is this?
+## About Scrobble Data
 
-This is a code base accompanying a written assignment for IU.<br>
-For further elaboration, you can contact balazs.torda@iu-study.org.
+Scrobble data is a tabular list of records, with each row representing an event of a user listening to a song. This data is valuable to musicologists and self-tracking enthusiasts who study personal music consumption patterns. Researchers apply terms like lifelogging, quantified self, and personal informatics to describe this phenomenon.
 
-## The basic building blocks
+For demonstration purposes, the current instance is shipped with default last.fm scrobbles from a user account created in 2006, accessible at https://www.last.fm/user/jurda.
+The main.py CLI should prompt for username, so any new instance pulled up can be configured with wiping the demo data, and building up a new db for the current user.
 
-It is a project developed in PyCharm incorporating Python scripts and SQL-based db connections.<br>
-As an example for fetching scrobble data in CSV, I am using https://benjaminbenben.com/lastfm-to-csv/.<br>
-You can look at Ben Foxall's code at https://github.com/benfoxall/lastfm-to-csv.<br>
-For correct data retrieval, I am using the last.fm API.<br>
-The terms of use can be checked at https://www.last.fm/api.<br>
+## Project Motivation
+
+Common scrobble service providers often struggle with data quality issues, particularly with artist name canonization.
+CanonFodder is a research project to address this challenge by providing tools for standardizing artist name variants, ensuring accurate music listening analytics.
+
+## Technical Foundation
+
+The project is built with Python and SQL, using:
+- last.fm API for data retrieval (https://www.last.fm/api)
+- MusicBrainz for metadata enrichment
+- SQLAlchemy for database operations
+- Pandas and Plotly for data analysis and visualization
+
+## Repository Structure
+
+- **DB/**: Database models, operations, and setup
+  - `models.py`: SQLAlchemy ORM models
+  - `ops.py`: Database operations
+  - `common.py`: Database connection setup
+- **config/**: Configuration files for the project
+  - `requirements.txt`: Project dependencies
+  - `pyproject.toml`: Project build configuration
+  - `setup.py`: Package installation configuration
+- **docs/**: Project documentation
+- **helpers/**: Utility functions for data processing and analysis
+- **JSON/**: Configuration files including color palettes for visualizations
+- **PQ/**: Parquet files for efficient data storage and quick loading
+- **scripts/**: Utility scripts for development and maintenance
+- **tests/**: Test files organized by type (unit, integration, e2e)
+- **alembic/**: Database migration scripts
+- **corefunc/**: Core functionality including canonization algorithms
 
 ## Installation
 
-Note: Make sure you have Python 3.12 installed on your system.<br>
-Clone the repository.<br>
-```shell
-docker-compose up --build
-```
-Create a virtual environment manually using a command like:<br>
-```shell
-python -m venv .venv
-```
-Activate the virtual environment:<br>
-```shell
-.venv\Scripts\activate
-```
-or
-```shell
-source .venv/bin/activate
-```
-Navigate to the project directory, then launch<br>
-```shell
-pip install -r requirements.txt
-```
-or
-```shell
-pip install .
-```
-Copy `.env.example` ➜ `.env` and fill in the required values.<br> 
-      * Get a free key at https://www.last.fm/api/account/create<br> 
-      * For read-only demos only `LASTFM_API_KEY` is mandatory.<br>
-Alembic and SQLAlchemy is used to allow for multiple DB backends.<br>
-I am using MySQL with setting DB_URL=mysql+pymysql://user:pass@localhost/canonfodder,
-but if you look in DB/common.py, you will see that the bootstrapping is configured with a local fallback to sqlite.<br>
-DB_URL there is set to sqlite:///canonfodder.db automatically if no MySQL is given in .env.
+### Prerequisites
+- Python 3.12
+- Git
 
-## How to use it?
-Command
+### Setup Steps
+1. **Clone the repository**
+   ```shell
+   git clone https://github.com/jurdabos/CanonFodder.git
+   cd CanonFodder
+   ```
+
+2. **Set up the environment**
+
+   Option 1: Using Docker
+   ```shell
+   docker-compose up --build
+   ```
+
+   Option 2: Manual setup
+   # Create a virtual environment
+   ```shell
+   python -m venv .venv
+   ```
+
+   # Activate the virtual environment
+   # On Windows:
+   ```shell
+   .venv\Scripts\activate
+   ```
+
+   # On Unix/MacOS:
+   ```shell
+   source .venv/bin/activate
+   ```
+
+   # Install dependencies
+   ```shell
+   pip install -r config/requirements.txt
+   ```
+   # or for development installation (recommended for contributors)
+   ```shell
+   pip install -e config/
+   ```
+
+   > **Important**: Always install from the `config/` directory, not the project root.
+   > This ensures that package metadata is stored correctly and prevents the creation
+   > of unnecessary `CanonFodder.egg-info` directory in the project root.
+
+3. **Configure the application**
+   - Copy `.env.example` to `.env` and fill in the required values
+   - Get a free last.fm API key at https://www.last.fm/api/account/create
+   - For read-only demos, only `LASTFM_API_KEY` is mandatory
+
+4. **Database Configuration**
+   - Default: MySQL (`DB_URL=mysql+pymysql://user:pass@localhost/canonfodder`)
+   - Alternative: SQLite (automatic fallback if MySQL not configured)
+   - The system uses Alembic and SQLAlchemy to support multiple database backends
+
+## Usage
+
+### Data Pipeline
+
+Run the complete data pipeline:
 ```shell
 python main.py
 ```
-for a complete data fetch.
 
-I am committing example .parquets for fast fload, so if you are in a hurry,
-you can directly command
-```shell
-python dev_profile.py
-```
-&
-```shell
-python dev_canon.py
-```
-and check out in a notebook-style step-by-step way how is canonization envisaged in this project.
+### Interactive Development
+
+The repository includes example Parquet files for quick exploration:
+
+1. **Data Profiling**
+   ```shell
+   python dev\profile.py
+   ```
+
+2. **Artist Canonization Exploration**
+   ```shell
+   python dev\canon.py
+   ```
+
+These scripts provide a notebook-style, step-by-step exploration of the data and canonization process.
+
+## Contributing
+
+Contributions to CanonFodder are welcome! If you'd like to contribute, please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## Acknowledgments
+
+- Last.fm for providing the API to access scrobble data
+- MusicBrainz for their comprehensive music metadata database
+- Ben Foxall's [lastfm-to-csv](https://github.com/benfoxall/lastfm-to-csv) for inspiration on scrobble data extraction
+- Research by Elsden et al. (2016) on personal music tracking and lifelogging
+
+## Contact
+
+For questions or feedback about CanonFodder, please contact the project maintainer.

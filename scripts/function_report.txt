@@ -22,6 +22,10 @@ alembic\versions\140_fix_artist_mbid_column_location.py
     upgrade()
     downgrade()
 
+alembic\versions\141_rename_artistcountry_to_artist_info.py
+    upgrade()
+    downgrade()
+
 corefunc\canonizer.py
     _split()
     apply_previous()
@@ -48,23 +52,23 @@ DB\guard_intervals.py
 
 DB\models.py
     Base
-    ArtistVariantsCanonized
-    Scrobble
     ArtistInfo
-    UserCountry
+    ArtistVariantsCanonized
     AsciiChar
     CountryCode
+    Scrobble
+    UserCountry
 
 DB\ops.py
+    _bulk_insert()
     _prepare_scrobble_rows()
     ascii_freq()
-    _bulk_insert()
     bulk_insert_scrobbles()
     bulk_insert_scrobbles_to_sqlite()
     bulk_insert_scrobbles_to_mysql()
-    bulk_upsert_artist_country()
     insert_ignore()
     load_scrobble_table_from_db_to_df()
+    populate_artist_info_from_scrobbles()
     save_group()
     seed_ascii_chars()
 
@@ -82,6 +86,8 @@ dev_profile.py
     _append_to_parquet()
     _country_for_series()
     _df_from_db()
+    colour_for()
+    single_bar()
     _split_variants()
     yearly_top()
     parse_args()
@@ -126,8 +132,8 @@ helpers\cluster.py
 
 helpers\io.py
     _parquet_name()
-    dump_latest_table_to_parquet()
     append_or_create_parquet()
+    dump_latest_table_to_parquet()
     dump_parquet()
     latest_parquet()
     load_country_timeline()
@@ -159,10 +165,10 @@ HTTP\client.py
     make_request()
 
 lfAPI.py
-    _bulk_insert_scrobbles()
     _clean_track()
     _normalise_tracks()
     _fetch_country_from_lastfm()
+    _paginate()
     _update_user_country()
     enrich_artist_mbids()
     fetch_misc_data_from_lastfmapi()
@@ -171,13 +177,17 @@ lfAPI.py
     fetch_scrobbles_since()
     generate_lastfm_signature()
     iso2_for_en_name()
-    _paginate()
     lastfm_request()
+    get_recent_tracks_with_progress()
     LastFMError
-    save_recent()
     sync_user_country()
 
 main.py
+    ProgressManager
+    fetch_lastfm_with_progress()
+    format_sql_for_display()
+    ProgressCallback
+    null_progress_callback()
     Colors
     init_colors()
     run_data_gathering_workflow()
@@ -187,20 +197,21 @@ main.py
     _cli_entry()
 
 mbAPI.py
-    MBArtistCache
-    safe_mb_call()
+    _mb_call()
     _rate_limited()
-    _retryable()
+    _split_user_agent()
     init()
-    search_artist()
-    lookup_mb_for()
-    _get_session()
-    lookup_artist()
-    fetch_country()
     _cache_artist()
+    _get_session()
     add_alias()
-    _get_cached()
+    fetch_country()
     get_aliases()
+    lookup_artist()
+    lookup_mb_for()
+    search_artist()
+    lookup_artist()
+    get_aliases()
+    get_complete_artist_info()
 
 scripts\list_symbols.py
     list_defs()
@@ -214,10 +225,27 @@ scripts\uc_populate.py
 tests\conftest.py
     tmp_sqlite_url()
     session()
+    sample_scrobble_df()
+    mock_progress_callback()
+    mock_session()
+    mock_engine()
     toy_scrobbles()
     make_groups()
     auto_answers()
 
+tests\e2e\test_cli_interface.py
+    TestCliInterfaceE2E
+    TestCliInterfaceMethods
+
+tests\integration\test_data_workflow.py
+    TestDataGatheringWorkflow
+
 tests\test_unify_cli.py
     _df_from_session()
     test_unify_cli_smoketest()
+
+tests\unit\test_main_unit.py
+    test_null_progress_callback()
+    test_init_colors()
+    TestProgressCallback
+    TestColors

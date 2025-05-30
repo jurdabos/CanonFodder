@@ -6,7 +6,7 @@ the ASCII lookup table, and offers assorted utility queries.
 from __future__ import annotations
 from dotenv import load_dotenv
 
-from mbAPI import lookup_mb_for
+from HTTP.mbAPI import lookup_mb_for
 
 load_dotenv(".env")
 from DB import get_session as _get_session, get_engine as _get_engine
@@ -240,7 +240,7 @@ def populate_artist_info_from_scrobbles(
             logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         )
         logger.addHandler(handler)
-    from mbAPI import get_complete_artist_info  # local import to avoid circulars
+    from HTTP.mbAPI import get_complete_artist_info  # local import to avoid circulars
     from DB import get_session
     from DB.models import Scrobble, ArtistInfo  # type: ignore  # noqa: F401
     session = session or get_session()
