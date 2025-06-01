@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     default-libmysqlclient-dev \
     git \
+    supervisor \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -21,11 +22,11 @@ RUN useradd -ms /bin/bash -d ${AIRFLOW_HOME} airflow
 # Create necessary directories
 WORKDIR ${AIRFLOW_HOME}
 
-# Copy requirements file
-COPY requirements.txt .
+# Copy requirements files
+COPY requirements.txt requirements-airflow.txt ./
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (using Airflow-compatible requirements for Docker)
+RUN pip install --no-cache-dir -r requirements-airflow.txt
 
 # Copy project files
 COPY . .

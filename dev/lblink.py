@@ -1,30 +1,24 @@
 """
 Very small ListenBrainz helper for CanonFodder development.
 Usage (CLI):
-    python dev\lblink.py --user <MB_USER_ID> [--count 10]
-    python dev\lblink.py --user <MB_USER_ID> --export <OUTPUT_PARQUET> [--count 1000]
+    python dev\\lblink.py --user <MB_USER_ID> [--count 10]
+    python dev\\lblink.py --user <MB_USER_ID> --export <OUTPUT_PARQUET> [--count 1000]
 Typical use (library):
     from dev.lblink import LBClient
     lb = LBClient()                          # token is read from env/.env
     listens = lb.get_listens("iliekcomputers", count=5)
-    for l in listens:
-        print(l["track_metadata"]["track_name"])
+    for listen in listens:
+        print(listen["track_metadata"]["track_name"])
 """
 from __future__ import annotations
-import json
 import logging
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 import pandas as pd
 import requests
-
-# --------------------------------------------------------------------------- #
-# Optional dependencies
-# --------------------------------------------------------------------------- #
 try:
     import pylistenbrainz  # type: ignore
 except ModuleNotFoundError:  # ↳ keep running without it
@@ -170,7 +164,7 @@ class LBClient:
                     return obj.as_dict()  # legacy helper
                 return vars(obj)  # best-effort fallback
 
-            return [_to_dict(l) for l in listens_raw]
+            return [_to_dict(listen) for listen in listens_raw]
         return self._client.get_listens(username, min_ts=min_ts, max_ts=max_ts, count=count)
 
     def lookup_metadata(

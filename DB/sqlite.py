@@ -5,6 +5,5 @@ SessionLocal.
 from __future__ import annotations
 from sqlalchemy import create_engine
 from .common import DB_URL, make_sessionmaker
-
 engine = create_engine(DB_URL, future=True, echo=False)
 SessionLocal = make_sessionmaker(engine)

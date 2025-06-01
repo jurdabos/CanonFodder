@@ -42,6 +42,13 @@ corefunc\data_gathering.py
 corefunc\dataprofiler.py
     quick_viz()
     run_profiling()
+    generate_markdown_report()
+    generate_html_report()
+
+corefunc\enrich.py
+    enrich_artist_country()
+    enrich_parquet_missing_countries()
+    fill_missing_countries()
 
 corefunc\llm.py
     load_rules()
@@ -64,6 +71,8 @@ corefunc\pipeline.py
     clean_artist_data()
     run_data_profiling()
     run_incremental_pipeline()
+    run_canonization()
+    export_to_parquet()
     run_full_pipeline()
 
 corefunc\visualizations.py
@@ -80,11 +89,21 @@ corefunc\visualizations.py
 corefunc\workflow.py
     run_data_gathering_workflow()
 
-dags\canonfodder_weekly_dag.py
+dags\cf_ingest.py
     fetch_new_scrobbles()
     enrich_artist_info()
     clean_artist_data()
+    run_canonization()
+    export_to_parquet()
     run_data_profiling()
+
+dags\fix_airflow_windows.py
+    backup_file()
+    patch_settings_file()
+    patch_simple_auth_manager()
+    patch_dag_bundles_base()
+    patch_python_virtualenv_operator()
+    fix_simple_auth_manager_indentation()
 
 DB\__init__.py
     get_engine()
@@ -139,16 +158,11 @@ dev\profile.py
     _df_from_db()
     colour_for()
     single_bar()
+    timeout_handler()
     _split_variants()
-    yearly_top()
 
 dev\test_interactive_mode.py
     test_access()
-
-enrich.py
-    enrich_artist_country()
-    enrich_parquet_missing_countries()
-    fill_missing_countries()
 
 helpers\aliases.py
     _variants()
@@ -204,6 +218,11 @@ helpers\io.py
     sanitize()
     save_as_word_table()
 
+helpers\markdown.py
+    render_markdown()
+    render_markdown_file()
+    create_visualization_with_description()
+
 helpers\progress.py
     ProgressManager
     ProgressCallback
@@ -213,6 +232,7 @@ helpers\review.py
     review_canonized_variants()
 
 helpers\stats.py
+    _load_country_mapping()
     _df_from_db()
     _load_ac_cache()
     _upsert_artist_country()
@@ -288,6 +308,10 @@ scripts\test_full_profile_workflow.py
 scripts\test_parquet_order.py
     test_parquet_column_order()
 
+scripts\test_pep_format.py
+    test_function()
+    another_function()
+
 scripts\test_profile_db_workflow.py
     test_profile_db_workflow()
 
@@ -325,9 +349,22 @@ tests\setup\test_setup.py
     test_root_setup_py()
     test_config_setup_py()
 
+tests\test_airflow_compatibility.py
+    check_package_version()
+    main()
+
+tests\test_airflow_dag.py
+    TestAirflowDag
+
+tests\test_parquet_location.py
+    test_parquet_location()
+
 tests\test_unify_cli.py
     _df_from_session()
     test_unify_cli_smoketest()
+
+tests\unit\test_fix.py
+    test_load_scrobble_table()
 
 tests\unit\test_main_unit.py
     test_null_progress_callback()

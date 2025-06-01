@@ -49,7 +49,10 @@ If you prefer to run Airflow without Docker:
 
 1. Install Airflow: `pip install apache-airflow~=3.0.1`
 2. Set the `AIRFLOW_HOME` environment variable to your preferred location
-3. Initialize the Airflow database: `airflow db init`
+3. Initialize the Airflow database: `airflow db migrate`
+   - **Windows Users**: If you encounter errors (such as `os.register_at_fork` or `fcntl` module not found), please see [WINDOWS_AIRFLOW.md](WINDOWS_AIRFLOW.md) for fixes and workarounds before proceeding.
+   - Note: In Airflow 3.x, the command `airflow db init` has been replaced with `airflow db migrate`.
+   - For Windows users, running Airflow via Docker or WSL2 is recommended for the best experience. See [DOCKER_AIRFLOW.md](DOCKER_AIRFLOW.md) for detailed instructions on running Airflow with Docker.
 4. Create an admin user: `airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin`
 5. Set the `AIRFLOW__CORE__DAGS_FOLDER` environment variable to the `dags` directory in your CanonFodder project
 6. Start the Airflow webserver: `airflow webserver -p 8080`

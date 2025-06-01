@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from sqlalchemy import event, func
 from sqlalchemy.orm import Session
 
-# Helper constant keeps an “infinite” upper-bound date
+# Helper constant keeps an almost-infinite upper-bound date
 DATE_MAX = date.max - timedelta(days=1)  # 9999-12-30
 
 

@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # MySQL database for CanonFodder
   db:
@@ -12,7 +10,7 @@ services:
       MYSQL_USER: canon
       MYSQL_PASSWORD: canon
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - dbdata:/var/lib/mysql
     healthcheck:
@@ -47,12 +45,14 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
       - AIRFLOW__WEBSERVER__BASE_URL=http://localhost:8080
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      - AIRFLOW__WEBSERVER__WEB_SERVER_HOST=0.0.0.0
     ports:
       - "8080:8080"
     volumes:
       - ./dags:/opt/airflow/dags
       - ./PQ:/opt/airflow/PQ
       - airflow_data:/opt/airflow
+      - ./supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
     command: >
       bash -c "
         # Initialize database schema
@@ -65,16 +65,21 @@ services:
         airflow db init &&
 
         # Create Airflow admin user if it doesn't exist
-        (airflow users list | grep -q admin) || 
-        airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin &&
+        (airflow user list | grep -q admin) || 
+        airflow user create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin &&
 
-        # Start Airflow webserver and scheduler
-        airflow webserver -p 8080 & airflow scheduler
+        # Create log directories for supervisord
+        mkdir -p /var/log &&
+        touch /var/log/supervisord.log /var/log/airflow-webserver.log /var/log/airflow-scheduler.log &&
+        chown -R airflow:airflow /var/log &&
+
+        # Start supervisord to manage Airflow processes
+        supervisord -c /etc/supervisor/conf.d/supervisord.conf
       "
 
   # Database management interface
   adminer:
-    image: adminer
+    image: adminer:latest
     container_name: canonfodder-adminer
     restart: always
     ports:

@@ -12,13 +12,12 @@ from pathlib import Path
 import re
 if '__file__' in globals():
     HERE = Path(__file__).resolve().parent
-    # Get the project root directory (parent of the helpers directory)
     PROJECT_ROOT = HERE.parent
 else:
     PROJECT_ROOT = Path.cwd()
 PQ_DIR = PROJECT_ROOT / "PQ"
 PQ_DIR.mkdir(exist_ok=True)
-OP_TOKENS = {           # space–operator–space → token
+OP_TOKENS = {
     r"\s\-\s": "_minus_",
     r"\s\+\s": "_plus_",
     r"\s\*\s": "_mul_",

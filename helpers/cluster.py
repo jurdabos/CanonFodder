@@ -7,8 +7,8 @@ import itertools
 import numpy as np
 from rapidfuzz import fuzz, process
 from sklearn.cluster import DBSCAN
-from sklearn.tree import _tree, DecisionTreeClassifier
-from typing import Any, Sequence, Tuple
+from sklearn.tree import _tree
+from typing import Sequence, Tuple
 
 
 def _clf_scorer(x: str, y: str, clf, **kwargs) -> float:

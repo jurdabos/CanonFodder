@@ -1,10 +1,8 @@
 """
 Progress tracking functionality for CanonFodder.
-
 This module provides classes and functions for tracking and reporting progress
 of various tasks in the application.
 """
-
 from __future__ import annotations
 import threading
 import time

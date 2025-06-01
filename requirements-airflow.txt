@@ -1,0 +1,35 @@
+# CanonFodder Airflow-compatible requirements
+# Use this file when working with Apache Airflow to avoid dependency conflicts
+
+# Core dependencies with flexible version constraints
+pandas
+numpy
+matplotlib
+seaborn
+requests
+openai>=1.60.2
+h11>=0.16.0  # Security requirement
+httpcore>=1.0.7
+httpx>=0.28.1
+Jinja2>=3.1.6
+setuptools>=78.1.1,<81
+
+# Airflow with compatible SQLAlchemy version
+# NOTE: Apache Airflow 3.0.1 requires SQLAlchemy<2.0,>=1.4.49
+# This conflicts with the core application which requires SQLAlchemy 2.0
+# When using Airflow, you'll need to create a separate virtual environment
+# with SQLAlchemy 1.4.x and use the SQLAlchemy 1.4 compatible code
+apache-airflow~=3.0.1
+
+# Process management
+supervisor
+
+# Additional dependencies needed for CanonFodder
+# These are specified with flexible version constraints to avoid conflicts
+fuzzywuzzy
+python-Levenshtein
+python-dotenv
+pymysql
+musicbrainzngs
+python-dateutil
+pytz

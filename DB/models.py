@@ -3,9 +3,9 @@ Defines all SQLAlchemy ORM ML used by CanonFodder.
 """
 from __future__ import annotations
 from datetime import date, datetime
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, func, String, Text, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from typing import Optional
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, func, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
@@ -22,7 +22,7 @@ class ArtistInfo(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     artist_name: Mapped[str] = mapped_column(String(750), index=True)
     mbid: Mapped[Optional[str]] = mapped_column(String(36), unique=True, nullable=True)
-    disambiguation_comment: Mapped[Optional[str]] = mapped_column(String(558))
+    disambiguation_comment: Mapped[str] = mapped_column(String(558))
     aliases: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     country: Mapped[Optional[str]] = mapped_column(String(255))
 
@@ -33,9 +33,9 @@ class ArtistVariantsCanonized(Base):
     artist_variants_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     artist_variants_text: Mapped[str] = mapped_column(Text)
     canonical_name: Mapped[str] = mapped_column(String(255))
-    mbid = mapped_column(String(36), nullable=True)
-    to_link: Mapped[bool] = mapped_column(Boolean, nullable=True)
-    comment: Mapped[Optional[str]] = mapped_column(String(750))
+    mbid: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    to_link: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    comment: Mapped[Optional[str]] = mapped_column(String(750), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -44,7 +44,7 @@ class ArtistVariantsCanonized(Base):
 class AsciiChar(Base):
     """Lookup table with printable non-alphanumeric ASCII characters 33–126"""
     __tablename__ = "ascii_chars"
-    ascii_code: Mapped[int] = mapped_column(primary_key=True)
+    ascii_code: Mapped[int] = mapped_column(Integer, primary_key=True)
     ascii_char: Mapped[str] = mapped_column(String(1), unique=True, nullable=False)
 
 
@@ -54,7 +54,7 @@ class CountryCode(Base):
     iso2: Mapped[str] = mapped_column(String(2), primary_key=True, unique=True)
     iso3: Mapped[str] = mapped_column(String(3), unique=True)
     en_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=False)
-    hu_name: Mapped[str] = mapped_column(String(350), unique=True, nullable=True)
+    hu_name: Mapped[Optional[str]] = mapped_column(String(350), unique=True, nullable=True)
 
 
 class Scrobble(Base):
@@ -67,7 +67,7 @@ class Scrobble(Base):
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     artist_name: Mapped[str] = mapped_column(String(350))
-    artist_mbid = mapped_column(String(36), nullable=True, index=True)
+    artist_mbid: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     album_title: Mapped[str] = mapped_column(String(350))
     track_title: Mapped[str] = mapped_column(String(350))
     play_time: Mapped[datetime] = mapped_column(
@@ -85,7 +85,7 @@ class UserCountry(Base):
     # ── dimensions ───────────────────────────────────────────────────────────
     country_code: Mapped[str] = mapped_column(String(2), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
-    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     # ── constraints / quality guards ─────────────────────────────────────────
     __table_args__ = (
         # only *one* row per (country, start_date)

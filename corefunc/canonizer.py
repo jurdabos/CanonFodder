@@ -1,13 +1,10 @@
 """
 corefunc.canonizer
 ==================
-
 Utility functions that normalise artist-name variants and compute a
 minimal ε for DBSCAN clustering, ensuring user-defined ‘must-merge’
 sub-groups are honoured.
-
 All public functions:
-
 * apply_previous
 * minimal_epsilon
 """

@@ -4,8 +4,6 @@ from dotenv import load_dotenv
 load_dotenv()
 from DB import SessionLocal
 from DB.models import ArtistVariantsCanonized
-from collections import Counter
-import featuretools as ft
 from helpers import cli
 from helpers import io
 from helpers import cluster
@@ -30,25 +28,20 @@ from pathlib import Path
 from rapidfuzz import process
 import re
 import seaborn as sns
-from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
+from sklearn.cluster import DBSCAN
 from sklearn.compose import ColumnTransformer
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_selection import VarianceThreshold
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
-from sklearn.svm import SVC
-from sklearn.tree import DecisionTreeClassifier, export_text, plot_tree
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import text
 import sys
 from tabulate import tabulate
 import warnings
 from xgboost import XGBClassifier
 
 warnings.filterwarnings("ignore", message="'force_all_finite' was renamed")
-import woodwork as ww
 
 if '__file__' in globals():
     HERE = Path(__file__).resolve().parent.parent  # running from a file in dev/ folder
@@ -230,8 +223,8 @@ y = gs[target].astype(int)
 # ------------------------------------------------------------------
 # 3.  Train / test split
 # ------------------------------------------------------------------
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.25, random_state=47, stratify=y
+X_train, X_test, y_train, y_test, _, idx_test = train_test_split(
+    X, y, test_size=0.25, random_state=47, stratify=y, return_train_idx=True, return_test_idx=True
 )
 
 # %%
@@ -251,7 +244,7 @@ xgb = XGBClassifier(
     max_depth=4,
     subsample=0.9,
     colsample_bytree=0.75,
-    scale_pos_weight=(y_train == 0).sum() / (y_train == 1).sum(),
+    scale_pos_weight=np.sum(y_train == 0) / np.sum(y_train == 1),
     eval_metric='logloss',
     random_state=49,
     n_jobs=-1

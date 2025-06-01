@@ -19,9 +19,11 @@ profile.INTERACTIVE_MODE = False
 # Print the modified value
 print(f"Modified INTERACTIVE_MODE: {profile.INTERACTIVE_MODE}")
 
+
 # Verify that the variable is accessible in functions
 def test_access():
     print(f"INTERACTIVE_MODE in function: {profile.INTERACTIVE_MODE}")
+
 
 test_access()
 

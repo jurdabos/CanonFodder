@@ -59,6 +59,9 @@ The project is built with Python and SQL, using:
    The project includes a complete Docker setup with MySQL, Airflow, and Adminer:
 
    ```shell
+   # Ensure Docker Desktop is running on your system
+   # You'll get a "pipe/dockerDesktopLinuxEngine" error if it's not running
+
    # Copy environment variables template
    cp .env.example .env
 
@@ -104,10 +107,25 @@ The project is built with Python and SQL, using:
    ```shell
    pip install -r requirements.txt
    ```
+
+   # For Airflow compatibility (resolves dependency conflicts)
+   ```shell
+   pip install -r requirements-airflow.txt
+   ```
+
    # or for development installation (recommended for contributors)
    ```shell
    pip install -e .
    ```
+
+   # For development with Airflow compatibility
+   ```shell
+   pip install -e ".[airflow]"
+   ```
+
+   > **Note on Dependency Conflicts**: CanonFodder uses SQLAlchemy 2.0 for its ORM models, while Apache Airflow 3.0.1 requires SQLAlchemy 1.4. This creates a dependency conflict when installing both packages together. The `requirements-airflow.txt` file and the `[airflow]` extra in setup.py are provided to help resolve these conflicts. When working with Airflow, some core CanonFodder database functionality may be limited.
+
+   > **Note on Platform-Specific Dependencies**: CanonFodder uses platform-specific markers in requirements.txt to handle dependencies that are only needed on certain operating systems (e.g., windows-curses for Windows). See [Platform-Specific Dependencies](docs/platform_specific_dependencies.md) for details.
 
 3. **Configure the application**
    - Copy `.env.example` to `.env` and fill in the required values

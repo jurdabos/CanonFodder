@@ -5,24 +5,19 @@ the ASCII lookup table, and offers assorted utility queries.
 """
 from __future__ import annotations
 from dotenv import load_dotenv
-
-from HTTP.mbAPI import lookup_mb_for
-
 load_dotenv(".env")
+from HTTP.mbAPI import lookup_mb_for
 from DB import get_session as _get_session, get_engine as _get_engine
 from datetime import datetime, UTC
-from .models import ArtistInfo, ArtistVariantsCanonized, AsciiChar, Scrobble
+from .models import ArtistVariantsCanonized, AsciiChar, Scrobble
 import numpy as np
 import pandas as pd
 import re
-from sqlalchemy import func, insert, inspect, literal, select, text, union_all
+from sqlalchemy import func, inspect, literal, select, text, union_all
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Insert
-import time
-from typing import Any, Iterable, Sequence, Callable
 
 
 _COLUMN_ALIASES = {
@@ -122,11 +117,11 @@ def ascii_freq(engine=None, target_table: str = "scrobble") -> pd.Series:
     """
     eng = engine or _get_engine()
     seed_ascii_chars(eng)  # to ensure lookup exists
-    A = AsciiChar.__table__
     S = Scrobble.__table__ if target_table == "scrobble" \
         else text(target_table)
     # LIKE '%!%'  but properly escaped for %, _
-    esc = lambda c: c.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    def esc(c):
+        return c.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     union_queries = []
     for row in _PRINTABLE_NONALNUM:
         code, ch = row
@@ -142,12 +137,12 @@ def ascii_freq(engine=None, target_table: str = "scrobble") -> pd.Series:
                 subq.c[0].label("unique_artist_count")
             )
         )
-    union = union_queries[0]
     combined = union_all(*union_queries).alias("ascii_union")
-    df = pd.read_sql(
-        select(combined).order_by(text("unique_artist_count DESC")),
-        eng
-    )
+    with eng.connect() as connection:
+        df = pd.read_sql(
+            select(combined).order_by(text("unique_artist_count DESC")),
+            connection
+        )
     return df.set_index("ascii_char")["unique_artist_count"]
 
 
@@ -193,8 +188,11 @@ def load_scrobble_table_from_db_to_df(engine) -> tuple[pd.DataFrame | None, str 
     # Does the table exist?
     if table_name not in inspect(engine).get_table_names():
         return None, None
-    df = pd.read_sql_table(table_name, engine)
-    df = df.drop(columns=['id'])
+    # Create a connection from the engine and use it with pandas
+    with engine.connect() as connection:
+        df = pd.read_sql(f"SELECT * FROM {table_name}", connection)
+    if 'id' in df.columns:
+        df = df.drop(columns=['id'])
     return df, table_name
 
 
@@ -398,8 +396,7 @@ def seed_ascii_chars(engine=None) -> None:
     """
     Inserts the ASCII lookup rows once and becomes a no-op afterwards.
     """
-    eng = engine or _get_engine()
-    with _get_session() as ses:
+    with _get_session(engine) as ses:
         # only seed when empty
         if ses.query(AsciiChar).first() is None:
             ses.bulk_save_objects(

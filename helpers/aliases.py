@@ -6,16 +6,12 @@ Usage (CLI):
 To be called programmatically from main.py’s menu later.
 """
 from __future__ import annotations
-
 import logging
 from typing import Sequence
-
 from sqlalchemy import select
-
 from HTTP import mbAPI
 from DB import SessionLocal
 from DB.models import ArtistVariantsCanonized, ArtistInfo
-
 log = logging.getLogger(__name__)
 
 

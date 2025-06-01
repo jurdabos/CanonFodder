@@ -4,7 +4,6 @@ CLI interface for CanonFodder.
 This module provides a curses-based CLI interface for the application with
 animated typing and steampunk-inspired terminal aesthetics.
 """
-
 from __future__ import annotations
 import os
 import sys
@@ -17,13 +16,10 @@ import locale
 import platform
 from pathlib import Path
 from typing import Optional
-
 from sqlalchemy import select, func, text, delete
-
 # Import from helpers
 from helpers.progress import ProgressCallback
 from helpers.cli import choose_lastfm_user
-
 # Import from DB
 from DB import SessionLocal
 from DB.models import ArtistInfo, Scrobble, Base

@@ -13,7 +13,7 @@ if urlparse(DB_URL).scheme.startswith("mysql"):
 else:
     from .sqlite import engine, SessionLocal
 from .models import Base
-# In case we sometimes need a quick schema without Alembic, guard it:
+# In case we need a quick schema without Alembic, guard it:
 if os.environ.get("CF_CREATE_SCHEMA") == "yes":
     Base.metadata.create_all(engine)
 
@@ -31,4 +31,7 @@ def get_session():
     return SessionLocal()
 
 
-print(f"[DB] using {engine.url}")
+# Make sure this is visible even if print output is being redirected
+import sys
+sys.stderr.write(f"[DB] using {engine.url}\n")
+sys.stderr.flush()

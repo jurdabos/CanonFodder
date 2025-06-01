@@ -1,6 +1,6 @@
 """
 Supplies a single helper that performs a GET request with retry and
-back-off while adding CanonFodder’s User-Agent.
+back-off while adding CanonFodder’s User-Agent per API documentation requirement.
 """
 from __future__ import annotations
 import requests

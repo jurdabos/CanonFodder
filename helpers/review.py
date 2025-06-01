@@ -2,7 +2,6 @@ import questionary
 from sqlalchemy import delete, update, select
 from DB import SessionLocal
 from DB.models import ArtistVariantsCanonized
-
 SEPARATOR = "{"
 
 

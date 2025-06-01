@@ -13,14 +13,13 @@ The DAG includes proper retry and back-off mechanisms (FR-08) and
 is designed to complete within 15 minutes for 1 million scrobbles (FR-09).
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.utils.dates import days_ago
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.utils.timezone import utcnow
 import os
 import sys
 import logging
-import math
 
 # Add the project root to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,19 +44,19 @@ default_args = {
 
 # Create the DAG
 dag = DAG(
-    'cf_ingest',  # Renamed to cf_ingest as per FR-09
+    'cf_ingest',
     default_args=default_args,
     description='Complete CanonFodder data pipeline covering FR-01 to FR-07',
-    schedule_interval='@weekly',
-    start_date=days_ago(1),
+    schedule='@weekly',
+    start_date=utcnow() - timedelta(days=1),
     catchup=False,
-    tags=['canonfodder', 'lastfm', 'musicbrainz', 'data-pipeline'],
+    tags={'canonfodder', 'lastfm', 'musicbrainz', 'data-pipeline'},
 )
+
 
 def fetch_new_scrobbles(**context):
     """
     Fetch new scrobbles from Last.fm since the last run (FR-01, FR-02, FR-03).
-
     This task:
     - Pulls recent tracks for a user since the last stored timestamp
     - Persists raw JSON
@@ -88,6 +87,7 @@ def fetch_new_scrobbles(**context):
 
     return result['new_scrobbles']
 
+
 def enrich_artist_info(**context):
     """
     Enrich artist information from MusicBrainz (FR-04).
@@ -115,13 +115,15 @@ def enrich_artist_info(**context):
     if result['status'] == 'error':
         raise ValueError(f"Error enriching artist data: {result['message']}")
 
-    logging.info(f"Artist info enrichment complete: processed={result['processed']}, created={result['created']}, updated={result['updated']}")
+    logging.info(
+        f"Artist info enrichment complete: processed={result['processed']}, created={result['created']}, updated={result['updated']}")
 
     return {
         'processed': result['processed'],
         'created': result['created'],
         'updated': result['updated']
     }
+
 
 def clean_artist_data(**context):
     """
@@ -164,7 +166,8 @@ def run_canonization(**context):
     if result['status'] == 'error':
         raise ValueError(f"Error running canonization: {result['message']}")
 
-    logging.info(f"Canonization complete: processed {result['row_count']} rows with {result['artist_count']} unique artists")
+    logging.info(
+        f"Canonization complete: processed {result['row_count']} rows with {result['artist_count']} unique artists")
 
     return {
         'row_count': result['row_count'],
@@ -197,6 +200,7 @@ def export_to_parquet(**context):
         'parquet_path': str(result['parquet_path'])
     }
 
+
 def run_data_profiling(**context):
     """
     Run data profiling to generate analytics (FR-07).
@@ -218,6 +222,7 @@ def run_data_profiling(**context):
     logging.info("Data profiling complete")
 
     return True
+
 
 # Define the tasks
 fetch_task = PythonOperator(

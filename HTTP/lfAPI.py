@@ -1,18 +1,12 @@
 from __future__ import annotations
-
 import time
-
 from dotenv import load_dotenv
-
 load_dotenv()
 from datetime import date
-
 from DB import SessionLocal
-
 import hashlib
 from HTTP.client import make_request, USER_AGENT
 import logging
-
 log = logging.getLogger("lfAPI")
 import os
 import pandas as pd
@@ -21,13 +15,10 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 import typing
 from typing import Any, Callable, Dict, Optional
-
-# Import the reference and timeline models only when the type checker needs them
 if typing.TYPE_CHECKING:  # pragma: no cover
     from DB.models import UserCountry
 LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/"
 HERE = Path(__file__).resolve().parent
-# Constants
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY")
 LASTFM_SECRET = os.environ.get("LASTFM_SECRET")
 USERNAME = os.getenv("LASTFM_USER")

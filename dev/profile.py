@@ -25,6 +25,7 @@ Performance Notes:
 from __future__ import annotations
 from datetime import datetime
 from dotenv import load_dotenv
+
 load_dotenv()
 from DB import SessionLocal
 from DB.models import (
@@ -41,22 +42,26 @@ from helpers import cli
 from helpers import io
 from helpers import stats
 from HTTP import mbAPI
-mbAPI.init()
 import json
 import logging
 import matplotlib
+
 matplotlib.use("TkAgg")
 from matplotlib.collections import PolyCollection
 import matplotlib.colors as mcolors
 import matplotlib.dates
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
+
 plt.ion()
 import musicbrainzngs
+
 musicbrainzngs.logging.getLogger().setLevel(logging.WARNING)
 logging.getLogger("musicbrainzngs.mbxml").setLevel(logging.WARNING)
 import numpy as np
 import os
+
 os.environ["MPLBACKEND"] = "TkAgg"
 import pandas as pd
 from pathlib import Path
@@ -72,6 +77,7 @@ import sys
 from statsmodels.tsa.seasonal import seasonal_decompose
 import threading
 import webbrowser
+
 # %%
 logging.basicConfig(
     level=logging.WARNING,
@@ -80,7 +86,16 @@ logging.basicConfig(
 )
 log = logging.getLogger("dev_profile")
 logging.getLogger("musicbrainzngs.mbxml").setLevel(logging.WARNING)
-mbAPI.init()
+# Get the database engine first
+from DB import get_engine
+engine = get_engine()
+
+# Display database connection information
+print(f"Database URL: {engine.url}")
+
+# Initialize mbAPI with the engine to ensure it uses the correct database
+mbAPI.init(engine=engine)
+
 # Default to TkAgg backend, but this can be overridden by command line args
 matplotlib.use("TkAgg")
 os.environ["MPLBACKEND"] = "TkAgg"
@@ -187,11 +202,14 @@ def show_or_save_plot(filename, dpi=100, description=None):
 </body>
 </html>"""
 
-                    with open(html_path, 'w', encoding='utf-8') as f:
-                        f.write(html_content)
+                    with open(html_path, 'w', encoding='utf-8') as file_handle:
+                        file_handle.write(html_content)
 
                     print(f"Plot with description saved to {html_path}")
                 except ImportError:
+                    # Define render_markdown as a simple function that returns the input text
+                    def render_markdown(text):
+                        return text
                     print("Showdown not available. HTML with description not generated.")
     except Exception as plot_error:
         print(f"Error showing/saving plot: {plot_error}")
@@ -237,10 +255,10 @@ def show_or_save_plotly(figura, filename, description=None, public=True):
     if not INTERACTIVE_MODE:
         print(f"[PERFORMANCE OPTIMIZATION] Skipping actual figure rendering for {filename}")
         print(f"To view the figure, run the script with interactive mode enabled")
-        with open(filepath.with_suffix('.txt'), 'w') as f:
-            f.write(f"Figure would be saved here: {filepath}\n")
-            f.write("Running in non-interactive mode with performance optimizations enabled.\n")
-            f.write("To view the actual figure, run the script without the --no-interactive flag.\n")
+        with open(filepath.with_suffix('.txt'), 'w') as file_obj:
+            file_obj.write(f"Figure would be saved here: {filepath}\n")
+            file_obj.write("Running in non-interactive mode with performance optimizations enabled.\n")
+            file_obj.write("To view the actual figure, run the script without the --no-interactive flag.\n")
         return
 
     # Check if running in a TTY (interactive terminal)
@@ -280,7 +298,12 @@ def show_or_save_plotly(figura, filename, description=None, public=True):
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         .description {{ margin-bottom: 20px; }}
-        .assessment-header {{ background-color: #f0f0f0; padding: 10px; margin-bottom: 20px; border-left: 5px solid #007bff; }}
+        .assessment-header {{ 
+            background-color: #f0f0f0; 
+            padding: 10px; 
+            margin-bottom: 20px; 
+            border-left: 5px solid #007bff; 
+        }}
     </style>
 </head>
 <body>
@@ -301,13 +324,18 @@ def show_or_save_plotly(figura, filename, description=None, public=True):
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         .description {{ margin-bottom: 20px; }}
-        .assessment-header {{ background-color: #f0f0f0; padding: 10px; margin-bottom: 20px; border-left: 5px solid #007bff; }}
+        .assessment-header {{ 
+            background-color: #f0f0f0; 
+            padding: 10px; 
+            margin-bottom: 20px; 
+            border-left: 5px solid #007bff; 
+        }}
     </style>
 </head>
 <body>
     <div class="assessment-header">
-        <h2>CanonFodder Visualization - Teacher Assessment Copy</h2>
-        <p>This visualization was generated for teacher assessment purposes.</p>
+        <h2>CanonFodder Visualization</h2>
+        <p>This visualization was generated for assessment purposes.</p>
         <p>Filename: {filename}</p>
         <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
     </div>
@@ -320,18 +348,21 @@ def show_or_save_plotly(figura, filename, description=None, public=True):
 </body>
 </html>"""
 
-                    with open(html_path, 'w', encoding='utf-8') as f:
-                        f.write(html_content)
+                    with open(html_path, 'w', encoding='utf-8') as file_out:
+                        file_out.write(html_content)
 
                     print(f"Visualization with description saved to {html_path}")
 
                     # If public flag is set, also save to public directory
                     if public:
                         public_html_path = public_filepath.with_suffix('.html')
-                        with open(public_html_path, 'w', encoding='utf-8') as f:
-                            f.write(public_html_content)
+                        with open(public_html_path, 'w', encoding='utf-8') as public_file:
+                            public_file.write(public_html_content)
                         print(f"Public copy for teacher assessment saved to {public_html_path}")
                 except ImportError:
+                    # Define render_markdown as a simple function that returns the input text
+                    def render_markdown(text):
+                        return text
                     print("Showdown not available. Using standard HTML output.")
                     # Fall back to standard HTML output
                     figura.write_html(
@@ -496,11 +527,11 @@ def find_project_root():
         if (candidate / "JSON").exists() and (candidate / "PQ").exists():
             return candidate
     # If that fails, try the current directory and its parent
-    current = Path.cwd()
-    if (current / "JSON").exists() and (current / "PQ").exists():
-        return current
-    if (current.parent / "JSON").exists() and (current.parent / "PQ").exists():
-        return current.parent
+    current_dir = Path.cwd()
+    if (current_dir / "JSON").exists() and (current_dir / "PQ").exists():
+        return current_dir
+    if (current_dir.parent / "JSON").exists() and (current_dir.parent / "PQ").exists():
+        return current_dir.parent
     # If all else fails, use an absolute path
     return Path(r"C:\Users\jurda\PycharmProjects\CanonFodder")
 
@@ -568,7 +599,8 @@ def _df_from_db() -> pd.DataFrame:
         ],
         columns=AC_COLS
     )
-# Syncing Parquet with DB
+
+
 df = _df_from_db()
 # Check if the dataframe is unusually large
 row_count = len(df)
@@ -1558,6 +1590,10 @@ else:
 
     # Create a custom colormap with logarithmic scale for better readability
 
+    # Initialize norway_count and france_count with empty arrays to avoid undefined variable issues
+    norway_count = np.array([])
+    france_count = np.array([])
+
     # Remove the default legend by setting legend_name to None
     # Use a standard ColorBrewer color scheme
     # YlOrRd is a good choice for sequential data (yellow to red)
@@ -1577,9 +1613,12 @@ else:
     ).add_to(m)
 
     # Remove any colormap children (which create the default legend)
-    for child in choropleth._children.copy():
-        if isinstance(choropleth._children[child], (StepColormap, LinearColormap)):
-            choropleth._children.pop(child)
+    # Note: Using _children is necessary here as it's part of folium's internal API
+    # We're accessing a protected member, but it's the recommended way to modify the legend
+    if hasattr(choropleth, '_children'):
+        for child in choropleth._children.copy():
+            if isinstance(choropleth._children[child], (StepColormap, LinearColormap)):
+                choropleth._children.pop(child)
 
     # Create a custom legend with color squares for better readability
     if not choropleth_data.empty:
@@ -1626,7 +1665,12 @@ else:
             legend_html += '</div>'
 
             # Add the custom legend to the map
-            m.get_root().html.add_child(folium.Element(legend_html))
+            # Using get_root().html is a valid approach in folium, even if IDE shows it as unresolved
+            root = m.get_root()
+            if hasattr(root, 'html'):
+                root.html.add_child(folium.Element(legend_html))
+            else:
+                print("Warning: Map root does not have 'html' attribute, legend not added")
 
             # We don't need to create a separate colormap since we're using a custom HTML legend
             # and the choropleth already has its coloring defined
@@ -1636,7 +1680,7 @@ else:
         folium.features.GeoJsonTooltip(
             fields=['name', 'ISO3166-1-Alpha-2', 'scrobble_count'],
             aliases=['Country:', 'Code:', 'Scrobble count:'],
-            style=("background-color: white; color: #333333; font-family: arial; font-size: 12px; padding: 10px;")
+            style="background-color: white; color: #333333; font-family: arial; font-size: 12px; padding: 10px;"
         )
     )
 
@@ -2066,7 +2110,6 @@ ax.set_xlabel("UserCountry", fontsize=14)
 ax.set_ylabel("Count (log scale)", fontsize=14)
 plt.tight_layout()
 show_or_save_plot("user_countries.png")
-
 
 # %%
 # --- entry point ----------------------------------------------------------------------

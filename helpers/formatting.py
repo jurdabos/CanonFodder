@@ -1,9 +1,7 @@
 """
 Formatting utilities for CanonFodder.
-
 This module provides functions for formatting various types of data for display.
 """
-
 from typing import Optional
 
 

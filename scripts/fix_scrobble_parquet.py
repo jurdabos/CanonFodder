@@ -3,13 +3,12 @@ Script to fix the scrobble.parquet file by removing extra columns.
 """
 import pandas as pd
 from pathlib import Path
-
 # Define paths
 PQ_DIR = Path(__file__).resolve().parents[1] / "PQ"
 SCROBBLE_PARQUET = PQ_DIR / "scrobble.parquet"
-
 # Define expected columns
 EXPECTED_COLUMNS = ["artist_name", "album_title", "play_time", "track_title", "artist_mbid"]
+
 
 def fix_scrobble_parquet():
     """

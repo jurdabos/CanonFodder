@@ -19,7 +19,7 @@ if parsed.scheme == "sqlite":
 
 
 def make_sessionmaker(engine, *, expire_on_commit: bool = False):
-    """Returns a new `sessionmaker` bound to `engine`.
+    """Returns a new sessionmaker bound to engine.
     Args:
         engine: SQLAlchemy engine to bind
         expire_on_commit: if true expires objects after commit

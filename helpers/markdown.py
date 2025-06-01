@@ -7,11 +7,8 @@ JavaScript library. It supports both direct text conversion and file-based opera
 import os
 from pathlib import Path
 from typing import Optional, Union
-
-# Flag to track if Showdown is available
 SHOWDOWN_AVAILABLE = False
 
-# Try to import showdown or execjs
 try:
     import showdown
     SHOWDOWN_AVAILABLE = True

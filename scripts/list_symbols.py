@@ -1,7 +1,6 @@
 import ast
 from pathlib import Path
 import textwrap
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REPORT_NAME = "function_report.txt"
 REPORT_PATH = PROJECT_ROOT / "scripts" / REPORT_NAME

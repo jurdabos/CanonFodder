@@ -2,14 +2,10 @@
 Provides interactive command-line helpers for data cleaning and user prompts.
 """
 from dotenv import load_dotenv
-
 load_dotenv()
-from datetime import datetime, UTC
+from datetime import datetime
 from DB import get_session as _get_session
-
-from DB.models import ArtistVariantsCanonized, ArtistInfo
-from DB import SessionLocal
-import getpass
+from DB.models import ArtistVariantsCanonized
 import hashlib
 from .io import PQ_DIR
 import logging
@@ -17,15 +13,12 @@ log = logging.getLogger(__name__)
 import os
 import pandas as pd
 from pathlib import Path
-
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[1] if "__file__" in globals() else Path.cwd()
-
 import questionary
 from sqlalchemy import select, insert, update
 import sys
 from typing import Optional
-
 SEPARATOR = "{"
 os.makedirs(PQ_DIR, exist_ok=True)
 AVC_PARQUET_PATH = os.path.join(PQ_DIR, "avc.parquet")

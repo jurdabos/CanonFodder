@@ -196,6 +196,10 @@ def init(*, engine=None, session_maker=None, user_agent: str | None = None) -> N
     # ArtistInfo table is managed by alembic migrations, no need to create here
     init._done = True  # type: ignore[attr-defined]
 
+    # Display database connection information
+    if engine:
+        print(f"[mbAPI] Using database: {engine.url}")
+
 
 def _cache_artist(data: Dict[str, Any]) -> None:
     """

@@ -12,10 +12,8 @@ import re
 from sklearn.metrics import confusion_matrix, classification_report
 from sqlalchemy import select, text, func, inspect
 from tabulate import tabulate
-
 AC_PARQUET = PQ_DIR / "artist_info.parquet"
 AC_COLS = ["artist_name", "country", "mbid", "disambiguation_comment"]
-# Path to the country code mapping file
 COUNTRY_MAPPING_PARQUET = PQ_DIR / "c.parquet"
 
 

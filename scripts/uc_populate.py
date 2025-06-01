@@ -1,11 +1,9 @@
 """
 Populates the user_country dimension from another table
 and emits a Parquet snapshot.
-
 • Works with any SQLAlchemy URL.
 • Safe to re-run: TRUNCATEs dst.user_country first.
 • Can run non-interactively (env/CLI) **or** interactive if URLs are absent.
-
     python -m canonfodder.scripts.uc_populate \
            --src  mysql+pymysql://u:pw@host/db \
            --dst  sqlite:///DB/canonfodder.db
@@ -16,7 +14,6 @@ import argparse
 import getpass
 import os
 import sys
-
 import pandas as pd
 from sqlalchemy import create_engine, text
 
