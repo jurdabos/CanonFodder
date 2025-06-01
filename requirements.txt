@@ -179,6 +179,10 @@ flag~=0.1.1
 
 branca~=0.8.1
 
-# Showdown integration dependencies
-py-showdown>=0.1.0
-PyExecJS>=1.5.1
+# Showdown integration dependencies - removed due to installation issues
+# These packages are optional and used only for Markdown-to-HTML conversion
+# The application has fallback mechanisms and can function without them
+# py-showdown>=0.1.0
+# PyExecJS>=1.5.1
+
+apache-airflow~=3.0.1

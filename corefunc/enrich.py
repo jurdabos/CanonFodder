@@ -15,7 +15,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import sqlalchemy as sa
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
 # Update path to point to the correct location from corefunc directory
 PARQUET_PATH = Path(__file__).resolve().parent.parent / "PQ" / "artist_info.parquet"

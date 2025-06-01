@@ -1,11 +1,8 @@
 """
 corefunc.dataprofiler
 =====================
-
 Utility functions to incorporate profiling tasks into main application.
-
 All public functions:
-
 * quick_viz
 * run_profiling
 """
@@ -13,7 +10,6 @@ from __future__ import annotations
 from collections import namedtuple
 import logging
 import numpy as np
-import os
 import pandas as pd
 from rapidfuzz import fuzz
 

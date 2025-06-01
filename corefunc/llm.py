@@ -48,7 +48,7 @@ class CanonFodderLLM:
             "country_iso2": None,
             "confidence": 0.0,
         }
-        # 1️⃣  MusicBrainz first (free & deterministic)
+        # 1️⃣  MusicBrainz first
         mb = await self.mb_search(f'artist:"{artist_name}"')
         if mb and mb.get("country"):
             result["country_iso2"] = mb["country"]

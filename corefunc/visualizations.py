@@ -2,13 +2,11 @@
 Visualization functions for CanonFodder.
 """
 from __future__ import annotations
-
 import json
 import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
-
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,16 +14,12 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.figure import Figure
 from scipy import stats
-
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
-
-# Set matplotlib backend to Agg for non-interactive environments
 matplotlib.use("Agg")
 
 
@@ -36,19 +30,19 @@ def load_data() -> pd.DataFrame:
         pd.DataFrame: The loaded data
     """
     try:
-        # Get the project root directory
+        # Getting the project root directory
         project_root = Path(__file__).resolve().parent.parent
-        # Look specifically for scrobble.parquet in the PQ directory
+        # Looking specifically for scrobble.parquet in the PQ directory
         pq_dir = project_root / "PQ"
         if not pq_dir.exists():
             raise FileNotFoundError(f"PQ directory not found: {pq_dir}")
         scrobble_file = pq_dir / "scrobble.parquet"
         if not scrobble_file.exists():
             raise FileNotFoundError(f"Scrobble parquet file not found: {scrobble_file}")
-        # Load the data
+        # Loading the data
         data = pd.read_parquet(scrobble_file)
 
-        # Rename columns to match the expected format
+        # Renaming columns to match the expected format
         if "artist_name" in data.columns:
             data = data.rename(columns={
                 "artist_name": "Artist",
@@ -57,22 +51,17 @@ def load_data() -> pd.DataFrame:
                 "track_name": "Song",
                 "artist_mbid": "MBID"
             })
-
-        # Convert timestamp to datetime if needed
+        # Converting timestamp to datetime if needed
         if "Datetime" in data.columns and not pd.api.types.is_datetime64_dtype(data["Datetime"]):
             data["Datetime"] = pd.to_datetime(data["Datetime"])
-
-        # Add year, month, day columns
+        # Adding year, month, day columns
         if "Datetime" in data.columns:
             data["Year"] = data["Datetime"].dt.year
             data["Month"] = data["Datetime"].dt.month
             data["Day"] = data["Datetime"].dt.day
-
         logger.info(f"Data loaded successfully from {scrobble_file}")
         logger.info(f"Data shape: {data.shape}")
-
         return data
-
     except Exception as e:
         logger.error(f"Error loading data: {e}")
         raise
@@ -84,40 +73,33 @@ def scrobbles_per_year(data: pd.DataFrame) -> Figure:
 
     Args:
         data (pd.DataFrame): The scrobble data
-
     Returns:
         Figure: The matplotlib figure
     """
     try:
-        # Group by year and count
+        # Grouping by year and count
         year_counts = data.groupby("Year")["Song"].count()
-
-        # Create the plot
+        # Creating the plot
         fig, ax = plt.subplots(figsize=(10, 6))
-
-        # Load custom color palette if available
+        # Loading custom color palette if available
         try:
             project_root = Path(__file__).resolve().parent.parent
             palette_path = project_root / "JSON" / "palettes.json"
-
             if palette_path.exists():
                 with open(palette_path, "r") as f:
                     palettes = json.load(f)["palettes"]
-
                 if "colorpalette_5" in palettes:
                     colors = palettes["colorpalette_5"]
-                    color = colors[0]  # Use the first color
+                    color = colors[0]  # to use the first color
                 else:
-                    color = "#0D3C45"  # Default color
+                    color = "#0D3C45"  # default color
             else:
                 color = "#0D3C45"  # Default color
         except Exception:
-            color = "#0D3C45"  # Default color
-
-        # Plot the data
+            color = "#0D3C45"  # default color
+        # Plotting the data
         bars = ax.bar(year_counts.index, year_counts.values, color=color)
-
-        # Add value labels on top of bars
+        # Adding value labels on top of bars
         for bar in bars:
             height = bar.get_height()
             ax.text(
@@ -128,21 +110,16 @@ def scrobbles_per_year(data: pd.DataFrame) -> Figure:
                 va="bottom",
                 fontsize=10
             )
-
-        # Customize the plot
+        # Customizing the plot
         ax.set_title("Total Scrobbles per Year", fontsize=16)
         ax.set_xlabel("Year", fontsize=14)
         ax.set_ylabel("Scrobbles", fontsize=14)
         ax.grid(axis="y", linestyle="--", alpha=0.7)
-
-        # Rotate x-axis labels if there are many years
+        # Rotating x-axis labels if there are many years
         if len(year_counts) > 10:
             plt.xticks(rotation=45, ha="right")
-
         plt.tight_layout()
-
         return fig
-
     except Exception as e:
         logger.error(f"Error creating scrobbles per year plot: {e}")
         raise
@@ -150,10 +127,8 @@ def scrobbles_per_year(data: pd.DataFrame) -> Figure:
 def scrobbles_per_month(data: pd.DataFrame) -> Figure:
     """
     Create a bar chart of average scrobbles per month.
-
     Args:
         data (pd.DataFrame): The scrobble data
-
     Returns:
         Figure: The matplotlib figure
     """

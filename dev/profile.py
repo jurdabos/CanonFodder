@@ -40,7 +40,6 @@ from folium import plugins as folium_plugins
 from helpers import cli
 from helpers import io
 from helpers import stats
-import importlib
 from HTTP import mbAPI
 mbAPI.init()
 import json
@@ -74,7 +73,6 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 import threading
 import webbrowser
 # %%
-# Constants & basic setup
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -89,7 +87,6 @@ os.environ["MPLBACKEND"] = "TkAgg"
 log.addFilter(lambda rec: not rec.name.startswith("musicbrainzngs.mbxml"))
 
 
-# Parsing command-line arguments
 def parse_args() -> argparse.Namespace:
     pee = argparse.ArgumentParser(description="CanonFodder dev profiling helper")
     pee.add_argument("--no-interactive", action="store_true",
@@ -97,7 +94,6 @@ def parse_args() -> argparse.Namespace:
     sub = pee.add_subparsers(dest="cmd", help="Sub‑commands")
     sub.add_parser("country", help="Edit user‑country timeline interactively")
     sub.add_parser("cleanup-artists", help="Clean up the ArtistInfo table by removing duplicates and orphaned entries")
-
     # Use parse_known_args to ignore unrecognized arguments (like PyCharm's --mode, --host, --port)
     parsed_args, unknown = pee.parse_known_args()
     if unknown:

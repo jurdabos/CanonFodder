@@ -17,7 +17,9 @@ from DB import engine, SessionLocal
 from DB.ops import bulk_insert_scrobbles, load_scrobble_table_from_db_to_df, populate_artist_info_from_scrobbles
 from HTTP import lfAPI, mbAPI
 from corefunc.data_cleaning import clean_artist_info_table
-from helpers.io import dump_parquet
+from corefunc.canonizer import apply_previous
+from corefunc.model_server import start_server, stop_server, get_server_status
+from helpers.io import dump_parquet, latest_parquet
 from helpers.progress import ProgressCallback, null_progress_callback
 from corefunc import dataprofiler as dp
 
@@ -38,7 +40,6 @@ def fetch_new_data(
         Last.fm username to fetch data for. If None, will use the LASTFM_USER environment variable.
     progress_callback : ProgressCallback, optional
         Callback function for progress updates.
-
     Returns
     -------
     Dict[str, Union[int, str, None]]
@@ -51,8 +52,7 @@ def fetch_new_data(
     # Use null callback if none provided
     if progress_callback is None:
         progress_callback = null_progress_callback
-
-    # Get username from parameter or environment variable
+    # Getting username from parameter or environment variable
     username = username or os.getenv("LASTFM_USER")
     if not username:
         error_msg = "No Last.fm username provided. Set LASTFM_USER environment variable or pass username parameter."
@@ -63,14 +63,11 @@ def fetch_new_data(
             'new_scrobbles': 0,
             'latest_timestamp': None
         }
-
     try:
         # Initialize MusicBrainz API if not already initialized
         mbAPI.init()
-
         # Report progress
         progress_callback("Initializing", 5, "Setting up environment")
-
         # Find newest scrobble timestamp already in DB
         progress_callback("Checking database", 10, "Looking for existing scrobbles")
         df_db, _tbl = load_scrobble_table_from_db_to_df(engine)
@@ -81,13 +78,10 @@ def fetch_new_data(
             progress_callback("Checking database", 15, f"Found {len(df_db)} scrobbles in database")
         else:
             progress_callback("Checking database", 15, "No existing scrobbles found")
-
         # Fetch new scrobbles
         logger.info(f"Fetching scrobbles from Last.fm API since {latest_ts}")
         progress_callback("Fetching from Last.fm API", 20, "Connecting to Last.fm")
-
         df_recent = lfAPI.fetch_scrobbles_since(username, latest_ts)
-
         if df_recent.empty:
             logger.info("No new scrobbles since last run – nothing to do.")
             progress_callback("Complete", 100, "No new scrobbles to process")
@@ -97,11 +91,9 @@ def fetch_new_data(
                 'new_scrobbles': 0,
                 'latest_timestamp': latest_ts
             }
-
-        # Insert into database
+        # Inserting into database
         logger.info(f"Fetched {len(df_recent)} new scrobbles")
         progress_callback("Processing data", 50, f"Processing {len(df_recent)} scrobbles")
-
         progress_callback("Storing results", 60, "Inserting into database")
         bulk_insert_scrobbles(df_recent, engine)
 
@@ -374,6 +366,175 @@ def run_incremental_pipeline(
     # All steps completed successfully
     progress_callback("Pipeline", 100, "Pipeline completed successfully")
     return result
+
+
+def run_canonization(
+        progress_callback: Optional[ProgressCallback] = None
+) -> Dict[str, Union[int, str, bool]]:
+    """
+    Run the canonization process to group artist name variants and store mapping in AVC.
+
+    Parameters
+    ----------
+    progress_callback : ProgressCallback, optional
+        Callback function for progress updates.
+
+    Returns
+    -------
+    Dict[str, Union[int, str, bool]]
+        Dictionary with status information:
+        - 'status': 'success' or 'error'
+        - 'message': Status message
+        - 'row_count': Number of rows processed
+        - 'artist_count': Number of unique artists
+        - 'data_source': Source of the data ('parquet' or 'database')
+    """
+    # Use null callback if none provided
+    if progress_callback is None:
+        progress_callback = null_progress_callback
+
+    try:
+        # Report progress
+        progress_callback("Canonization", 0, "Starting artist name canonization")
+
+        # Check model server status and start if not running
+        status = get_server_status()
+        if not status["is_running"]:
+            progress_callback("Canonization", 10, "Starting model server")
+            success = start_server()
+            if success:
+                logger.info("Model server started successfully")
+                progress_callback("Canonization", 20, "Model server started successfully")
+            else:
+                logger.warning("Failed to start model server. Continuing without it.")
+                progress_callback("Canonization", 20, "Failed to start model server. Continuing without it.")
+        else:
+            logger.info("Model server is already running")
+            progress_callback("Canonization", 20, "Model server is already running")
+
+        # Load data
+        progress_callback("Canonization", 30, "Loading data")
+
+        # Try to load from parquet first
+        data_source = "parquet"
+        try:
+            data = pd.read_parquet(latest_parquet())
+            logger.info("Loaded data from parquet")
+            progress_callback("Canonization", 40, "Loaded data from parquet")
+        except Exception as e:
+            # Fall back to database
+            logger.warning(f"Failed to load from parquet: {str(e)}. Falling back to database.")
+            progress_callback("Canonization", 40, "Falling back to database")
+            data, _ = load_scrobble_table_from_db_to_df(engine)
+            data_source = "database"
+
+        if data is None or data.empty:
+            error_msg = "No data found for canonization"
+            logger.error(error_msg)
+            progress_callback("Error", 100, error_msg)
+            return {
+                'status': 'error',
+                'message': error_msg,
+                'row_count': 0,
+                'artist_count': 0,
+                'data_source': data_source
+            }
+
+        # Apply previous canonization
+        progress_callback("Canonization", 60, "Applying previous canonization")
+        data = apply_previous(data)
+
+        # Get statistics
+        row_count = len(data)
+        artist_count = data["Artist"].nunique()
+
+        logger.info(f"Canonization complete: processed {row_count} rows with {artist_count} unique artists")
+        progress_callback("Complete", 100, f"Processed {row_count} rows with {artist_count} unique artists")
+
+        return {
+            'status': 'success',
+            'message': f"Successfully applied canonization to {row_count} rows with {artist_count} unique artists",
+            'row_count': row_count,
+            'artist_count': artist_count,
+            'data_source': data_source
+        }
+
+    except Exception as e:
+        error_msg = f"Error during canonization: {str(e)}"
+        logger.exception(error_msg)
+        progress_callback("Error", 100, error_msg)
+        return {
+            'status': 'error',
+            'message': error_msg,
+            'row_count': 0,
+            'artist_count': 0,
+            'data_source': 'unknown'
+        }
+
+
+def export_to_parquet(
+        progress_callback: Optional[ProgressCallback] = None
+) -> Dict[str, Union[str, Path]]:
+    """
+    Export data to parquet files.
+
+    Parameters
+    ----------
+    progress_callback : ProgressCallback, optional
+        Callback function for progress updates.
+
+    Returns
+    -------
+    Dict[str, Union[str, Path]]
+        Dictionary with status information:
+        - 'status': 'success' or 'error'
+        - 'message': Status message
+        - 'parquet_path': Path to the exported parquet file
+    """
+    # Use null callback if none provided
+    if progress_callback is None:
+        progress_callback = null_progress_callback
+
+    try:
+        # Report progress
+        progress_callback("Exporting", 0, "Starting parquet export")
+
+        # Load data from database
+        progress_callback("Exporting", 20, "Loading data from database")
+        df, _tbl = load_scrobble_table_from_db_to_df(engine)
+
+        if df is None or df.empty:
+            error_msg = "No data found for export"
+            logger.error(error_msg)
+            progress_callback("Error", 100, error_msg)
+            return {
+                'status': 'error',
+                'message': error_msg,
+                'parquet_path': None
+            }
+
+        # Export to parquet
+        progress_callback("Exporting", 60, "Exporting to parquet")
+        parquet_path = dump_parquet(df, constant=True)
+
+        logger.info(f"Parquet export complete: {parquet_path}")
+        progress_callback("Complete", 100, f"Exported to {parquet_path}")
+
+        return {
+            'status': 'success',
+            'message': f"Successfully exported data to {parquet_path}",
+            'parquet_path': parquet_path
+        }
+
+    except Exception as e:
+        error_msg = f"Error during parquet export: {str(e)}"
+        logger.exception(error_msg)
+        progress_callback("Error", 100, error_msg)
+        return {
+            'status': 'error',
+            'message': error_msg,
+            'parquet_path': None
+        }
 
 
 def run_full_pipeline(

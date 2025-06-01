@@ -20,7 +20,6 @@ log = logging.getLogger(__name__)
 
 import pandas as pd
 import numpy as np
-from rapidfuzz import fuzz
 import re
 from sklearn.cluster import DBSCAN
 

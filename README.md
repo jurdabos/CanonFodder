@@ -55,9 +55,33 @@ The project is built with Python and SQL, using:
 2. **Set up the environment**
 
    Option 1: Using Docker
+
+   The project includes a complete Docker setup with MySQL, Airflow, and Adminer:
+
    ```shell
+   # Copy environment variables template
+   cp .env.example .env
+
+   # Edit .env file to add your Last.fm API key and other settings
+   # At minimum, set LASTFM_API_KEY and LASTFM_USER
+
+   # Start the Docker containers
    docker-compose up --build
    ```
+
+   This will start the following services:
+   - **MySQL Database**: Stores scrobble data and metadata
+   - **CanonFodder App with Airflow**: Runs the data pipeline and provides workflow orchestration
+   - **Adminer**: Web interface for database management
+
+   Access the services:
+   - Airflow UI: http://localhost:8080 (username: admin, password: admin)
+   - Adminer: http://localhost:8081 (server: db, username: canon, password: canon, database: canonfodder)
+
+   The Docker setup includes:
+   - Automatic database initialization
+   - Airflow DAG for weekly data pipeline runs
+   - Volume mapping for persistent data storage
 
    Option 2: Manual setup
    # Create a virtual environment

@@ -42,19 +42,18 @@ def load_model() -> Tuple[XGBClassifier, List[str]]:
         Tuple[XGBClassifier, List[str]]: The loaded model and column names
     """
     try:
-        # Get the project root directory
+        # Getting the project root directory
         project_root = Path(__file__).resolve().parent.parent
-        # Load the model
+        # Loading the model
         model_path = project_root / "ML" / "xgb.json"
         columns_path = project_root / "ML" / "xgb_columns.json"
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
         if not columns_path.exists():
             raise FileNotFoundError(f"Columns file not found: {columns_path}")
-        # Load the model
         xgb_model = XGBClassifier()
         xgb_model.load_model(model_path)
-        # Load the column names
+        # Loading the column names
         with open(columns_path, "r") as f:
             cols = json.load(f)
         logger.info(f"Model loaded successfully from {model_path}")
@@ -73,13 +72,13 @@ def preprocess_data(data: Dict[str, Union[float, int, str]]) -> pd.DataFrame:
     Returns:
         pd.DataFrame: The preprocessed data
     """
-    # Create a DataFrame with the required columns
+    # Creating a DataFrame with the required columns
     df = pd.DataFrame([data])
-    # Ensure all required columns are present
+    # Ensuring all required columns are present
     for col in columns:
         if col not in df.columns:
             df[col] = 0.0
-    # Select only the columns used by the model
+    # Selecting only the columns used by the model
     df = df[columns]
     return df
 
@@ -106,16 +105,16 @@ def predict():
         JSON response with prediction result
     """
     try:
-        # Get the input data
+        # Getting the input data
         input_data = request.json
         if not input_data or "data" not in input_data:
             return jsonify({"error": "Invalid input format. Expected JSON with 'data' field."}), 400
-        # Preprocess the data
+        # Preprocessing the data
         data = preprocess_data(input_data["data"])
         # Make prediction
         prediction = model.predict(data)[0]
         probability = model.predict_proba(data)[0, 1]
-        # Return the prediction
+        # Returning the prediction
         return jsonify({
             "prediction": int(prediction),
             "probability": float(probability),
@@ -145,24 +144,24 @@ def predict_batch():
         JSON response with prediction results
     """
     try:
-        # Get the input data
+        # Getting the input data
         input_data = request.json
         if not input_data or "data" not in input_data or not isinstance(input_data["data"], list):
             return jsonify({"error": "Invalid input format. Expected JSON with 'data' field containing a list."}), 400
         results = []
         for item in input_data["data"]:
-            # Preprocess the data
+            # Preprocessing the data
             data = preprocess_data(item)
-            # Make prediction
+            # Making prediction
             prediction = model.predict(data)[0]
             probability = model.predict_proba(data)[0, 1]
-            # Add to results
+            # Adding to results
             results.append({
                 "prediction": int(prediction),
                 "probability": float(probability),
                 "should_link": bool(prediction == 1)
             })
-        # Return the predictions
+        # Returning the predictions
         return jsonify({"results": results})
     except Exception as e:
         logger.error(f"Error making batch prediction: {e}")
@@ -182,12 +181,12 @@ def start_server(server_port: int = 5000) -> bool:
         logger.warning("Server is already running")
         return True
     try:
-        # Load the model and columns
+        # Loading the model and columns
         model, columns = load_model()
-        # Initialize the global scaler
+        # Initializing the global scaler
         global scaler
         scaler = RobustScaler()
-        # Set the port
+        # Setting the port
         port = server_port
         # Define the thread function
 

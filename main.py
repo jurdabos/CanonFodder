@@ -184,29 +184,44 @@ def _cli_entry() -> int:
         from helpers.markdown import render_markdown_file
         import glob
         from pathlib import Path
+        import os
 
         # Create docs/html directory if it doesn't exist
         html_dir = Path("docs/html")
         html_dir.mkdir(exist_ok=True, parents=True)
 
+        # Get the absolute path of the current working directory
+        cwd = Path.cwd().resolve()
+
         # Render all Markdown files in the project
         md_files = glob.glob("**/*.md", recursive=True)
         for md_file in md_files:
-            md_path = Path(md_file)
+            md_path = Path(md_file).resolve()
             # Skip files in the .venv directory
             if ".venv" in md_path.parts:
                 continue
 
             # Create output path in docs/html
-            rel_path = md_path.relative_to(Path.cwd())
-            output_path = html_dir / rel_path.with_suffix('.html')
-            output_path.parent.mkdir(exist_ok=True, parents=True)
-
+            # Use os.path.relpath for safer relative path calculation
             try:
-                render_markdown_file(md_path, output_path)
-                print(f"Rendered {md_path} to {output_path}")
-            except Exception as e:
-                print(f"Error rendering {md_path}: {e}")
+                rel_path = Path(os.path.relpath(md_path, cwd))
+                output_path = html_dir / rel_path.with_suffix('.html')
+                output_path.parent.mkdir(exist_ok=True, parents=True)
+
+                try:
+                    render_markdown_file(md_path, output_path)
+                    print(f"Rendered {md_path} to {output_path}")
+                except ImportError as e:
+                    # Handle the case where Markdown rendering packages are not available
+                    print(f"Warning: Could not render {md_path} - {e}")
+                    # Copy the Markdown file as-is to maintain documentation
+                    import shutil
+                    shutil.copy2(md_path, output_path.with_suffix('.md'))
+                    print(f"Copied {md_path} to {output_path.with_suffix('.md')} (no HTML conversion)")
+                except Exception as e:
+                    print(f"Error rendering {md_path}: {e}")
+            except ValueError as e:
+                print(f"Warning: Skipping {md_path} - {e}")
 
         print("Documentation rendering complete.")
         return 0

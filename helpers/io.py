@@ -12,9 +12,11 @@ from pathlib import Path
 import re
 if '__file__' in globals():
     HERE = Path(__file__).resolve().parent
+    # Get the project root directory (parent of the helpers directory)
+    PROJECT_ROOT = HERE.parent
 else:
-    HERE = Path.cwd()
-PQ_DIR = Path.cwd() / "PQ"
+    PROJECT_ROOT = Path.cwd()
+PQ_DIR = PROJECT_ROOT / "PQ"
 PQ_DIR.mkdir(exist_ok=True)
 OP_TOKENS = {           # space–operator–space → token
     r"\s\-\s": "_minus_",
@@ -141,12 +143,13 @@ def append_or_create_parquet(df: pd.DataFrame, path: Path) -> None:
 def dump_latest_table_to_parquet() -> None:
     """
     Materialises the newest DB scrobble table as a parquet file.
+    Uses the constant filename (scrobble.parquet) instead of a timestamped one.
     """
     df_db, latest_tbl = load_scrobble_table_from_db_to_df(engine)
     if df_db is None:
         print("No scrobble table in DB – nothing to dump.")
         return
-    pq_file = PQ_DIR / f"scrobbles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"
+    pq_file = PQ_DIR / "scrobble.parquet"
     df_db.to_parquet(pq_file, index=False)
     print(f"Latest scrobble table persisted → {pq_file}")
 

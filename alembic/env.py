@@ -3,7 +3,6 @@ from logging.config import fileConfig
 """Alembic run-environment"""
 from pathlib import Path
 from alembic import context
-from sqlalchemy import pool
 import os
 
 # ─── 1  .env + optional -x db_url override ───────────────────────

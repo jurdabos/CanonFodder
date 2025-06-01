@@ -6,7 +6,6 @@ scrobble data from Last.fm, as well as functions for cleaning and maintaining th
 """
 
 from __future__ import annotations
-import os
 import json
 import logging
 import traceback
@@ -28,10 +27,8 @@ import helpers.aliases as mb_alias
 from DB import engine, SessionLocal
 from DB.models import Base, ArtistInfo, Scrobble
 from DB.ops import (
-    ascii_freq,
     bulk_insert_scrobbles,
     load_scrobble_table_from_db_to_df,
-    seed_ascii_chars,
     populate_artist_info_from_scrobbles
 )
 

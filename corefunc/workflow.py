@@ -17,9 +17,8 @@ import pandas as pd
 import seaborn as sns
 import matplotlib
 
-# Import from helpers
 from helpers.progress import ProgressCallback, null_progress_callback
-from helpers.io import dump_parquet, latest_parquet, register_custom_palette
+from helpers.io import dump_parquet, register_custom_palette
 from helpers.cli import yes_no, choose_lastfm_user
 import helpers.aliases as mb_alias
 

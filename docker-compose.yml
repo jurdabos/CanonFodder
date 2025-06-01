@@ -1,0 +1,87 @@
+version: '3.9'
+
+services:
+  # MySQL database for CanonFodder
+  db:
+    image: mysql:8.3
+    container_name: canonfodder-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: canonroot
+      MYSQL_DATABASE: canonfodder
+      MYSQL_USER: canon
+      MYSQL_PASSWORD: canon
+    ports:
+      - "3306:3306"
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # CanonFodder application with Airflow
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: canonfodder-app
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - LASTFM_API_KEY=${LASTFM_API_KEY}
+      - LASTFM_USER=${LASTFM_USER}
+      - MB_APP_NAME=CanonFodder
+      - MB_APP_VERSION=1.2
+      - MB_CONTACT=${MB_CONTACT}
+      - DB_URL=mysql+pymysql://canon:canon@db/canonfodder
+      - UC_SRC=mysql+pymysql://canon:canon@db/canonfodder
+      - UC_DST=${UC_SRC}
+      - AIRFLOW_HOME=/opt/airflow
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__WEBSERVER__BASE_URL=http://localhost:8080
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./PQ:/opt/airflow/PQ
+      - airflow_data:/opt/airflow
+    command: >
+      bash -c "
+        # Initialize database schema
+        alembic upgrade head &&
+
+        # Populate user country data
+        python -m canonfodder.scripts.uc_populate &&
+
+        # Initialize Airflow
+        airflow db init &&
+
+        # Create Airflow admin user if it doesn't exist
+        (airflow users list | grep -q admin) || 
+        airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin &&
+
+        # Start Airflow webserver and scheduler
+        airflow webserver -p 8080 & airflow scheduler
+      "
+
+  # Database management interface
+  adminer:
+    image: adminer
+    container_name: canonfodder-adminer
+    restart: always
+    ports:
+      - "8081:8080"
+    depends_on:
+      - db
+
+volumes:
+  dbdata:
+  airflow_data:

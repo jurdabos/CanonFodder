@@ -18,7 +18,6 @@ PARQUET_DIR = PROJECT_ROOT / "PQ"
 PARQUET_OUT = PARQUET_DIR / "c.parquet"
 PARQUET_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---------- read + transform ----------------------------------------------
 rename_map = {
     "ALPHA2": "ISO-2",
     "ALPHA3": "ISO-3",
@@ -41,10 +40,8 @@ df = (
     .reset_index(drop=True)
 )
 
-# ---------- write parquet --------------------------------------------------
 df.to_parquet(PARQUET_OUT, engine="pyarrow", index=False)
 
-# ---------- write to MySQL -------------------------------------------------
 user = os.getenv("MyDB_USER")
 pwd = os.getenv("MyDB_PASSWORD")
 host = os.getenv("MyDB_HOST")

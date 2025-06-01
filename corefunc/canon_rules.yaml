@@ -15,7 +15,7 @@ checksum: sha256
 
 canonization_rules:
   - number: 1
-    text: Lookup of official versions is the most authoritative way to decide on canonical variant.
+    text: Lookup of official artist name versions is the most authoritative way to decide on canonical variant.
     example: [Discogs, MB, official website, registries, Wikipedia]
   - number: 2
     text: '&' is preferred over 'and', 'And', 'und, 'Und'.
