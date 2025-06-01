@@ -3,7 +3,7 @@ CanonFodder is a data-engineering pipeline with the following building blocks in
     — ETL process: hosted in Python script with a hybrid of manual/deterministic fuzzy-logic canonisation offered
     — DWH: backend-agnostic SQL storage with tables for scrobble, artist info, canonisations, user country and codes
     — Evaluation DB: .parquet files offering a tiny analytics stack in a star schema where scrobble is the fact table
-    — BI frontend: an interactive menu launched from main.py where the user can launch data harvest, and see visuals
+    — BI frontend: an interactive menu launched from main.py where the user can launch data harvest, run the full pipeline, and see visuals
 
 For all EDA and frontend visualizations, we want to use our custom colour palettes to be found at JSON/palettes.json.
 I have created a set of info for colorpalette_{n} from 1 < n < 11 using https://coolors.co/16697a-dbf4a7-a24936-7ebce6-e6beae.
@@ -24,6 +24,9 @@ ETL pipeline:
     — rename "Artist" to "artist_name", "Album" to "album_title", "Song" to "track_title"
     – convert UTS to SQL datetime in the form of YYYY-MM-DD HH:MM:SS
     – de-dup scrobble records
+    – pull-based pipeline for incremental updates with robust conflict handling
+    – weekly autofetch of new data via Airflow orchestration
+    – artist metadata enrichment from MusicBrainz with country and alias information
 
 DWH:
 For own production, housed in local MySQL.
@@ -51,7 +54,7 @@ Python libraries:    contextlib, datetime, dotenv, hashlib, os, pathlib, pickle,
 Default RDBMS:       MySQL
 Static hosting:      GitHub
 VCS:                 git
-Workflow management: Airflow (a one-click Airflow DAG to graduate the hobby code into reproducible production)
+Workflow management: Airflow (weekly DAG for autofetch, artist enrichment, data cleaning, and profiling)
 
 We need proper docstrings for all functions.
 

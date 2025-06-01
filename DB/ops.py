@@ -262,7 +262,7 @@ def populate_artist_info_from_scrobbles(
     with_mbid_q = (
         session.query(Scrobble.artist_mbid, Scrobble.artist_name)
         .filter(Scrobble.artist_mbid.isnot(None))
-        .group_by(Scrobble.artist_mbid)
+        .group_by(Scrobble.artist_mbid, Scrobble.artist_name)
     )
     without_mbid_q = (
         session.query(Scrobble.artist_name)

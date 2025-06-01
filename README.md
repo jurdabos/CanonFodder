@@ -30,10 +30,6 @@ The project is built with Python and SQL, using:
   - `models.py`: SQLAlchemy ORM models
   - `ops.py`: Database operations
   - `common.py`: Database connection setup
-- **config/**: Configuration files for the project
-  - `requirements.txt`: Project dependencies
-  - `pyproject.toml`: Project build configuration
-  - `setup.py`: Package installation configuration
 - **docs/**: Project documentation
 - **helpers/**: Utility functions for data processing and analysis
 - **JSON/**: Configuration files including color palettes for visualizations
@@ -82,16 +78,12 @@ The project is built with Python and SQL, using:
 
    # Install dependencies
    ```shell
-   pip install -r config/requirements.txt
+   pip install -r requirements.txt
    ```
    # or for development installation (recommended for contributors)
    ```shell
-   pip install -e config/
+   pip install -e .
    ```
-
-   > **Important**: Always install from the `config/` directory, not the project root.
-   > This ensures that package metadata is stored correctly and prevents the creation
-   > of unnecessary `CanonFodder.egg-info` directory in the project root.
 
 3. **Configure the application**
    - Copy `.env.example` to `.env` and fill in the required values

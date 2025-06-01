@@ -1,0 +1,91 @@
+# CanonFodder Changelog
+
+## Recent Changes Summary
+
+### July 2023 Update: Orchestration and Pipeline Improvements
+The CanonFodder project has been enhanced with orchestration capabilities and a robust pull-based pipeline:
+
+1. **Orchestration & Automation**
+   - Added weekly autofetch of new data with Airflow integration
+   - Created a pull-based pipeline that can be triggered manually or via Airflow
+   - Implemented robust conflict handling policies for data merging
+   - Added new `corefunc/pipeline.py` module for the pull-based pipeline
+   - Created Airflow DAG for weekly execution in the new `dags/` directory
+
+2. **User Interface Enhancements**
+   - Added new "Full Pipeline" option to the CLI interface
+   - Improved error handling and progress reporting
+   - Enhanced data cleaning functionality for artist information
+
+3. **Data Processing Improvements**
+   - Refactored data gathering workflow to support incremental updates
+   - Improved handling of MusicBrainz API rate limits
+   - Enhanced artist metadata enrichment process
+
+### Previous Improvements
+The CanonFodder project has undergone significant improvements focused on modularization, serialization, and enhanced user experience:
+
+1. **Code Modularization**
+   - Reorganized API modules into dedicated HTTP/ directory
+   - Moved development scripts to dev/ directory
+   - Created corefunc/ package for core workflow functionality
+   - Enhanced helpers/ with specialized modules for CLI, formatting, and progress tracking
+
+2. **Serialization Improvements**
+   - Added JSON configuration files for color palettes and feature selection
+   - Implemented XGBoost model serialization
+   - Updated Parquet file structure for optimized data storage
+   - Enhanced database operations for better data handling
+
+3. **User Experience Enhancements**
+   - Major overhaul of menu logic for improved interaction
+   - Added progress tracking for long-running operations
+   - Improved CLI I/O for better user feedback
+   - Enhanced visualization capabilities with custom color palettes
+
+4. **Configuration & Setup**
+   - Moved setup configuration back to the project root for simplicity
+   - Removed duplicate configuration files from the config/ directory
+   - Removed the entire config/ directory as it became redundant
+   - Added comprehensive testing infrastructure
+
+## System Architecture
+```
+                    🎵 CanonFodder Music Data Pipeline 🎵
+
+    📡 Sources                  🔄 Processing                 📊 Output
+    ┌─────────────┐            ┌─────────────────┐          ┌─────────────┐
+    │ 🎧 last.fm  │──────┐     │                 │          │             │
+    └─────────────┘      │     │  ┌───────────┐  │          │  ┌─────────┐│
+                         ├────▶│  │Extract    │  │          │  │Parquet  ││
+    ┌─────────────┐      │     │  │Transform  │──┼─────────▶│  │Files    ││
+    │ 🎸 MusicBrainz│────┘     │  │Load       │  │          │  └─────────┘│
+    └─────────────┘            │  └───────────┘  │          │             │
+                               │                 │          │  ┌─────────┐│
+    ┌─────────────┐            │  ┌───────────┐  │          │  │Plotly   ││
+    │ 👤 User Input│───────────▶│  │SQLAlchemy │──┼─────────▶│  │Visuals  ││
+    └─────────────┘            │  │Database   │  │          │  └─────────┘│
+                               │  └───────────┘  │          │             │
+                               └─────────────────┘          └─────────────┘
+                                        │                          ▲
+                                        │                          │
+                                        ▼                          │
+                               ┌─────────────────┐                 │
+                               │ 🧠 ML Pipeline  │─────────────────┘
+                               │ XGBoost Models  │
+                               └─────────────────┘
+```
+
+## Recommendations
+
+### Installation Method
+The recommended installation method is now `pip install -e .` from the project root.
+
+**Changes made:**
+1. The setup.py file has been moved back to the project root for simplicity
+2. The config/ directory has been removed as it became redundant
+3. All configuration files are now in the project root
+4. The proper installation method is now `pip install -e .` from the project root
+
+**Note:**
+When installing the package, a CanonFodder.egg-info directory will be created in the project root. This is normal and contains metadata needed for the package to function correctly.

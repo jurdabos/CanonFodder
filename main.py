@@ -9,30 +9,23 @@ import os
 import sys
 import logging
 import argparse
-import platform
 import signal
-import re
-import threading
+import re as re
 from pathlib import Path
 from typing import Optional
-from sqlalchemy import delete, select, text, func
+from sqlalchemy import select, func
 
 # Import from helpers
 from helpers.progress import ProgressCallback, null_progress_callback
-from helpers.cli_interface import CliInterface, Colors, init_colors, start_gui, get_db_statistics
-from helpers.formatting import format_sql_for_display
+from helpers.cli_interface import init_colors, start_gui
 from helpers.cli import choose_lastfm_user
 
 # Import from corefunc
 from corefunc.workflow import run_data_gathering_workflow
 
-# Import from HTTP
-from HTTP.lfAPI import fetch_lastfm_with_progress
-
 # Import from DB
 from DB import SessionLocal
-from DB.models import ArtistInfo, Scrobble, Base
-from DB.ops import populate_artist_info_from_scrobbles
+from DB.models import ArtistInfo, Scrobble
 
 # Import API modules
 from HTTP import lfAPI
@@ -74,6 +67,11 @@ def _cli_entry() -> int:
         "--debug-artist-aliases",
         type=str,
         help="Debug alias retrieval for a specific artist (provide artist name or MBID)",
+    )
+    parser.add_argument(
+        "--render-docs",
+        action="store_true",
+        help="Render Markdown documentation to HTML using Showdown",
     )
     parser.add_argument(
         "--username",
@@ -179,6 +177,38 @@ def _cli_entry() -> int:
                         print("\nNo database record found!")
             except Exception as e:
                 print(f"Error: {e}")
+        return 0
+
+    if args.render_docs:
+        print("Rendering Markdown documentation to HTML...")
+        from helpers.markdown import render_markdown_file
+        import glob
+        from pathlib import Path
+
+        # Create docs/html directory if it doesn't exist
+        html_dir = Path("docs/html")
+        html_dir.mkdir(exist_ok=True, parents=True)
+
+        # Render all Markdown files in the project
+        md_files = glob.glob("**/*.md", recursive=True)
+        for md_file in md_files:
+            md_path = Path(md_file)
+            # Skip files in the .venv directory
+            if ".venv" in md_path.parts:
+                continue
+
+            # Create output path in docs/html
+            rel_path = md_path.relative_to(Path.cwd())
+            output_path = html_dir / rel_path.with_suffix('.html')
+            output_path.parent.mkdir(exist_ok=True, parents=True)
+
+            try:
+                render_markdown_file(md_path, output_path)
+                print(f"Rendered {md_path} to {output_path}")
+            except Exception as e:
+                print(f"Error rendering {md_path}: {e}")
+
+        print("Documentation rendering complete.")
         return 0
 
     if args.refresh_aliases:

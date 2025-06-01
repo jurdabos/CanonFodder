@@ -512,13 +512,18 @@ def fetch_scrobbles_since(username: str,
         # Skip "now-playing" pseudo-track (no date key)
         if "date" not in t:
             continue
+
+        # Safely handle artist and album data which might not be dictionaries
+        artist = t.get("artist", {}) if isinstance(t.get("artist"), dict) else {"#text": t.get("artist", "")}
+        album = t.get("album", {}) if isinstance(t.get("album"), dict) else {"#text": t.get("album", "")}
+
         rows.append(
             {
-                "Artist": t["artist"]["#text"],
-                "Song": t["name"],
-                "Album": t["album"]["#text"],
-                "uts": int(t["date"]["uts"]),
-                "artist_mbid": t["artist"].get("mbid") if isinstance(t["artist"], dict) else None
+                "Artist": artist.get("#text", ""),
+                "Song": t.get("name", ""),
+                "Album": album.get("#text", ""),
+                "uts": int(t.get("date", {}).get("uts", 0)),
+                "artist_mbid": artist.get("mbid") if isinstance(artist, dict) else None
             }
         )
 
@@ -705,7 +710,7 @@ def get_recent_tracks_with_progress(
         List of scrobble records
     """
     # Initializing parameters for first request
-    params = {"extended": 1, "limit": limit}
+    params = {"extended": 1}
     if from_timestamp:
         params["from"] = from_timestamp
     if to_timestamp:

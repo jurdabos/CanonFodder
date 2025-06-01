@@ -223,7 +223,20 @@ def run_data_gathering_workflow(
         # Run data profiling
         if not progress_callback:
             try:
-                dp.run_profiling()
+                # Run profiling and generate report
+                profile_result = dp.run_profiling(df_recent)
+
+                # Generate HTML report
+                report_path = Path("docs/reports")
+                report_path.mkdir(exist_ok=True, parents=True)
+                html_path = report_path / "profiling_report.html"
+
+                try:
+                    dp.generate_html_report(profile_result, html_path)
+                    print(f"Data profiling report saved to {html_path}")
+                except ImportError:
+                    print("Showdown not available. HTML report not generated.")
+
                 print("Data profiling completed.")
             except Exception as e:
                 print(f"Error during data profiling: {str(e)}")

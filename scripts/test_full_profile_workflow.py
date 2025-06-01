@@ -48,7 +48,16 @@ def test_full_profile_workflow():
 
     # Step 3: Simulate the column renaming in profile.py
     print("\nStep 3: Renaming columns")
-    data.columns = ["Artist", "Album", "Datetime", "Song", "MBID"]
+    # Create a mapping from original column names to the ones we want to use for analysis
+    column_mapping = {
+        "artist_name": "Artist",
+        "album_title": "Album",
+        "play_time": "Datetime",
+        "track_title": "Song",
+        "artist_mbid": "MBID"
+    }
+    # Create a view of the data with renamed columns for analysis
+    data = data.rename(columns=column_mapping)
     print(f"Columns after renaming: {data.columns.tolist()}")
 
     # Step 4: Verify that the data is correct after renaming

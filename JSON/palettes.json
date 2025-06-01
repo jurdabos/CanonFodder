@@ -684,6 +684,21 @@
   ]
 },
 {
+  "paletteName": "caribbean_current_shades_10_l2d",
+  "colors": [
+    { "position": 1,  "name": "caribbean_current_shades_10_l2d_1",  "hex": "eef9fc" },
+    { "position": 2,  "name": "caribbean_current_shades_10_l2d_2",  "hex": "cbeef6" },
+    { "position": 3,  "name": "caribbean_current_shades_10_l2d_3",  "hex": "a9e3ef" },
+    { "position": 4,  "name": "caribbean_current_shades_10_l2d_4",  "hex": "86d8e9" },
+    { "position": 5,  "name": "caribbean_current_shades_10_l2d_5",  "hex": "41c2dc" },
+    { "position": 6,  "name": "caribbean_current_shades_10_l2d_6",  "hex": "26b3cf" },
+    { "position": 7,  "name": "caribbean_current_shades_10_l2d_7",  "hex": "19778a" },
+    { "position": 8,  "name": "caribbean_current_shades_10_l2d_8",  "hex": "135967" },
+    { "position": 9,  "name": "caribbean_current_shades_10_l2d_9",  "hex": "061e22" },
+    { "position": 10, "name": "caribbean_current_shades_10_l2d_10", "hex": "030f11" }
+  ]
+},
+{
   "paletteName": "caribbean_current_shades_13_d2l",
   "colors": [
     { "position": 1,  "name": "caribbean_current_shades_13_d2l_1",  "hex": "030f11" },

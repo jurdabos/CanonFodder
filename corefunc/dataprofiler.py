@@ -50,13 +50,18 @@ def run_profiling(data: pd.DataFrame) -> ProfileResult:
     """
     Cleans raw last.fm scrobble data and computes name-level similarity.
     Performs duplicate-dropping, coercion to UTC.
-    Args:
-        data: the pd df containing last.fm scrobbles
-    Returns:
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        The DataFrame containing last.fm scrobbles
+
+    Returns
+    -------
+    ProfileResult
         A ProfileResult object containing the mutated dataframe,
         the artist counts, the similarity matrix, the names,
         and the names-to-index mapping.
-    Example:
     """
     before = len(data)
     data = data.copy()
@@ -83,3 +88,81 @@ def run_profiling(data: pd.DataFrame) -> ProfileResult:
         for j in range(i, n):
             sim[i, j] = sim[j, i] = fuzz.token_sort_ratio(a, names[j]) / 100
     return ProfileResult(data, artist_counts, sim, names, name_to_idx)
+
+
+def generate_markdown_report(profile: ProfileResult) -> str:
+    """
+    Generates a Markdown report from a ProfileResult.
+
+    Parameters
+    ----------
+    profile : ProfileResult
+        The profile result to generate a report for
+
+    Returns
+    -------
+    str
+        The Markdown report
+    """
+    # Get the top 20 artists
+    top_artists = profile.artist_counts.head(20)
+
+    # Generate Markdown
+    md = f"""# Data Profiling Report
+
+## Overview
+- Total scrobbles: {len(profile.df)}
+- Unique artists: {len(profile.artist_counts)}
+
+## Top 20 Artists
+| Artist | Scrobbles |
+|--------|-----------|
+"""
+
+    for artist, count in top_artists.items():
+        md += f"| {artist} | {count} |\n"
+
+    # Add similarity information
+    md += f"""
+## Artist Name Similarity
+
+The profiling identified {len(profile.names)} unique artist names.
+A similarity matrix was computed using fuzzy string matching to identify potential duplicates.
+
+### Similarity Statistics
+- Highest similarity between different artists: {profile.sim.max():.2f}
+- Average similarity between artists: {profile.sim.mean():.2f}
+"""
+
+    return md
+
+
+def generate_html_report(profile: ProfileResult, output_file=None) -> str:
+    """
+    Generates an HTML report from a ProfileResult using Showdown.
+
+    Parameters
+    ----------
+    profile : ProfileResult
+        The profile result to generate a report for
+    output_file : str or Path, optional
+        If provided, the HTML will be written to this file
+
+    Returns
+    -------
+    str
+        The HTML report
+    """
+    try:
+        from helpers.markdown import render_markdown
+
+        # Generate Markdown report
+        md_report = generate_markdown_report(profile)
+
+        # Render to HTML
+        html_report = render_markdown(md_report, output_file)
+
+        return html_report
+    except ImportError:
+        # If Showdown is not available, return the Markdown report
+        return generate_markdown_report(profile)

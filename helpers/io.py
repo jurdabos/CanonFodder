@@ -104,11 +104,18 @@ def append_or_create_parquet(df: pd.DataFrame, path: Path) -> None:
             combined_normalized = pd.concat([normalized_existing, normalized_df])
             # Keep the latest version of each record
             combined_normalized = combined_normalized.drop_duplicates(subset=dedup_cols, keep="last")
-            # Preserving all original columns from both dataframes
-            all_columns = list(set(existing_df.columns).union(set(df.columns)))
-            combined_df = combined_normalized[
-                [col for col in all_columns if col in combined_normalized.columns]
+            # Only keep the expected columns and any additional columns that are in both dataframes
+            # This prevents preserving unwanted columns like 'Album', 'Artist', 'Song', 'uts'
+            expected_columns = ["artist_name", "album_title", "play_time", "track_title", "artist_mbid"]
+            available_expected = [col for col in expected_columns if col in combined_normalized.columns]
+
+            # Only include additional columns that are in both dataframes to avoid preserving unwanted columns
+            additional_columns = [
+                col for col in combined_normalized.columns 
+                if col not in expected_columns and col not in ["Album", "Artist", "Song", "uts"]
             ]
+
+            combined_df = combined_normalized[available_expected + additional_columns]
         else:
             logger.warning("No common deduplication columns found, concatenating without deduplication")
             combined_df = pd.concat([existing_df, normalized_df])

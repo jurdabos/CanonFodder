@@ -31,6 +31,14 @@ corefunc\canonizer.py
     apply_previous()
     minimal_epsilon()
 
+corefunc\data_cleaning.py
+    clean_artist_info_table()
+
+corefunc\data_gathering.py
+    run_data_gathering_workflow()
+    run_full_refresh()
+    clean_artist_info_table()
+
 corefunc\dataprofiler.py
     quick_viz()
     run_profiling()
@@ -38,6 +46,45 @@ corefunc\dataprofiler.py
 corefunc\llm.py
     load_rules()
     CanonFodderLLM
+
+corefunc\model_server.py
+    load_model()
+    preprocess_data()
+    health_check()
+    predict()
+    predict_batch()
+    start_server()
+    stop_server()
+    shutdown()
+    get_server_status()
+
+corefunc\pipeline.py
+    fetch_new_data()
+    enrich_artist_data()
+    clean_artist_data()
+    run_data_profiling()
+    run_incremental_pipeline()
+    run_full_pipeline()
+
+corefunc\visualizations.py
+    load_data()
+    scrobbles_per_year()
+    scrobbles_per_month()
+    monthly_ridgeline()
+    seasonal_decomposition()
+    top_artists_bar()
+    artist_distribution_violin()
+    find_trusted_companions()
+    save_figure()
+
+corefunc\workflow.py
+    run_data_gathering_workflow()
+
+dags\canonfodder_weekly_dag.py
+    fetch_new_scrobbles()
+    enrich_artist_info()
+    clean_artist_data()
+    run_data_profiling()
 
 DB\__init__.py
     get_engine()
@@ -72,17 +119,21 @@ DB\ops.py
     save_group()
     seed_ascii_chars()
 
-dev_canon.py
+dev\canon.py
     _split_variants()
 
-dev_lblink.py
+dev\lblink.py
     _load_token()
     _RequestsBackend
     LBClient
     export_listens_to_parquet()
     _cli()
 
-dev_profile.py
+dev\profile.py
+    parse_args()
+    show_or_save_plot()
+    show_or_save_plotly()
+    find_project_root()
     _append_to_parquet()
     _country_for_series()
     _df_from_db()
@@ -90,7 +141,9 @@ dev_profile.py
     single_bar()
     _split_variants()
     yearly_top()
-    parse_args()
+
+dev\test_interactive_mode.py
+    test_access()
 
 enrich.py
     enrich_artist_country()
@@ -119,6 +172,13 @@ helpers\cli.py
     verify_commas()
     yes_no()
 
+helpers\cli_interface.py
+    Colors
+    init_colors()
+    get_db_statistics()
+    start_gui()
+    CliInterface
+
 helpers\cluster.py
     _clf_scorer()
     anchors_ok()
@@ -130,6 +190,9 @@ helpers\cluster.py
     most_similar()
     tree_to_rule_list()
 
+helpers\formatting.py
+    format_sql_for_display()
+
 helpers\io.py
     _parquet_name()
     append_or_create_parquet()
@@ -140,6 +203,11 @@ helpers\io.py
     register_custom_palette()
     sanitize()
     save_as_word_table()
+
+helpers\progress.py
+    ProgressManager
+    ProgressCallback
+    null_progress_callback()
 
 helpers\review.py
     review_canonized_variants()
@@ -160,14 +228,15 @@ helpers\stats.py
     top_n_artists_by_country()
     variance_testing()
     winsorization_outliers()
+    get_db_statistics()
 
 HTTP\client.py
     make_request()
 
-lfAPI.py
+HTTP\lfAPI.py
     _clean_track()
-    _normalise_tracks()
     _fetch_country_from_lastfm()
+    _normalise_tracks()
     _paginate()
     _update_user_country()
     enrich_artist_mbids()
@@ -180,23 +249,10 @@ lfAPI.py
     lastfm_request()
     get_recent_tracks_with_progress()
     LastFMError
+    fetch_lastfm_with_progress()
     sync_user_country()
 
-main.py
-    ProgressManager
-    fetch_lastfm_with_progress()
-    format_sql_for_display()
-    ProgressCallback
-    null_progress_callback()
-    Colors
-    init_colors()
-    run_data_gathering_workflow()
-    get_db_statistics()
-    start_gui()
-    CliInterface
-    _cli_entry()
-
-mbAPI.py
+HTTP\mbAPI.py
     _mb_call()
     _rate_limited()
     _split_user_agent()
@@ -205,16 +261,41 @@ mbAPI.py
     _get_session()
     add_alias()
     fetch_country()
-    get_aliases()
-    lookup_artist()
     lookup_mb_for()
     search_artist()
     lookup_artist()
     get_aliases()
     get_complete_artist_info()
 
+main.py
+    _cli_entry()
+
+scripts\fix_scrobble_parquet.py
+    fix_scrobble_parquet()
+
 scripts\list_symbols.py
     list_defs()
+
+scripts\test_column_mapping_fix.py
+    test_column_mapping_fix()
+
+scripts\test_dump_parquet_workflow.py
+    test_dump_parquet_workflow()
+
+scripts\test_full_profile_workflow.py
+    test_full_profile_workflow()
+
+scripts\test_parquet_order.py
+    test_parquet_column_order()
+
+scripts\test_profile_db_workflow.py
+    test_profile_db_workflow()
+
+scripts\test_profile_dump_parquet.py
+    test_dump_parquet()
+
+scripts\test_profile_workflow.py
+    test_profile_workflow()
 
 scripts\uc_populate.py
     _ask()
@@ -240,6 +321,10 @@ tests\e2e\test_cli_interface.py
 tests\integration\test_data_workflow.py
     TestDataGatheringWorkflow
 
+tests\setup\test_setup.py
+    test_root_setup_py()
+    test_config_setup_py()
+
 tests\test_unify_cli.py
     _df_from_session()
     test_unify_cli_smoketest()
@@ -249,3 +334,6 @@ tests\unit\test_main_unit.py
     test_init_colors()
     TestProgressCallback
     TestColors
+
+tests\unit\test_profile_performance.py
+    run_command_with_timeout()
