@@ -1,16 +1,52 @@
 """
 Defines all SQLAlchemy ORM ML used by CanonFodder.
+
+This file includes a compatibility layer to support both SQLAlchemy 1.4.x (required by Airflow)
+and SQLAlchemy 2.0 (used by the core application). The compatibility layer provides:
+
+1. A common Base class that works with both versions
+2. A Mapped type annotation for type hints
+3. A mapped_column function that works in both versions
+
+When running with Airflow, SQLAlchemy 1.4.x is used, and the compatibility layer provides
+implementations of DeclarativeBase, Mapped, and mapped_column that mimic SQLAlchemy 2.0's API.
 """
 from __future__ import annotations
 from datetime import date, datetime
-from typing import Optional
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, func, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from typing import Optional, Any, TypeVar, Generic, Type, get_type_hints, get_origin, get_args
+from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, func, Integer, String, Text, UniqueConstraint
 
+# Handle SQLAlchemy version compatibility
+try:
+    # SQLAlchemy 2.0 style
+    from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-class Base(DeclarativeBase):
-    """Serves as the common declarative base so metadata stays centralised"""
-    pass
+    class Base(DeclarativeBase):
+        """Serves as the common declarative base so metadata stays centralised"""
+        pass
+except ImportError:
+    # SQLAlchemy 1.4 style (for Airflow compatibility)
+    from sqlalchemy.orm import declarative_base
+
+    Base = declarative_base()
+
+    # Add a docstring to maintain documentation
+    Base.__doc__ = "Serves as the common declarative base so metadata stays centralised"
+
+    # Create compatibility layer for Mapped and mapped_column
+    T = TypeVar('T')
+
+    class Mapped(Generic[T]):
+        """Compatibility class for SQLAlchemy 1.4 to mimic SQLAlchemy 2.0's Mapped type"""
+        pass
+
+    def mapped_column(*args, **kwargs):
+        """
+        Compatibility function for SQLAlchemy 1.4 to mimic SQLAlchemy 2.0's mapped_column
+
+        This simply passes through to Column for SQLAlchemy 1.4
+        """
+        return Column(*args, **kwargs)
 
 
 class ArtistInfo(Base):

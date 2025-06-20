@@ -2,7 +2,30 @@
 
 ## Recent Changes Summary
 
-### July 2023 Update: Orchestration and Pipeline Improvements
+### August 2025 Update: Database Migration Fix
+Fixed an issue with database migrations in Docker environment:
+
+1. **Database Migration Improvements**
+   - Added a new initial migration to create all tables before adding columns
+   - Fixed the migration sequence to ensure tables exist before modifying them
+   - Resolved the "Table 'canonfodder.artist_variants_canonized' doesn't exist" error
+   - Improved Docker container startup reliability
+
+### July 2025 Update: SQLAlchemy Compatibility Layer
+Added a compatibility layer to support both SQLAlchemy 1.4.x (required by Airflow) and SQLAlchemy 2.0 (used by the core application):
+
+1. **Database Compatibility Improvements**
+   - Added compatibility layer in DB/models.py for SQLAlchemy version differences
+   - Implemented fallback mechanisms for SQLAlchemy 2.0 features when running with SQLAlchemy 1.4.x
+   - Fixed import error with DeclarativeBase when running in Airflow environment
+   - Added comprehensive documentation for the compatibility approach
+
+2. **Airflow Integration Enhancements**
+   - Improved Docker container compatibility with Airflow
+   - Ensured database models work correctly in both standalone and Airflow environments
+   - Fixed issues with database migrations in Airflow context
+
+### June 2025 Update: Orchestration and Pipeline Improvements
 The CanonFodder project has been enhanced with orchestration capabilities and a robust pull-based pipeline:
 
 1. **Orchestration & Automation**

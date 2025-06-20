@@ -5,27 +5,22 @@ The application maintains all functionality of the previous GUI while presenting
 a more console-like experience.
 """
 from __future__ import annotations
-import os
 import sys
-import logging
 import argparse
 import signal
 import re as re
-from pathlib import Path
 from typing import Optional
 from sqlalchemy import select, func
 
 # Import from helpers
-from helpers.progress import ProgressCallback, null_progress_callback
 from helpers.cli_interface import init_colors, start_gui
-from helpers.cli import choose_lastfm_user
 
 # Import from corefunc
 from corefunc.workflow import run_data_gathering_workflow
 
 # Import from DB
 from DB import SessionLocal
-from DB.models import ArtistInfo, Scrobble
+from DB.models import ArtistInfo
 
 # Import API modules
 from HTTP import lfAPI
@@ -83,7 +78,6 @@ def _cli_entry() -> int:
     # Check for special operations
     if args.debug_artist_aliases:
         print(f"Debugging aliases for: {args.debug_artist_aliases}")
-        from pprint import pprint
 
         is_mbid = bool(re.fullmatch(r"[0-9a-fA-F-]{36}", args.debug_artist_aliases))
 
@@ -143,21 +137,19 @@ def _cli_entry() -> int:
                             idx = int(choice) - 1
                             if idx < 0 or idx >= len(search_results):
                                 print("Invalid choice, using #1")
-                                idx = 0
+                                idx = 0  # noqa
                         except ValueError:
                             print("Invalid choice, using #1")
                             idx = 0
                 else:
                     idx = 0
-
-                # Get aliases for selected artist
+                # Getting aliases for selected artist
                 selected_mbid = search_results[idx]['id']
                 aliases = mbAPI.get_aliases(selected_mbid)
                 print(f"\nFound {len(aliases)} aliases for {search_results[idx]['name']}:")
                 for alias in aliases:
                     print(f"  - {alias}")
-
-                # Check DB record
+                # Checking DB record
                 with SessionLocal() as session:
                     db_artist = session.execute(
                         select(ArtistInfo).where(ArtistInfo.mbid == selected_mbid)
@@ -312,6 +304,9 @@ def _cli_entry() -> int:
 
     if args.enrich_artist_mbid:
         # Getting username from args, env, or config
+        import os
+        from pathlib import Path
+
         username = args.username or os.getenv("LASTFM_USER")
         if not username:
             # Trying to read from config file
@@ -323,7 +318,7 @@ def _cli_entry() -> int:
                             if line.startswith("username="):
                                 username = line.split("=")[1].strip()
                                 break
-                except Exception:
+                except (IOError, OSError, FileNotFoundError):
                     pass
 
         if not username:
@@ -344,6 +339,7 @@ def _cli_entry() -> int:
                 else:
                     pbar.set_description(task)
                 pbar.refresh()
+                return
 
         result = lfAPI.enrich_artist_mbids(username, TqdmProgressCallback())
         pbar.close()

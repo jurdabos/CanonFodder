@@ -54,6 +54,7 @@ If you prefer to run Airflow without Docker:
    - Note: In Airflow 3.x, the command `airflow db init` has been replaced with `airflow db migrate`.
    - For Windows users, running Airflow via Docker or WSL2 is recommended for the best experience. See [DOCKER_AIRFLOW.md](DOCKER_AIRFLOW.md) for detailed instructions on running Airflow with Docker.
 4. Create an admin user: `airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin`
+   - **Note**: If you encounter an error with the `airflow users` command, see [AIRFLOW_USERS_COMMAND.md](../docs/AIRFLOW_USERS_COMMAND.md) for a fix. In Airflow 3.x, you must use specific subcommands like `airflow users create` instead of just `airflow users`.
 5. Set the `AIRFLOW__CORE__DAGS_FOLDER` environment variable to the `dags` directory in your CanonFodder project
 6. Start the Airflow webserver: `airflow webserver -p 8080`
 7. Start the Airflow scheduler: `airflow scheduler`

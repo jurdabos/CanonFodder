@@ -12,12 +12,11 @@ The `AIRFLOW__CORE__DAGS_FOLDER` setting tells Airflow where to look for DAG fil
 
 According to the `dags/README.md` file (line 57):
 > "Set the `AIRFLOW__CORE__DAGS_FOLDER` environment variable to the `dags` directory in your CanonFodder project"
-
-This means that Airflow should look for DAGs in `C:\Users\jurda\PycharmProjects\CanonFodder\dags`, not in `C:\Users\jurda\airflow\dags`.
+This means that Airflow should look for DAGs in `\CanonFodder\dags`, not in `\airflow\dags`.
 
 ### Other Settings
 
-The other Airflow settings in your `.env` file are correct:
+The other Airflow settings in `.env` should be:
 
 - `AIRFLOW__CORE__LOAD_EXAMPLES=False`: Disables the example DAGs to keep the UI clean
 - `AIRFLOW__CORE__EXECUTOR=LocalExecutor`: Uses the LocalExecutor for a single machine setup
@@ -27,4 +26,4 @@ The other Airflow settings in your `.env` file are correct:
 
 ## Summary
 
-This setup allows you to keep your Airflow installation separate from your project files while still using the DAGs defined in your project.
+This setup allows us to keep the Airflow installation separate from the project files while still using the DAGs defined in the project.

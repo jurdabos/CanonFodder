@@ -86,6 +86,8 @@ The project is built with Python and SQL, using:
    - Airflow DAG for weekly data pipeline runs
    - Volume mapping for persistent data storage
 
+   For more information about the Docker filesystem structure and what `/opt/airflow` means, see [Understanding Linux Filesystem Paths in Docker](docs/linux_filesystem_in_docker.md).
+
    Option 2: Manual setup
    # Create a virtual environment
    ```shell
@@ -124,6 +126,8 @@ The project is built with Python and SQL, using:
    ```
 
    > **Note on Dependency Conflicts**: CanonFodder uses SQLAlchemy 2.0 for its ORM models, while Apache Airflow 3.0.1 requires SQLAlchemy 1.4. This creates a dependency conflict when installing both packages together. The `requirements-airflow.txt` file and the `[airflow]` extra in setup.py are provided to help resolve these conflicts. When working with Airflow, some core CanonFodder database functionality may be limited.
+
+   > **Note on Airflow CLI Commands**: If you encounter an error with the `airflow users` command (such as "invalid choice: 'users'"), please see [AIRFLOW_USERS_COMMAND.md](docs/AIRFLOW_USERS_COMMAND.md) for a fix. In Airflow 3.x, you must use specific subcommands like `airflow users create` instead of just `airflow users`.
 
    > **Note on Platform-Specific Dependencies**: CanonFodder uses platform-specific markers in requirements.txt to handle dependencies that are only needed on certain operating systems (e.g., windows-curses for Windows). See [Platform-Specific Dependencies](docs/platform_specific_dependencies.md) for details.
 

@@ -35,3 +35,24 @@ def get_session():
 import sys
 sys.stderr.write(f"[DB] using {engine.url}\n")
 sys.stderr.flush()
+
+# Enable SQL statement logging with proper formatting
+from helpers.formatting import format_sql_for_display
+import logging
+
+# Configure SQLAlchemy logging
+sql_logger = logging.getLogger('sqlalchemy.engine')
+sql_logger.setLevel(logging.INFO)
+
+# Create a custom handler that formats SQL statements
+class SQLFormattingHandler(logging.StreamHandler):
+    def emit(self, record):
+        if hasattr(record, 'statement'):
+            # Format SQL statements using our custom formatter
+            record.msg = format_sql_for_display(record.msg)
+        super().emit(record)
+
+# Add the custom handler to the logger
+handler = SQLFormattingHandler()
+handler.setLevel(logging.INFO)
+sql_logger.addHandler(handler)

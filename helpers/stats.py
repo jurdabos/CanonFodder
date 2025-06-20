@@ -569,8 +569,8 @@ def get_db_statistics():
 
     Returns
     -------
-    pandas.DataFrame
-        DataFrame with statistics about the database tables
+    tuple
+        Tuple containing two pandas DataFrames with statistics about the scrobble and artist_info tables
     """
     try:
         # Get the inspector
@@ -579,52 +579,97 @@ def get_db_statistics():
         # Get table names
         table_names = inspector.get_table_names()
 
-        # Focus on the scrobble table
-        if 'scrobble' not in table_names:
-            return None
+        # Initialize DataFrames
+        scrobble_stats_df = None
+        artist_info_stats_df = None
 
-        # Get column information for the scrobble table
-        columns = inspector.get_columns('scrobble')
-        column_names = [col['name'] for col in columns]
+        # Process scrobble table
+        if 'scrobble' in table_names:
+            # Get column information for the scrobble table
+            columns = inspector.get_columns('scrobble')
+            # Filter out 'id' and 'play_time' columns, ensure 'artist_mbid' is included
+            column_names = [col['name'] for col in columns if col['name'] not in ['id', 'play_time'] or col['name'] == 'artist_mbid']
 
-        # Create a DataFrame to store statistics
-        stats_data = []
+            # Create a DataFrame to store statistics
+            stats_data = []
 
-        # Connect to the database and get statistics
-        with engine.connect() as conn:
-            # Get total row count
-            total_rows = conn.execute(text("SELECT COUNT(*) FROM scrobble")).scalar()
+            # Connect to the database and get statistics
+            with engine.connect() as conn:
+                # Get total row count
+                total_rows = conn.execute(text("SELECT COUNT(*) FROM scrobble")).scalar()
 
-            if total_rows == 0:
-                return None
+                if total_rows > 0:
+                    # Get statistics for each column
+                    for col_name in column_names:
+                        # Count non-null values
+                        non_null_count = conn.execute(
+                            text(f"SELECT COUNT(*) FROM scrobble WHERE {col_name} IS NOT NULL")
+                        ).scalar()
 
-            # Get statistics for each column
-            for col_name in column_names:
-                # Count non-null values
-                non_null_count = conn.execute(
-                    text(f"SELECT COUNT(*) FROM scrobble WHERE {col_name} IS NOT NULL")
-                ).scalar()
+                        # Calculate null count and percentages
+                        null_count = total_rows - non_null_count
+                        non_null_percentage = (non_null_count / total_rows) * 100
+                        null_percentage = (null_count / total_rows) * 100
 
-                # Calculate null count and percentages
-                null_count = total_rows - non_null_count
-                non_null_percentage = (non_null_count / total_rows) * 100
-                null_percentage = (null_count / total_rows) * 100
+                        # Add to statistics data
+                        stats_data.append({
+                            'column_name': col_name,
+                            'total_rows': total_rows,
+                            'non_null_count': non_null_count,
+                            'null_count': null_count,
+                            'non_null_percentage': non_null_percentage,
+                            'null_percentage': null_percentage
+                        })
 
-                # Add to statistics data
-                stats_data.append({
-                    'column_name': col_name,
-                    'total_rows': total_rows,
-                    'non_null_count': non_null_count,
-                    'null_count': null_count,
-                    'non_null_percentage': non_null_percentage,
-                    'null_percentage': null_percentage
-                })
+                    # Create DataFrame from statistics data
+                    scrobble_stats_df = pd.DataFrame(stats_data)
 
-        # Create DataFrame from statistics data
-        stats_df = pd.DataFrame(stats_data)
+        # Process artist_info table
+        if 'artist_info' in table_names:
+            # Get column information for the artist_info table
+            columns = inspector.get_columns('artist_info')
+            # Filter to include only the required columns
+            required_columns = ['artist_name', 'mbid', 'disambiguation_comment', 'country', 'aliases']
+            column_names = [col['name'] for col in columns if col['name'] in required_columns]
 
-        return stats_df
+            # Create a DataFrame to store statistics
+            stats_data = []
+
+            # Connect to the database and get statistics
+            with engine.connect() as conn:
+                # Get total row count
+                total_rows = conn.execute(text("SELECT COUNT(*) FROM artist_info")).scalar()
+
+                if total_rows > 0:
+                    # Get statistics for each column
+                    for col_name in column_names:
+                        # Count non-null values
+                        non_null_count = conn.execute(
+                            text(f"SELECT COUNT(*) FROM artist_info WHERE {col_name} IS NOT NULL")
+                        ).scalar()
+
+                        # Calculate null count and percentages
+                        null_count = total_rows - non_null_count
+                        non_null_percentage = (non_null_count / total_rows) * 100
+                        null_percentage = (null_count / total_rows) * 100
+
+                        # Add to statistics data
+                        # Use 'disambi' as display name instead of 'disambiguation_comment'
+                        display_col_name = 'disambi' if col_name == 'disambiguation_comment' else col_name
+                        stats_data.append({
+                            'column_name': display_col_name,
+                            'total_rows': total_rows,
+                            'non_null_count': non_null_count,
+                            'null_count': null_count,
+                            'non_null_percentage': non_null_percentage,
+                            'null_percentage': null_percentage
+                        })
+
+                    # Create DataFrame from statistics data
+                    artist_info_stats_df = pd.DataFrame(stats_data)
+
+        return (scrobble_stats_df, artist_info_stats_df)
 
     except Exception as e:
         logging.error(f"Error getting database statistics: {e}")
-        return None
+        return (None, None)

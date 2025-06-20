@@ -52,6 +52,8 @@ We've created a patch script that modifies the Airflow installation to work on W
    airflow scheduler
    ```
 
+   **Note**: If you encounter an error with the `airflow users` command (such as "invalid choice: 'users'"), please see [AIRFLOW_USERS_COMMAND.md](../docs/AIRFLOW_USERS_COMMAND.md) for a fix. In Airflow 3.x, you must use specific subcommands like `airflow users create` instead of just `airflow users`.
+
    Note: In Airflow 3.x, the command `airflow db init` has been replaced with `airflow db migrate`.
 
 ## Remaining Limitations

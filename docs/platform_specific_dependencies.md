@@ -11,8 +11,8 @@ CanonFodder uses certain packages that are platform-specific, meaning they are o
 The `windows-curses` package is a Windows-specific implementation of the curses library, which provides terminal handling for console applications. This package is only needed on Windows systems and is not available for Linux or macOS.
 
 In the `requirements.txt` file, we use a platform-specific marker to ensure that `windows-curses` is only installed on Windows:
-
-```python
+python
+```
 windows-curses==2.4.1; platform_system == "Windows"
 ```
 
@@ -40,16 +40,16 @@ This approach ensures that Docker builds complete successfully without dependenc
 ## Adding New Platform-Specific Dependencies
 
 If you need to add more platform-specific dependencies, follow this pattern:
-
-```python
+python
+```
 package-name==version; platform_system == "Windows"  # For Windows-only packages
 package-name==version; platform_system == "Linux"    # For Linux-only packages
 package-name==version; platform_system == "Darwin"   # For macOS-only packages
 ```
 
 You can also use more complex conditions if needed:
-
-```python
+python
+```
 package-name==version; platform_system != "Windows"  # For non-Windows platforms
 ```
 
@@ -63,8 +63,8 @@ To test that your platform-specific dependencies and dependency conflict resolut
    - It should resolve dependency conflicts by using `requirements-airflow.txt`
 
 You can verify the Docker build with:
-
-```bash
+bash
+```
 docker-compose build
 ```
 

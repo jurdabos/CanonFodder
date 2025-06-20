@@ -56,7 +56,7 @@ dag = DAG(
 
 def fetch_new_scrobbles(**context):
     """
-    Fetch new scrobbles from Last.fm since the last run (FR-01, FR-02, FR-03).
+    Fetch new scrobbles from last.fm since the last run (FR-01, FR-02, FR-03).
     This task:
     - Pulls recent tracks for a user since the last stored timestamp
     - Persists raw JSON

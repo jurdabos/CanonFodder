@@ -31,6 +31,11 @@ RUN pip install --no-cache-dir -r requirements-airflow.txt
 # Copy project files
 COPY . .
 
+# Install the package in development mode with Airflow compatibility
+# This ensures the package is installed but allows for code changes without reinstallation
+# The [airflow] extra installs the package with Airflow-compatible dependencies
+RUN pip install -e ".[airflow]"
+
 # Set ownership to airflow user
 RUN chown -R airflow:airflow ${AIRFLOW_HOME}
 

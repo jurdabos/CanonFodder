@@ -297,7 +297,7 @@ def populate_artist_info_from_scrobbles(
                     for fld in ("country", "disambiguation_comment", "aliases")
                 )
                 if fields_missing:
-                    info = get_complete_artist_info(identifier=mbid)
+                    info = get_complete_artist_info(artist_identifier=mbid)
                     logger.debug("MB response for %s: %s", mbid, info)
                     if ai.country in (None, "") and info.get("country"):
                         ai.country = info["country"]
@@ -313,7 +313,7 @@ def populate_artist_info_from_scrobbles(
                     updated += 1
             else:
                 # Brand-new entry
-                info = get_complete_artist_info(identifier=mbid)
+                info = get_complete_artist_info(artist_identifier=mbid)
                 aliases_raw = info.get("aliases", [])
                 aliases_str = ",".join(aliases_raw) if isinstance(aliases_raw, list) else str(aliases_raw or "")
                 session.add(
@@ -346,7 +346,7 @@ def populate_artist_info_from_scrobbles(
             )
             if not ai:
                 # MusicBrainz lookup by name
-                info = get_complete_artist_info(identifier=raw_name)
+                info = get_complete_artist_info(artist_identifier=raw_name)
                 if not info:
                     logger.debug("No MB data for '%s'; skipping", raw_name)
                     continue

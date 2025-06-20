@@ -108,6 +108,7 @@ dags\fix_airflow_windows.py
 DB\__init__.py
     get_engine()
     get_session()
+    SQLFormattingHandler
 
 DB\common.py
     make_sessionmaker()
@@ -290,36 +291,21 @@ HTTP\mbAPI.py
 main.py
     _cli_entry()
 
+scripts\fix_airflow_users_command.py
+    find_airflow_cli_py()
+    backup_file()
+    patch_cli_parser()
+
+scripts\fix_airflow_users_command_docker_v3.py
+    find_airflow_cli_py()
+    backup_file()
+    patch_cli_parser()
+
 scripts\fix_scrobble_parquet.py
     fix_scrobble_parquet()
 
 scripts\list_symbols.py
     list_defs()
-
-scripts\test_column_mapping_fix.py
-    test_column_mapping_fix()
-
-scripts\test_dump_parquet_workflow.py
-    test_dump_parquet_workflow()
-
-scripts\test_full_profile_workflow.py
-    test_full_profile_workflow()
-
-scripts\test_parquet_order.py
-    test_parquet_column_order()
-
-scripts\test_pep_format.py
-    test_function()
-    another_function()
-
-scripts\test_profile_db_workflow.py
-    test_profile_db_workflow()
-
-scripts\test_profile_dump_parquet.py
-    test_dump_parquet()
-
-scripts\test_profile_workflow.py
-    test_profile_workflow()
 
 scripts\uc_populate.py
     _ask()
@@ -342,8 +328,29 @@ tests\e2e\test_cli_interface.py
     TestCliInterfaceE2E
     TestCliInterfaceMethods
 
+tests\integration\test_column_mapping_fix.py
+    test_column_mapping_fix()
+
 tests\integration\test_data_workflow.py
     TestDataGatheringWorkflow
+
+tests\integration\test_dump_parquet_workflow.py
+    test_dump_parquet_workflow()
+
+tests\integration\test_full_profile_workflow.py
+    test_full_profile_workflow()
+
+tests\integration\test_parquet_order.py
+    test_parquet_column_order()
+
+tests\integration\test_profile_db_workflow.py
+    test_profile_db_workflow()
+
+tests\integration\test_profile_dump_parquet.py
+    test_dump_parquet()
+
+tests\integration\test_profile_workflow.py
+    test_profile_workflow()
 
 tests\setup\test_setup.py
     test_root_setup_py()

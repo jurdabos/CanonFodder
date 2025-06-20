@@ -106,4 +106,6 @@ If you encounter issues:
    - Remove all volumes: `docker-compose down -v`
    - Rebuild from scratch: `docker-compose up -d --build`
 
-For more detailed information, refer to the Docker section in the main [README.md](../README.md) file.
+For more detailed information, refer to:
+- The Docker section in the main [README.md](../README.md) file
+- [Understanding Linux Filesystem Paths in Docker](../docs/linux_filesystem_in_docker.md) for an explanation of the `/opt/airflow` directory

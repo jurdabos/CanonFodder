@@ -59,10 +59,13 @@ services:
         alembic upgrade head &&
 
         # Populate user country data
-        python -m canonfodder.scripts.uc_populate &&
+        python /opt/airflow/scripts/uc_populate.py &&
 
         # Initialize Airflow
         airflow db init &&
+
+        # Apply the fix for 'airflow users' command
+        python /opt/airflow/scripts/fix_airflow_users_command_docker_v3.py &&
 
         # Create Airflow admin user if it doesn't exist
         (airflow user list | grep -q admin) || 
