@@ -12,6 +12,7 @@ import os
 from typing import Dict, Optional, Tuple, Union, Callable
 
 import pandas as pd
+from sqlalchemy import exc as sqlalchemy_exc
 
 from DB import engine, SessionLocal
 from DB.ops import bulk_insert_scrobbles, load_scrobble_table_from_db_to_df, populate_artist_info_from_scrobbles
@@ -182,6 +183,34 @@ def enrich_artist_data(
             'updated': updated
         }
 
+    except sqlalchemy_exc.IntegrityError as e:
+        # Handle duplicate MBID errors specifically
+        if "Duplicate entry" in str(e) and "for key 'artist_info.mbid'" in str(e):
+            error_msg = f"Duplicate MBID detected during artist enrichment. This is likely a race condition that has been handled, but the operation was interrupted. You can safely retry the operation."
+            logger.warning(error_msg)
+            logger.warning(f"Original error: {str(e)}")
+            progress_callback("Warning", 100, error_msg)
+
+            # Return partial success with warning
+            return {
+                'status': 'warning',
+                'message': error_msg,
+                'processed': 0,  # We don't know how many were processed before the error
+                'created': 0,
+                'updated': 0
+            }
+        else:
+            # Other integrity errors
+            error_msg = f"Database integrity error during artist enrichment: {str(e)}"
+            logger.exception(error_msg)
+            progress_callback("Error", 100, error_msg)
+            return {
+                'status': 'error',
+                'message': error_msg,
+                'processed': 0,
+                'created': 0,
+                'updated': 0
+            }
     except Exception as e:
         error_msg = f"Error enriching artist data: {str(e)}"
         logger.exception(error_msg)

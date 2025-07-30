@@ -9,11 +9,12 @@ load_dotenv(".env")
 from HTTP.mbAPI import lookup_mb_for
 from DB import get_session as _get_session, get_engine as _get_engine
 from datetime import datetime, UTC
-from .models import ArtistVariantsCanonized, AsciiChar, Scrobble
+from .models import ArtistVariantsCanonized, AsciiChar, Scrobble, ArtistInfo
 import numpy as np
 import pandas as pd
 import re
 from sqlalchemy import func, inspect, literal, select, text, union_all
+from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -196,6 +197,61 @@ def load_scrobble_table_from_db_to_df(engine) -> tuple[pd.DataFrame | None, str 
     return df, table_name
 
 
+def _merge_artist_info(session, existing_record, info, raw_name=None):
+    """
+    Update an existing ArtistInfo record with new information.
+
+    Parameters
+    ----------
+    session : sqlalchemy.orm.Session
+        Database session.
+    existing_record : ArtistInfo
+        Existing record to update.
+    info : dict
+        New information from MusicBrainz.
+    raw_name : str, optional
+        Original artist name from scrobble data.
+
+    Returns
+    -------
+    bool
+        True if the record was updated, False otherwise.
+    """
+    updated = False
+
+    # Update MBID if missing
+    if existing_record.mbid in (None, "") and info.get("id"):
+        existing_record.mbid = info["id"]
+        updated = True
+
+    # Update country if missing
+    if existing_record.country in (None, "") and info.get("country"):
+        existing_record.country = info["country"]
+        updated = True
+
+    # Update disambiguation comment if missing
+    if (existing_record.disambiguation_comment in (None, "") and 
+        info.get("disambiguation")):
+        existing_record.disambiguation_comment = info["disambiguation"]
+        updated = True
+
+    # Update aliases if missing
+    if existing_record.aliases in (None, "") and info.get("aliases"):
+        aliases_raw = info.get("aliases", [])
+        aliases_str = ",".join(aliases_raw) if isinstance(aliases_raw, list) else str(aliases_raw or "")
+        existing_record.aliases = aliases_str
+        updated = True
+
+    # Update artist name if the new one is more complete
+    if raw_name and info.get("name") and info["name"] != existing_record.artist_name:
+        # If the existing name is a substring of the new name, update it
+        if existing_record.artist_name in info["name"]:
+            existing_record.artist_name = info["name"]
+            updated = True
+
+    return updated
+
+
 def populate_artist_info_from_scrobbles(
     session=None,
     progress_cb=None,
@@ -240,7 +296,6 @@ def populate_artist_info_from_scrobbles(
         logger.addHandler(handler)
     from HTTP.mbAPI import get_complete_artist_info  # local import to avoid circulars
     from DB import get_session
-    from DB.models import Scrobble, ArtistInfo  # type: ignore  # noqa: F401
     session = session or get_session()
 
     # ----------------------------------------------------------- helper funcs
@@ -299,33 +354,138 @@ def populate_artist_info_from_scrobbles(
                 if fields_missing:
                     info = get_complete_artist_info(artist_identifier=mbid)
                     logger.debug("MB response for %s: %s", mbid, info)
-                    if ai.country in (None, "") and info.get("country"):
-                        ai.country = info["country"]
-                    if (
-                        ai.disambiguation_comment in (None, "")
-                        and info.get("disambiguation")
-                    ):
-                        ai.disambiguation_comment = info["disambiguation"]
-
-                    if ai.aliases in (None, "") and info.get("aliases"):
-                        aliases = info["aliases"]
-                        ai.aliases = ",".join(aliases) if isinstance(aliases, list) else str(aliases)
-                    updated += 1
+                    if _merge_artist_info(session, ai, info, raw_name):
+                        updated += 1
             else:
                 # Brand-new entry
                 info = get_complete_artist_info(artist_identifier=mbid)
+                mb_id = info.get("id", mbid)
+                artist_name = info.get("name", raw_name)
+                disambiguation = info.get("disambiguation", "")
+
+                # Check if an entry with this MBID already exists (in case the MB ID is different from the scrobble data)
+                if mb_id != mbid:
+                    existing_by_mbid = session.query(ArtistInfo).filter_by(mbid=mb_id).one_or_none()
+                    if existing_by_mbid:
+                        # Update existing record if needed
+                        if _merge_artist_info(session, existing_by_mbid, info, raw_name):
+                            updated += 1
+                        continue
+
+                # Check if there's an artist with the same name but no MBID
+                existing_by_name = (
+                    session.query(ArtistInfo)
+                    .filter_by(artist_name=artist_name, mbid=None)
+                    .one_or_none()
+                )
+                if existing_by_name:
+                    # Update the existing record with the MBID and other info
+                    existing_by_name.mbid = mb_id
+                    if _merge_artist_info(session, existing_by_name, info, raw_name):
+                        updated += 1
+                    continue
+
+                # Check if there's an artist with the same name and different disambiguation comment
+                if disambiguation:
+                    existing_by_name_and_disambiguation = (
+                        session.query(ArtistInfo)
+                        .filter(
+                            ArtistInfo.artist_name == artist_name,
+                            ArtistInfo.disambiguation_comment != disambiguation,
+                            ArtistInfo.mbid.is_(None)
+                        )
+                        .one_or_none()
+                    )
+                    if existing_by_name_and_disambiguation:
+                        # This is a different artist with the same name, so we should create a new record
+                        logger.debug(
+                            "Found artist with same name but different disambiguation: %s (%s vs %s)",
+                            artist_name, existing_by_name_and_disambiguation.disambiguation_comment, disambiguation
+                        )
+                    else:
+                        # Check if there's an artist with the same name and disambiguation comment
+                        existing_by_name_and_disambiguation = (
+                            session.query(ArtistInfo)
+                            .filter(
+                                ArtistInfo.artist_name == artist_name,
+                                ArtistInfo.disambiguation_comment == disambiguation,
+                                ArtistInfo.mbid.is_(None)
+                            )
+                            .one_or_none()
+                        )
+                        if existing_by_name_and_disambiguation:
+                            # Update the existing record with the MBID and other info
+                            existing_by_name_and_disambiguation.mbid = mb_id
+                            if _merge_artist_info(session, existing_by_name_and_disambiguation, info, raw_name):
+                                updated += 1
+                            continue
+
+                # Create new record if no existing record was found
                 aliases_raw = info.get("aliases", [])
                 aliases_str = ",".join(aliases_raw) if isinstance(aliases_raw, list) else str(aliases_raw or "")
-                session.add(
-                    ArtistInfo(
-                        artist_name=info.get("name", raw_name),
-                        mbid=info.get("id", mbid),
-                        country=info.get("country"),
-                        disambiguation_comment=info.get("disambiguation"),
-                        aliases=aliases_str,
+
+                try:
+                    # Try to get the existing record with this MBID one more time to avoid race conditions
+                    existing_record = session.query(ArtistInfo).filter_by(mbid=mb_id).one_or_none()
+                    if existing_record:
+                        # Update the existing record with any new information
+                        if _merge_artist_info(session, existing_record, info, raw_name):
+                            updated += 1
+                            logger.info("Updated existing record for %s (%s) - detected before insert", raw_name, mb_id)
+                        continue
+
+                    # Add the new record
+                    session.add(
+                        ArtistInfo(
+                            artist_name=artist_name,
+                            mbid=mb_id,
+                            country=info.get("country"),
+                            disambiguation_comment=disambiguation,
+                            aliases=aliases_str,
+                        )
                     )
-                )
-                created += 1
+                    # Flush to detect any integrity errors immediately
+                    session.flush()
+                    created += 1
+                except sqlalchemy_exc.IntegrityError as e:
+                    # Handle duplicate MBID error specifically
+                    if "Duplicate entry" in str(e) and "for key 'artist_info.mbid'" in str(e):
+                        logger.warning("Duplicate MBID detected for %s (%s): %s - handling during insert", raw_name, mb_id, e)
+                        session.rollback()
+
+                        # Try to get the existing record with this MBID
+                        existing_record = session.query(ArtistInfo).filter_by(mbid=mb_id).one_or_none()
+                        if existing_record:
+                            # Update the existing record with any new information
+                            if _merge_artist_info(session, existing_record, info, raw_name):
+                                updated += 1
+                                logger.info("Updated existing record for %s (%s) - after integrity error", raw_name, mb_id)
+                            session.commit()
+                        continue
+                    else:
+                        # Re-raise other integrity errors
+                        raise
+        except sqlalchemy_exc.IntegrityError as exc:
+            # Handle duplicate MBID error specifically
+            if "Duplicate entry" in str(exc) and "for key 'artist_info.mbid'" in str(exc):
+                logger.warning("Duplicate MBID detected for %s (%s): %s", raw_name, mbid, exc)
+                session.rollback()
+
+                # Try to get the existing record with this MBID
+                existing_record = session.query(ArtistInfo).filter_by(mbid=mbid).one_or_none()
+                if existing_record:
+                    # Update the existing record with any new information
+                    info = get_complete_artist_info(artist_identifier=mbid)
+                    if _merge_artist_info(session, existing_record, info, raw_name):
+                        updated += 1
+                        logger.info("Updated existing record for %s (%s)", raw_name, mbid)
+                    session.commit()
+                continue
+            else:
+                # Other integrity errors
+                logger.exception("Database integrity error for artist %s (%s): %s", raw_name, mbid, exc)
+                session.rollback()
+                continue
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("Failed processing artist %s (%s): %s", raw_name, mbid, exc)
             session.rollback()
@@ -339,29 +499,140 @@ def populate_artist_info_from_scrobbles(
         processed += 1
         _emit_progress(raw_name)
         try:
+            # First, check if there's an exact match by name and null MBID
             ai: ArtistInfo | None = (
                 session.query(ArtistInfo)
                 .filter_by(artist_name=raw_name, mbid=None)
                 .one_or_none()
             )
-            if not ai:
-                # MusicBrainz lookup by name
-                info = get_complete_artist_info(artist_identifier=raw_name)
-                if not info:
-                    logger.debug("No MB data for '%s'; skipping", raw_name)
+
+            # MusicBrainz lookup by name to get additional info
+            info = get_complete_artist_info(artist_identifier=raw_name)
+            if not info:
+                logger.debug("No MB data for '%s'; skipping", raw_name)
+                continue
+
+            # Get the MBID and disambiguation comment from the info
+            mbid = info.get("id")
+            disambiguation = info.get("disambiguation", "")
+
+            # If we have an existing record with the same name and null MBID
+            if ai:
+                # Update it if needed
+                if _merge_artist_info(session, ai, info, raw_name):
+                    updated += 1
+                continue
+
+            # Check if an entry with this MBID already exists
+            if mbid:
+                existing_by_mbid = session.query(ArtistInfo).filter_by(mbid=mbid).one_or_none()
+                if existing_by_mbid:
+                    # Update existing record if needed
+                    if _merge_artist_info(session, existing_by_mbid, info, raw_name):
+                        updated += 1
                     continue
-                aliases_raw = info.get("aliases", [])
-                aliases_str = ",".join(aliases_raw) if isinstance(aliases_raw, list) else str(aliases_raw or "")
+
+            # Check if there's an artist with the same name but different disambiguation comment
+            if disambiguation:
+                existing_by_name_and_disambiguation = (
+                    session.query(ArtistInfo)
+                    .filter(
+                        ArtistInfo.artist_name == raw_name,
+                        ArtistInfo.disambiguation_comment != disambiguation,
+                        ArtistInfo.mbid.is_(None)
+                    )
+                    .one_or_none()
+                )
+                if existing_by_name_and_disambiguation:
+                    # This is a different artist with the same name, so we should create a new record
+                    logger.debug(
+                        "Found artist with same name but different disambiguation: %s (%s vs %s)",
+                        raw_name, existing_by_name_and_disambiguation.disambiguation_comment, disambiguation
+                    )
+                else:
+                    # Check if there's an artist with the same name and disambiguation comment
+                    existing_by_name_and_disambiguation = (
+                        session.query(ArtistInfo)
+                        .filter(
+                            ArtistInfo.artist_name == raw_name,
+                            ArtistInfo.disambiguation_comment == disambiguation,
+                            ArtistInfo.mbid.is_(None)
+                        )
+                        .one_or_none()
+                    )
+                    if existing_by_name_and_disambiguation:
+                        # Update existing record if needed
+                        if _merge_artist_info(session, existing_by_name_and_disambiguation, info, raw_name):
+                            updated += 1
+                        continue
+
+            # Create new record if no existing record was found
+            aliases_raw = info.get("aliases", [])
+            aliases_str = ",".join(aliases_raw) if isinstance(aliases_raw, list) else str(aliases_raw or "")
+
+            try:
+                # If we have an MBID, check one more time for an existing record to avoid race conditions
+                if mbid:
+                    existing_record = session.query(ArtistInfo).filter_by(mbid=mbid).one_or_none()
+                    if existing_record:
+                        # Update the existing record with any new information
+                        if _merge_artist_info(session, existing_record, info, raw_name):
+                            updated += 1
+                            logger.info("Updated existing record for '%s' (%s) - detected before insert", raw_name, mbid)
+                        continue
+
+                # Add the new record
                 session.add(
                     ArtistInfo(
                         artist_name=info.get("name", raw_name),
-                        mbid=info.get("id"),  # may still be None
+                        mbid=mbid,  # may still be None
                         country=info.get("country"),
-                        disambiguation_comment=info.get("disambiguation"),
+                        disambiguation_comment=disambiguation,
                         aliases=aliases_str,
                     )
                 )
+                # Flush to detect any integrity errors immediately
+                session.flush()
                 created += 1
+            except sqlalchemy_exc.IntegrityError as e:
+                # Handle duplicate MBID error specifically
+                if mbid and "Duplicate entry" in str(e) and "for key 'artist_info.mbid'" in str(e):
+                    logger.warning("Duplicate MBID detected for '%s' (%s): %s - handling during insert", raw_name, mbid, e)
+                    session.rollback()
+
+                    # Try to get the existing record with this MBID
+                    existing_record = session.query(ArtistInfo).filter_by(mbid=mbid).one_or_none()
+                    if existing_record:
+                        # Update the existing record with any new information
+                        if _merge_artist_info(session, existing_record, info, raw_name):
+                            updated += 1
+                            logger.info("Updated existing record for '%s' (%s) - after integrity error", raw_name, mbid)
+                        session.commit()
+                    continue
+                else:
+                    # Re-raise other integrity errors
+                    raise
+        except sqlalchemy_exc.IntegrityError as exc:
+            # Handle duplicate MBID error specifically
+            if "Duplicate entry" in str(exc) and "for key 'artist_info.mbid'" in str(exc):
+                logger.warning("Duplicate MBID detected for '%s': %s", raw_name, exc)
+                session.rollback()
+
+                # Try to get the existing record with this MBID
+                if mbid:
+                    existing_record = session.query(ArtistInfo).filter_by(mbid=mbid).one_or_none()
+                    if existing_record:
+                        # Update the existing record with any new information
+                        if _merge_artist_info(session, existing_record, info, raw_name):
+                            updated += 1
+                            logger.info("Updated existing record for '%s' (%s)", raw_name, mbid)
+                        session.commit()
+                continue
+            else:
+                # Other integrity errors
+                logger.exception("Database integrity error for artist '%s': %s", raw_name, exc)
+                session.rollback()
+                continue
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("Failed processing artist '%s': %s", raw_name, exc)
             session.rollback()
