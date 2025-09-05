@@ -3,10 +3,12 @@ __pycache__/
 *.pyc
 *.pyo
 .Python
+*.py[cod]
 
 # Ignore virtual environments
 .venv/
 .env/
+venv/
 
 # Ignore system-specific files
 .DS_Store
@@ -27,6 +29,19 @@ Thumbs.db
 *.h5
 *.csv
 .junie/
+data/
+datasets/
+models/
+checkpoints/
+logs/
+*.db
+*.sqlite
+*.sql
+*.parquet
+*.zip
+*.tar
+*.gz
+
 
 # Ignore sensitive or environment-specific configurations
 .env
@@ -38,6 +53,16 @@ build/
 dist/
 *.egg-info/
 .eggs/
+*.spec
 
 # Alembic caches
 alembic/versions/__pycache__/
+
+# Test/typing caches
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
