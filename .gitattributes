@@ -1,0 +1,5 @@
+* text=auto
+# Keep lockfiles LF-only
+uv.lock text eol=lf
+# Common LF-only files
+*.sh text eol=lf
