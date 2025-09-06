@@ -46,6 +46,22 @@ The project is built with Python and SQL, using:
 - Git
 
 ### Setup Steps
+
+Option 3: Using uv (recommended)
+
+```powershell
+# Create a virtual environment and sync core deps
+uv venv .venv
+.\.venv\Scripts\activate
+uv sync
+
+# Add DB extras (SQLAlchemy 2.x)
+uv add ".[db]"
+
+# If you need Airflow, use a separate env:
+# uv venv .venv-airflow && .\.venv-airflow\Scripts\activate
+# uv add ".[airflow]"
+```
 1. **Clone the repository**
    ```shell
    git clone https://github.com/jurdabos/CanonFodder.git
@@ -120,12 +136,12 @@ The project is built with Python and SQL, using:
    pip install -e .
    ```
 
-   # For development with Airflow compatibility
+   # For development with Airflow compatibility (separate env recommended)
    ```shell
    pip install -e ".[airflow]"
    ```
 
-   > **Note on Dependency Conflicts**: CanonFodder uses SQLAlchemy 2.0 for its ORM models, while Apache Airflow 3.0.1 requires SQLAlchemy 1.4. This creates a dependency conflict when installing both packages together. The `requirements-airflow.txt` file and the `[airflow]` extra in setup.py are provided to help resolve these conflicts. When working with Airflow, some core CanonFodder database functionality may be limited.
+   > Note on Dependency Conflicts: CanonFodder uses SQLAlchemy 2.x for its ORM models, while Apache Airflow 3.x requires SQLAlchemy 1.4.x. Do not install both "[airflow]" and DB/"[all]" extras together in the same environment. With the uv-based setup, the "all" extra intentionally excludes Airflow to avoid unsatisfiable constraints. Use a separate virtual environment or Docker for Airflow.
 
    > **Note on Airflow CLI Commands**: If you encounter an error with the `airflow users` command (such as "invalid choice: 'users'"), please see [AIRFLOW_USERS_COMMAND.md](docs/AIRFLOW_USERS_COMMAND.md) for a fix. In Airflow 3.x, you must use specific subcommands like `airflow users create` instead of just `airflow users`.
 

@@ -3,7 +3,7 @@ Pull-based pipeline for CanonFodder.
 
 This module provides a pull-based pipeline for fetching new data from Last.fm,
 enriching artist information from MusicBrainz, and cleaning up the database.
-It can be triggered manually or via Airflow.
+It can be triggered manually or via Prefect.
 """
 
 from __future__ import annotations
