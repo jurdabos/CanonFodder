@@ -25,7 +25,7 @@ ETL pipeline:
     – convert UTS to SQL datetime in the form of YYYY-MM-DD HH:MM:SS
     – de-dup scrobble records
     – pull-based pipeline for incremental updates with robust conflict handling
-    – weekly autofetch of new data via Airflow orchestration
+    – weekly autofetch of new data via Prefect orchestration
     – artist metadata enrichment from MusicBrainz with country and alias information
 
 DWH:
@@ -54,7 +54,7 @@ Python libraries:    contextlib, datetime, dotenv, hashlib, os, pathlib, pickle,
 Default RDBMS:       MySQL
 Static hosting:      GitHub
 VCS:                 git
-Workflow management: Airflow (weekly DAG for autofetch, artist enrichment, data cleaning, and profiling)
+Workflow management: Prefect (weekly flow for autofetch, artist enrichment, data cleaning, and profiling)
 
 We need proper docstrings for all functions.
 
