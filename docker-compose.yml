@@ -52,7 +52,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./PQ:/opt/airflow/PQ
       - airflow_data:/opt/airflow
-      - ./supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
+      - ./config/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
     command: >
       bash -c "
         # Initialize database schema
