@@ -33,11 +33,6 @@ db_dependencies = [
     'alembic>=1.15.2',
 ]
 
-# Define Airflow dependencies
-airflow_dependencies = [
-    'apache-airflow~=3.0.1',
-]
-
 setup(
     name='CanonFodder',
     packages=find_packages(exclude=['examples']),
@@ -50,7 +45,6 @@ setup(
     install_requires=core_dependencies,
     extras_require={
         'db': db_dependencies,
-        'airflow': airflow_dependencies,
-        'all': db_dependencies + airflow_dependencies,
+        'all': db_dependencies,
     },
 )
