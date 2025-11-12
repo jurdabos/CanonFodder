@@ -12,9 +12,22 @@ This guide explains how to set up and run the CanonFodder data pipeline using Pr
 
 ## Installation
 
-1. **Install dependencies:**
+1. **Set up environment with uv:**
    ```bash
-   uv pip install -r requirements.txt
+   # Create virtual environment
+   uv venv .venv
+   
+   # Activate virtual environment
+   # Windows:
+   .\.venv\Scripts\activate
+   # Unix/MacOS:
+   # source .venv/bin/activate
+   
+   # Install dependencies
+   uv sync
+   
+   # Install with Prefect extras
+   uv sync --extra prefect
    ```
 
 2. **Set up environment variables:**
@@ -39,14 +52,14 @@ This guide explains how to set up and run the CanonFodder data pipeline using Pr
 To run the pipeline immediately:
 
 ```bash
-python flows/cf_ingest.py
+uv run python flows/cf_ingest.py
 ```
 
 ### Using Prefect UI
 
 1. **Start the Prefect server:**
    ```bash
-   prefect server start
+   uv run prefect server start
    ```
    
    The UI will be available at http://localhost:4200
@@ -69,7 +82,7 @@ python flows/cf_ingest.py
 
 3. **Start a worker:**
    ```bash
-   prefect worker start --pool default
+   uv run prefect worker start --pool default
    ```
 
 ### Manual Flow Execution
@@ -77,7 +90,7 @@ python flows/cf_ingest.py
 To run the flow manually via Prefect CLI:
 
 ```bash
-python -m prefect run flows.cf_ingest:weekly_ingest_flow
+uv run python -m prefect run flows.cf_ingest:weekly_ingest_flow
 ```
 
 ## Flow Structure
@@ -165,7 +178,7 @@ To modify the pipeline:
 
 1. Edit tasks in `flows/cf_ingest.py`
 2. Update pipeline functions in `corefunc/pipeline.py`
-3. Run tests: `pytest tests/test_prefect_flow.py`
+3. Run tests: `uv run pytest tests/test_prefect_flow.py`
 4. Apply changes to deployment
 
 ## Migration from Airflow

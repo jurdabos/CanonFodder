@@ -45,7 +45,13 @@ Apache Airflow 3.x requires SQLAlchemy < 2.0, which conflicts with CanonFodder's
 
 1. **Update dependencies:**
    ```bash
-   uv pip install -r requirements.txt
+   # Create and activate virtual environment
+   uv venv .venv
+   .\.venv\Scripts\activate  # Windows
+   # source .venv/bin/activate  # Unix/MacOS
+   
+   # Install dependencies
+   uv sync
    ```
 
 2. **Update environment variables:**
@@ -55,10 +61,10 @@ Apache Airflow 3.x requires SQLAlchemy < 2.0, which conflicts with CanonFodder's
 3. **Run the pipeline:**
    ```bash
    # Direct execution
-   python flows/cf_ingest.py
+   uv run python flows/cf_ingest.py
    
    # Or with Prefect UI
-   prefect server start
+   uv run prefect server start
    # Then navigate to http://localhost:4200
    ```
 

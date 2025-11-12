@@ -2,6 +2,20 @@
 
 This document provides instructions for setting up CanonFodder with Docker.
 
+## Why pip in Docker?
+
+> **Important**: Our Dockerfiles intentionally use `pip` (see Dockerfile lines 29 and 37) instead of `uv` for compatibility and simplicity in slim container environments. **For local development outside Docker, always use `uv` as documented in the README.**
+
+The Docker container uses pip because:
+- Smaller image size with standard Python base images
+- Well-established container patterns
+- No need for uv's advanced features in the immutable container environment
+
+If you need to regenerate `requirements.txt` for Docker builds, run locally:
+```bash
+uv export --frozen --output-file=requirements.txt
+```
+
 ## Changes Made
 
 The following changes have been made to fix issues with the Docker setup:
@@ -11,7 +25,7 @@ The following changes have been made to fix issues with the Docker setup:
    - This fixes the issue where the script was being referenced as a module in a non-existent package
 
 2. **Updated Dockerfile to install the package properly**:
-   - Added `RUN pip install -e ".[airflow]"` to install the package in development mode with Airflow compatibility
+   - Added `RUN pip install -e ".[airflow]"` to install the package in development mode with Airflow compatibility (Note: Docker intentionally uses pip, not uv)
    - This ensures that the package is installed with the appropriate dependencies for Airflow compatibility
 
 ## Known Limitations

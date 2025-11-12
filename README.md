@@ -44,24 +44,25 @@ The project is built with Python and SQL, using:
 ### Prerequisites
 - Python 3.12
 - Git
+- uv (Python package manager)
+
+### Installing uv
+
+If you don't have uv installed yet:
+
+```powershell
+# Windows
+winget install Astral-sh.Uv
+
+# macOS
+brew install uv
+
+# Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
 ### Setup Steps
 
-Option 3: Using uv (recommended)
-
-```powershell
-# Create a virtual environment and sync core deps
-uv venv .venv
-.\.venv\Scripts\activate
-uv sync
-
-# Add DB extras (SQLAlchemy 2.x)
-uv add ".[db]"
-
-# If you need Airflow, use a separate env:
-# uv venv .venv-airflow && .\.venv-airflow\Scripts\activate
-# uv add ".[airflow]"
-```
 1. **Clone the repository**
    ```shell
    git clone https://github.com/jurdabos/CanonFodder.git
@@ -70,9 +71,51 @@ uv add ".[db]"
 
 2. **Set up the environment**
 
-   Option 1: Using Docker
+   **Option 1: Using uv (Recommended)**
+
+   ```powershell
+   # Create a virtual environment
+   uv venv .venv
+   
+   # Activate the virtual environment
+   # On Windows:
+   .\.venv\Scripts\activate
+   # On Unix/MacOS:
+   # source .venv/bin/activate
+   
+   # Install dependencies from pyproject.toml and uv.lock
+   uv sync
+   
+   # Optional: Install with database extras (SQLAlchemy 2.x)
+   uv sync --extra db
+   
+   # Optional: Install with Prefect extras for workflow orchestration
+   uv sync --extra prefect
+   ```
+
+   > **Note on Airflow**: CanonFodder has migrated from Airflow to Prefect. If you need Airflow compatibility for legacy reasons, use a separate environment and refer to the Docker setup below.
+
+   **Common uv Tasks:**
+   ```powershell
+   # Add a new dependency
+   uv add <package-name>
+   
+   # Add a development dependency
+   uv add --dev <package-name>
+   
+   # Run commands in the environment
+   uv run python main.py
+   uv run pytest
+   
+   # Export dependencies for Docker/CI
+   uv export --frozen --output-file=requirements.txt
+   ```
+
+   **Option 2: Using Docker**
 
    The project includes a complete Docker setup with MySQL, Airflow, and Adminer:
+
+   > **Note**: The Docker setup uses pip inside containers for compatibility and simplicity. For local development outside Docker, use uv as described in Option 1.
 
    ```shell
    # Ensure Docker Desktop is running on your system
@@ -104,44 +147,7 @@ uv add ".[db]"
 
    For more information about the Docker filesystem structure and what `/opt/airflow` means, see [Understanding Linux Filesystem Paths in Docker](docs/linux_filesystem_in_docker.md).
 
-   Option 2: Manual setup
-   # Create a virtual environment
-   ```shell
-   python -m venv .venv
-   ```
-
-   # Activate the virtual environment
-   # On Windows:
-   ```shell
-   .venv\Scripts\activate
-   ```
-
-   # On Unix/MacOS:
-   ```shell
-   source .venv/bin/activate
-   ```
-
-   # Install dependencies
-   ```shell
-   pip install -r requirements.txt
-   ```
-
-   # For Airflow compatibility (resolves dependency conflicts)
-   ```shell
-   pip install -r requirements-airflow.txt
-   ```
-
-   # or for development installation (recommended for contributors)
-   ```shell
-   pip install -e .
-   ```
-
-   # For development with Airflow compatibility (separate env recommended)
-   ```shell
-   pip install -e ".[airflow]"
-   ```
-
-   > Note on Dependency Conflicts: CanonFodder uses SQLAlchemy 2.x for its ORM models, while Apache Airflow 3.x requires SQLAlchemy 1.4.x. Do not install both "[airflow]" and DB/"[all]" extras together in the same environment. With the uv-based setup, the "all" extra intentionally excludes Airflow to avoid unsatisfiable constraints. Use a separate virtual environment or Docker for Airflow.
+   > **Dependency Conflicts Note**: CanonFodder uses SQLAlchemy 2.x for its ORM models, while Apache Airflow 3.x requires SQLAlchemy 1.4.x. The project has migrated to Prefect for workflow orchestration. The Docker setup maintains Airflow for legacy compatibility but uses pip inside containers. For local development, always use uv (Option 1).
 
    > **Note on Airflow CLI Commands**: If you encounter an error with the `airflow users` command (such as "invalid choice: 'users'"), please see [AIRFLOW_USERS_COMMAND.md](docs/AIRFLOW_USERS_COMMAND.md) for a fix. In Airflow 3.x, you must use specific subcommands like `airflow users create` instead of just `airflow users`.
 
@@ -163,7 +169,7 @@ uv add ".[db]"
 
 Run the complete data pipeline:
 ```shell
-python main.py
+uv run python main.py
 ```
 
 ### Interactive Development
@@ -172,12 +178,12 @@ The repository includes example Parquet files for quick exploration:
 
 1. **Data Profiling**
    ```shell
-   python dev\profile.py
+   uv run python dev\profile.py
    ```
 
 2. **Artist Canonization Exploration**
    ```shell
-   python dev\canon.py
+   uv run python dev\canon.py
    ```
 
 These scripts provide a notebook-style, step-by-step exploration of the data and canonization process.
