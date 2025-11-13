@@ -121,9 +121,9 @@ Optional:
 
 ### Dependency Management
 - Core app uses SQLAlchemy 2.0.40+
-- Airflow (if used) requires SQLAlchemy 1.4.x - use separate environment
 - Platform-specific dependencies handled via markers in requirements.txt
 - Use `uv` for package management to avoid conflicts
+- Workflow orchestration uses Prefect 3.0+
 
 ### Performance Targets
 - Process 1 million scrobbles in < 15 minutes
@@ -145,21 +145,7 @@ Optional:
 - Fixtures in `tests/conftest.py` for test database setup
 - Mock API responses to avoid external dependencies
 
-## Docker Support
-
-```powershell
-# Build and run with Docker Compose
-docker-compose up --build
-
-# Services exposed:
-# - Airflow UI: http://localhost:8080 (admin/admin)
-# - Adminer: http://localhost:8081 (db/canon/canon/canonfodder)
-# - MySQL: localhost:3306
-```
-
-Note: Docker setup has SQLAlchemy version conflicts between Airflow and core app.
-
-## Database Schema
+##
 
 Main tables:
 - `scrobbles`: Music listening events (artist, track, timestamp, mbid)

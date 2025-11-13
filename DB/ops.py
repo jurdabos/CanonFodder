@@ -221,8 +221,19 @@ def _merge_artist_info(session, existing_record, info, raw_name=None):
 
     # Update MBID if missing
     if existing_record.mbid in (None, "") and info.get("id"):
-        existing_record.mbid = info["id"]
-        updated = True
+        # Check if another record already has this MBID
+        conflicting_record = session.query(ArtistInfo).filter_by(mbid=info["id"]).first()
+        if conflicting_record and conflicting_record.id != existing_record.id:
+            # Another record already has this MBID, don't update
+            import logging
+            logger = logging.getLogger("populate_artist_info")
+            logger.debug(
+                "Cannot assign MBID %s to '%s' - already assigned to '%s'",
+                info["id"], existing_record.artist_name, conflicting_record.artist_name
+            )
+        else:
+            existing_record.mbid = info["id"]
+            updated = True
 
     # Update country if missing
     if existing_record.country in (None, "") and info.get("country"):
@@ -376,13 +387,25 @@ def populate_artist_info_from_scrobbles(
                 existing_by_name = (
                     session.query(ArtistInfo)
                     .filter_by(artist_name=artist_name, mbid=None)
-                    .one_or_none()
+                    .first()  # Using first() to avoid MultipleResultsFound
                 )
                 if existing_by_name:
-                    # Update the existing record with the MBID and other info
-                    existing_by_name.mbid = mb_id
-                    if _merge_artist_info(session, existing_by_name, info, raw_name):
-                        updated += 1
+                    # Before assigning MBID, check if another record already has it
+                    conflicting_record = session.query(ArtistInfo).filter_by(mbid=mb_id).first()
+                    if conflicting_record:
+                        # Another record already has this MBID, merge info into that one instead
+                        logger.debug(
+                            "MBID %s already assigned to '%s', merging info instead of updating '%s'",
+                            mb_id, conflicting_record.artist_name, existing_by_name.artist_name
+                        )
+                        if _merge_artist_info(session, conflicting_record, info, raw_name):
+                            updated += 1
+                    else:
+                        # Safe to assign MBID
+                        with session.no_autoflush:
+                            existing_by_name.mbid = mb_id
+                            if _merge_artist_info(session, existing_by_name, info, raw_name):
+                                updated += 1
                     continue
 
                 # Check if there's an artist with the same name and different disambiguation comment
@@ -394,7 +417,7 @@ def populate_artist_info_from_scrobbles(
                             ArtistInfo.disambiguation_comment != disambiguation,
                             ArtistInfo.mbid.is_(None)
                         )
-                        .one_or_none()
+                        .first()  # Using first() - we just check if any such record exists
                     )
                     if existing_by_name_and_disambiguation:
                         # This is a different artist with the same name, so we should create a new record
@@ -411,13 +434,25 @@ def populate_artist_info_from_scrobbles(
                                 ArtistInfo.disambiguation_comment == disambiguation,
                                 ArtistInfo.mbid.is_(None)
                             )
-                            .one_or_none()
+                            .first()  # Using first() to avoid MultipleResultsFound
                         )
                         if existing_by_name_and_disambiguation:
-                            # Update the existing record with the MBID and other info
-                            existing_by_name_and_disambiguation.mbid = mb_id
-                            if _merge_artist_info(session, existing_by_name_and_disambiguation, info, raw_name):
-                                updated += 1
+                            # Before assigning MBID, check if another record already has it
+                            conflicting_record = session.query(ArtistInfo).filter_by(mbid=mb_id).first()
+                            if conflicting_record:
+                                # Another record already has this MBID, merge info into that one instead
+                                logger.debug(
+                                    "MBID %s already assigned to '%s', merging info instead of updating '%s'",
+                                    mb_id, conflicting_record.artist_name, existing_by_name_and_disambiguation.artist_name
+                                )
+                                if _merge_artist_info(session, conflicting_record, info, raw_name):
+                                    updated += 1
+                            else:
+                                # Safe to assign MBID
+                                with session.no_autoflush:
+                                    existing_by_name_and_disambiguation.mbid = mb_id
+                                    if _merge_artist_info(session, existing_by_name_and_disambiguation, info, raw_name):
+                                        updated += 1
                             continue
 
                 # Create new record if no existing record was found
@@ -503,7 +538,7 @@ def populate_artist_info_from_scrobbles(
             ai: ArtistInfo | None = (
                 session.query(ArtistInfo)
                 .filter_by(artist_name=raw_name, mbid=None)
-                .one_or_none()
+                .first()  # Using first() to avoid MultipleResultsFound
             )
 
             # MusicBrainz lookup by name to get additional info
@@ -525,7 +560,7 @@ def populate_artist_info_from_scrobbles(
 
             # Check if an entry with this MBID already exists
             if mbid:
-                existing_by_mbid = session.query(ArtistInfo).filter_by(mbid=mbid).one_or_none()
+                existing_by_mbid = session.query(ArtistInfo).filter_by(mbid=mbid).first()
                 if existing_by_mbid:
                     # Update existing record if needed
                     if _merge_artist_info(session, existing_by_mbid, info, raw_name):
@@ -541,7 +576,7 @@ def populate_artist_info_from_scrobbles(
                         ArtistInfo.disambiguation_comment != disambiguation,
                         ArtistInfo.mbid.is_(None)
                     )
-                    .one_or_none()
+                    .first()  # Using first() to avoid MultipleResultsFound
                 )
                 if existing_by_name_and_disambiguation:
                     # This is a different artist with the same name, so we should create a new record
@@ -558,7 +593,7 @@ def populate_artist_info_from_scrobbles(
                             ArtistInfo.disambiguation_comment == disambiguation,
                             ArtistInfo.mbid.is_(None)
                         )
-                        .one_or_none()
+                        .first()  # Using first() to avoid MultipleResultsFound
                     )
                     if existing_by_name_and_disambiguation:
                         # Update existing record if needed

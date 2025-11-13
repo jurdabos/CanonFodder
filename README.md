@@ -93,8 +93,6 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
    uv sync --extra prefect
    ```
 
-   > **Note on Airflow**: CanonFodder has migrated from Airflow to Prefect. If you need Airflow compatibility for legacy reasons, use a separate environment and refer to the Docker setup below.
-
    **Common uv Tasks:**
    ```powershell
    # Add a new dependency
@@ -107,51 +105,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
    uv run python main.py
    uv run pytest
    
-   # Export dependencies for Docker/CI
+   # Export dependencies for CI
    uv export --frozen --output-file=requirements.txt
    ```
-
-   **Option 2: Using Docker**
-
-   The project includes a complete Docker setup with MySQL, Airflow, and Adminer:
-
-   > **Note**: The Docker setup uses pip inside containers for compatibility and simplicity. For local development outside Docker, use uv as described in Option 1.
-
-   ```shell
-   # Ensure Docker Desktop is running on your system
-   # You'll get a "pipe/dockerDesktopLinuxEngine" error if it's not running
-
-   # Copy environment variables template
-   cp .env.example .env
-
-   # Edit .env file to add your Last.fm API key and other settings
-   # At minimum, set LASTFM_API_KEY and LASTFM_USER
-
-   # Start the Docker containers
-   docker-compose up --build
-   ```
-
-   This will start the following services:
-   - **MySQL Database**: Stores scrobble data and metadata
-   - **CanonFodder App with Airflow**: Runs the data pipeline and provides workflow orchestration
-   - **Adminer**: Web interface for database management
-
-   Access the services:
-   - Airflow UI: http://localhost:8080 (username: admin, password: admin)
-   - Adminer: http://localhost:8081 (server: db, username: canon, password: canon, database: canonfodder)
-
-   The Docker setup includes:
-   - Automatic database initialization
-   - Airflow DAG for weekly data pipeline runs
-   - Volume mapping for persistent data storage
-
-   For more information about the Docker filesystem structure and what `/opt/airflow` means, see [Understanding Linux Filesystem Paths in Docker](docs/linux_filesystem_in_docker.md).
-
-   > **Dependency Conflicts Note**: CanonFodder uses SQLAlchemy 2.x for its ORM models, while Apache Airflow 3.x requires SQLAlchemy 1.4.x. The project has migrated to Prefect for workflow orchestration. The Docker setup maintains Airflow for legacy compatibility but uses pip inside containers. For local development, always use uv (Option 1).
-
-   > **Note on Airflow CLI Commands**: If you encounter an error with the `airflow users` command (such as "invalid choice: 'users'"), please see [AIRFLOW_USERS_COMMAND.md](docs/AIRFLOW_USERS_COMMAND.md) for a fix. In Airflow 3.x, you must use specific subcommands like `airflow users create` instead of just `airflow users`.
-
-   > **Note on Platform-Specific Dependencies**: CanonFodder uses platform-specific markers in requirements.txt to handle dependencies that are only needed on certain operating systems (e.g., windows-curses for Windows). See [Platform-Specific Dependencies](docs/platform_specific_dependencies.md) for details.
 
 3. **Configure the application**
    - Copy `.env.example` to `.env` and fill in the required values
