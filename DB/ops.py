@@ -219,21 +219,8 @@ def _merge_artist_info(session, existing_record, info, raw_name=None):
     """
     updated = False
 
-    # Update MBID if missing
-    if existing_record.mbid in (None, "") and info.get("id"):
-        # Check if another record already has this MBID
-        conflicting_record = session.query(ArtistInfo).filter_by(mbid=info["id"]).first()
-        if conflicting_record and conflicting_record.id != existing_record.id:
-            # Another record already has this MBID, don't update
-            import logging
-            logger = logging.getLogger("populate_artist_info")
-            logger.debug(
-                "Cannot assign MBID %s to '%s' - already assigned to '%s'",
-                info["id"], existing_record.artist_name, conflicting_record.artist_name
-            )
-        else:
-            existing_record.mbid = info["id"]
-            updated = True
+    # Note: MBID updating is handled by the caller to avoid conflicts
+    # We don't update MBID here to prevent duplicate key errors
 
     # Update country if missing
     if existing_record.country in (None, "") and info.get("country"):
@@ -401,11 +388,26 @@ def populate_artist_info_from_scrobbles(
                         if _merge_artist_info(session, conflicting_record, info, raw_name):
                             updated += 1
                     else:
-                        # Safe to assign MBID
-                        with session.no_autoflush:
-                            existing_by_name.mbid = mb_id
-                            if _merge_artist_info(session, existing_by_name, info, raw_name):
-                                updated += 1
+                        # Safe to assign MBID - wrap in try-except for safety
+                        try:
+                            with session.no_autoflush:
+                                existing_by_name.mbid = mb_id
+                                if _merge_artist_info(session, existing_by_name, info, raw_name):
+                                    updated += 1
+                            session.flush()  # Flush to detect integrity errors immediately
+                        except sqlalchemy_exc.IntegrityError as e:
+                            if "Duplicate entry" in str(e) and "for key 'artist_info.mbid'" in str(e):
+                                logger.warning(
+                                    "Race condition: MBID %s became unavailable for '%s': %s",
+                                    mb_id, existing_by_name.artist_name, e
+                                )
+                                session.rollback()
+                                # Try merging into the conflicting record instead
+                                conflicting_record = session.query(ArtistInfo).filter_by(mbid=mb_id).first()
+                                if conflicting_record and _merge_artist_info(session, conflicting_record, info, raw_name):
+                                    updated += 1
+                            else:
+                                raise
                     continue
 
                 # Check if there's an artist with the same name and different disambiguation comment
@@ -448,11 +450,26 @@ def populate_artist_info_from_scrobbles(
                                 if _merge_artist_info(session, conflicting_record, info, raw_name):
                                     updated += 1
                             else:
-                                # Safe to assign MBID
-                                with session.no_autoflush:
-                                    existing_by_name_and_disambiguation.mbid = mb_id
-                                    if _merge_artist_info(session, existing_by_name_and_disambiguation, info, raw_name):
-                                        updated += 1
+                                # Safe to assign MBID - wrap in try-except for safety
+                                try:
+                                    with session.no_autoflush:
+                                        existing_by_name_and_disambiguation.mbid = mb_id
+                                        if _merge_artist_info(session, existing_by_name_and_disambiguation, info, raw_name):
+                                            updated += 1
+                                    session.flush()  # Flush to detect integrity errors immediately
+                                except sqlalchemy_exc.IntegrityError as e:
+                                    if "Duplicate entry" in str(e) and "for key 'artist_info.mbid'" in str(e):
+                                        logger.warning(
+                                            "Race condition: MBID %s became unavailable for '%s': %s",
+                                            mb_id, existing_by_name_and_disambiguation.artist_name, e
+                                        )
+                                        session.rollback()
+                                        # Try merging into the conflicting record instead
+                                        conflicting_record = session.query(ArtistInfo).filter_by(mbid=mb_id).first()
+                                        if conflicting_record and _merge_artist_info(session, conflicting_record, info, raw_name):
+                                            updated += 1
+                                    else:
+                                        raise
                             continue
 
                 # Create new record if no existing record was found

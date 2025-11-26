@@ -227,9 +227,13 @@ def _cache_artist(data: Dict[str, Any]) -> None:
             ).scalar_one_or_none()
 
         if not existing and artist_name:
-            existing = sess.execute(
-                select(ArtistInfo).where(ArtistInfo.artist_name == artist_name)
-            ).scalar_one_or_none()
+            # Using first() to handle multiple artists with same name
+            result = sess.execute(
+                select(ArtistInfo)
+                .where(ArtistInfo.artist_name == artist_name)
+                .order_by(ArtistInfo.id.desc())
+            ).first()
+            existing = result[0] if result else None
 
         # Process aliases - ensure we're handling both direct list and nested 'alias-list'
         aliases = []
@@ -248,7 +252,18 @@ def _cache_artist(data: Dict[str, Any]) -> None:
         # If exists, update it
         if existing:
             existing.artist_name = artist_name
-            existing.mbid = mbid
+            # Only update MBID if it's not already set or if there's no conflict
+            if mbid and existing.mbid != mbid:
+                # Check if another record already has this MBID
+                conflicting = sess.execute(
+                    select(ArtistInfo).where(ArtistInfo.mbid == mbid)
+                ).first()
+                if conflicting and conflicting[0].id != existing.id:
+                    LOGGER.debug(
+                        f"Cannot update MBID for '{artist_name}' to {mbid} - already assigned to '{conflicting[0].artist_name}'"
+                    )
+                else:
+                    existing.mbid = mbid
             existing.country = data.get("country")
             existing.disambiguation_comment = data.get("disambiguation")
             # Always update aliases, even if empty - this ensures we're not keeping stale data
@@ -571,11 +586,13 @@ def get_complete_artist_info(artist_identifier: str = None, **kwargs) -> dict[st
                         select(ArtistInfo).where(ArtistInfo.mbid == artist_identifier)
                     ).scalar_one_or_none()
                 else:
-                    cached = sess.execute(
+                    # Using first() instead of scalar_one_or_none() to handle multiple artists with same name
+                    result = sess.execute(
                         select(ArtistInfo)
                         .where(ArtistInfo.artist_name.ilike(artist_identifier))
                         .order_by(ArtistInfo.id.desc())
-                    ).scalar_one_or_none()
+                    ).first()
+                    cached = result[0] if result else None
 
                 if cached and cached.country and cached.aliases:  # ensure both country and aliases are present
                     LOGGER.info(f"Cache hit for {artist_identifier}: {cached.artist_name} ({cached.country})")
