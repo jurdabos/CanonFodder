@@ -2,6 +2,10 @@ alembic\env.py
     run_migrations_offline()
     run_migrations_online()
 
+alembic\versions\135_create_tables.py
+    upgrade()
+    downgrade()
+
 alembic\versions\136ae3641488_add_mbid_to_variants.py
     upgrade()
     downgrade()
@@ -89,22 +93,6 @@ corefunc\visualizations.py
 corefunc\workflow.py
     run_data_gathering_workflow()
 
-dags\cf_ingest.py
-    fetch_new_scrobbles()
-    enrich_artist_info()
-    clean_artist_data()
-    run_canonization()
-    export_to_parquet()
-    run_data_profiling()
-
-dags\fix_airflow_windows.py
-    backup_file()
-    patch_settings_file()
-    patch_simple_auth_manager()
-    patch_dag_bundles_base()
-    patch_python_virtualenv_operator()
-    fix_simple_auth_manager_indentation()
-
 DB\__init__.py
     get_engine()
     get_session()
@@ -135,12 +123,22 @@ DB\ops.py
     bulk_insert_scrobbles_to_mysql()
     insert_ignore()
     load_scrobble_table_from_db_to_df()
+    _merge_artist_info()
     populate_artist_info_from_scrobbles()
     save_group()
     seed_ascii_chars()
 
 dev\canon.py
     _split_variants()
+
+dev\lb_refresh.py
+    get_parquet_path()
+    load_existing()
+    get_latest_timestamp()
+    fetch_all_new_listens()
+    listens_to_dataframe()
+    deduplicate()
+    main()
 
 dev\lblink.py
     _load_token()
@@ -164,6 +162,15 @@ dev\profile.py
 
 dev\test_interactive_mode.py
     test_access()
+
+flows\cf_ingest.py
+    fetch_new_scrobbles()
+    enrich_artist_info()
+    clean_artist_data()
+    run_canonization()
+    export_to_parquet()
+    run_data_profiling()
+    weekly_ingest_flow()
 
 helpers\aliases.py
     _variants()
@@ -251,6 +258,14 @@ helpers\stats.py
     winsorization_outliers()
     get_db_statistics()
 
+helpers\stats_unknown_handler.py
+    get_session()
+    get_top_artists()
+    get_data_quality_stats()
+    get_unknown_albums()
+    fix_known_album()
+    print_data_quality_report()
+
 HTTP\client.py
     make_request()
 
@@ -291,15 +306,8 @@ HTTP\mbAPI.py
 main.py
     _cli_entry()
 
-scripts\fix_airflow_users_command.py
-    find_airflow_cli_py()
-    backup_file()
-    patch_cli_parser()
-
-scripts\fix_airflow_users_command_docker_v3.py
-    find_airflow_cli_py()
-    backup_file()
-    patch_cli_parser()
+scripts\check_status.py
+    check_status()
 
 scripts\fix_scrobble_parquet.py
     fix_scrobble_parquet()
@@ -356,15 +364,26 @@ tests\setup\test_setup.py
     test_root_setup_py()
     test_config_setup_py()
 
-tests\test_airflow_compatibility.py
-    check_package_version()
-    main()
-
-tests\test_airflow_dag.py
-    TestAirflowDag
-
 tests\test_parquet_location.py
     test_parquet_location()
+
+tests\test_prefect_flow.py
+    prefect_test_fixture()
+    mock_environment()
+    mock_pipeline_functions()
+    test_fetch_new_scrobbles_success()
+    test_fetch_new_scrobbles_no_user()
+    test_fetch_new_scrobbles_error()
+    test_fetch_new_scrobbles_no_new_data()
+    test_enrich_artist_info_success()
+    test_enrich_artist_info_no_scrobbles()
+    test_clean_artist_data_success()
+    test_run_canonization_success()
+    test_export_to_parquet_success()
+    test_run_data_profiling_success()
+    test_weekly_ingest_flow_complete()
+    test_weekly_ingest_flow_no_new_scrobbles()
+    test_task_retry_on_failure()
 
 tests\test_unify_cli.py
     _df_from_session()

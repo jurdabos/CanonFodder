@@ -1,0 +1,659 @@
+0. Refresh user data
+uv run python dev/lb_refresh.py --user forevian
+
+1. Top 10 per country
+```
+uv run python -c @"
+import pandas as pd
+from pathlib import Path
+PQ_DIR = Path('C:/acidvuca/canonfodder/PQ')
+scrobbles = pd.read_parquet(PQ_DIR / 'forevian_scrobble.parquet')
+artist_info = pd.read_parquet(PQ_DIR / 'artist_info.parquet')
+countries = pd.read_parquet(PQ_DIR / 'c.parquet')
+df = scrobbles.merge(artist_info[['artist_name', 'country']], on='artist_name', how='left')
+df = df.merge(countries[['ISO-2', 'en_name']], left_on='country', right_on='ISO-2', how='left')
+artist_counts = df.groupby(['en_name', 'artist_name']).size().reset_index(name='play_count').dropna(subset=['en_name'])
+top_10 = artist_counts.sort_values(['en_name', 'play_count'], ascending=[True, False]).groupby('en_name').head(10)
+for country, group in top_10.groupby('en_name'):
+    print(f'\n=== {country} ===')
+    for _, row in group.iterrows():
+        print(f"  {row['artist_name']}: {row['play_count']}")
+"@
+```
+=== Argentina ===
+  Guillermo Klein: 124
+  Massacre: 13
+  Juana Molina: 1
+
+=== Armenia ===
+  Tigran Hamasyan: 9
+
+=== Australia ===
+  King Gizzard & The Lizard Wizard: 491
+  Crowded House: 400
+  INXS: 176
+  Parcels: 155
+  Tommy Emmanuel: 102
+  Men at Work: 86
+  Colin Hay: 77
+  King Gizzard And The Lizard Wizard: 76
+  Psychedelic Porn Crumpets: 76
+  Leah Senior: 67
+
+=== Austria ===
+  Gandalf: 118
+  Wolfgang Amadeus Mozart: 79
+  Joseph Haydn: 54
+  Franz Schubert: 30
+  Falco: 20
+  Fennesz: 16
+  Franz Joseph Haydn: 9
+  Gustav Mahler: 5
+  Dorian Concept: 3
+  Mozart: 3
+
+=== Belgium ===
+  dEUS: 149
+  Telex: 28
+  After All: 23
+  Catherine Jauniaux: 12
+  Manu Louis: 9
+  Stromae: 6
+  Jacques Brel: 4
+  Slow: 1
+  Soulwax: 1
+
+=== Brazil ===
+  Amon Tobin: 49
+  Ana Caram: 41
+  Sepultura: 7
+  Insane Driver: 5
+  Angra: 1
+  CSS: 1
+  Eliane Elias: 1
+
+=== Bulgaria ===
+  Невена Цонева: 1
+
+=== Cameroon ===
+  Richard Bona: 44
+
+=== Canada ===
+  Feist: 468
+  Close Talker: 286
+  Neil Young: 263
+  Sloan: 154
+  Broken Social Scene: 149
+  Strapping Young Lad: 100
+  Galt Macdermot: 94
+  Rush: 91
+  Patrick Watson: 46
+  The New Pornographers: 32
+
+=== China ===
+  Tan Dun: 47
+
+=== Croatia ===
+  2Cellos: 2
+
+=== Cuba ===
+  Irakere: 2
+  Los Van Van: 2
+
+=== Czechia ===
+  Iva Bittova: 20
+  Bran: 19
+  Jiři Stivín: 16
+  Antonín Dvořák: 2
+  Ewa Farna: 1
+
+=== Democratic Republic of the Congo ===
+  Staff Benda Bilili: 4
+
+=== Denmark ===
+  Mew: 1244
+  Efterklang: 592
+  Oh No Ono: 255
+  Liima: 227
+  Junior Senior: 188
+  Spleen United: 89
+  Agnes Obel: 57
+  Choir of Young Believers: 35
+  Clarissa Connelly: 22
+  Orion: 14
+
+=== Estonia ===
+  Ewert and the Two Dragons: 726
+  Arvo Pärt: 22
+
+=== Finland ===
+  Liekki: 647
+  Pharaoh Overlord: 223
+  Callisto: 203
+  Loituma: 122
+  Amorphis: 29
+  Finntroll: 29
+  Circle: 15
+  Kemialliset Ystävät: 14
+  HIM: 13
+  The Black Napkins: 13
+
+=== France ===
+  Tahiti 80: 527
+  Air: 286
+  Jean-Michel Jarre: 234
+  Alcest: 83
+  Gong: 82
+  Maurice Ravel: 67
+  Magma: 41
+  Gojira: 39
+  Justice: 35
+  Claude Debussy: 32
+
+=== Germany ===
+  The Whitest Boy Alive: 681
+  Tangerine Dream: 321
+  Nils Frahm: 255
+  The Season Standard: 173
+  Kammerflimmer Kollektief: 172
+  Johann Sebastian Bach: 156
+  Bohren & der Club of Gore: 100
+  Kraftwerk: 96
+  Ash Ra Tempel: 78
+  Peter Finger: 70
+
+=== Greece ===
+  Vangelis: 290
+  Aphrodite's Child: 98
+  Ismeretlen előadó: 1
+
+=== Hungary ===
+  Kaláka: 1640
+  Heaven Street Seven: 1278
+  Barják András: 1193
+  Béla Bartók: 1098
+  Makám: 469
+  Vidám Barakk: 307
+  Middlemist Red: 297
+  Péterfy Bori & Love Band: 281
+  Quimby: 280
+  Kolinda: 216
+
+=== Iceland ===
+  Hjaltalín: 760
+  Sin Fang: 750
+  Agent Fresco: 452
+  Ólafur Arnalds: 367
+  Valdimar: 335
+  GusGus: 321
+  Svavar Knútur: 221
+  Sóley: 189
+  Björk: 84
+  Sigur Rós: 69
+
+=== India ===
+  Robert Miles And Trilok Gurtu: 72
+  Hari Prasad Chaurasia & Zakir Hussain: 7
+  Amjad Ali Khan: 1
+
+=== Ireland ===
+  Fionn Regan: 573
+  U2: 204
+  God Is an Astronaut: 116
+  Women: 58
+  my bloody valentine: 35
+  Thin Lizzy: 34
+  The Redneck Manifesto: 31
+  The Cranberries: 21
+  Villagers: 20
+  Glen Hansard: 17
+
+=== Israel ===
+  The Living Tombstone: 5
+  Infected Mushroom: 2
+
+=== Italy ===
+  Eliot Sumner: 58
+  Calibro 35: 23
+  Domenico Scarlatti: 19
+  Robert Miles: 16
+  fole: 16
+  Ludovico Einaudi: 14
+  MICHELE RABBIA: 12
+  Girolamo Frescobaldi: 11
+  Giulio Caccini: 10
+  Lucio Battisti: 10
+
+=== Jamaica ===
+  Jimmy Cliff: 1
+
+=== Japan ===
+  Yellow Magic Orchestra: 229
+  Kitaro: 153
+  ROVO: 140
+  Cornelius: 117
+  Joe Hisaishi: 97
+  Ryuichi Sakamoto: 34
+  Zeneker Team: 32
+  Koenjihyakkei: 23
+  Hair: 21
+  Super Seaweed Sex Scandal: 16
+
+=== Malaysia ===
+  Hazami: 1
+
+=== Mali ===
+  Vieux Farka Touré: 19
+  Tinariwen: 13
+  Rokia Traoré: 12
+
+=== Mexico ===
+  Murcof: 22
+
+=== Mongolia ===
+  The HU: 2
+
+=== Netherlands ===
+  The Gathering: 30
+  Focus: 27
+  Georg Graewe, Ernst Reijseger & Gerry Hemingway: 15
+  Textures: 6
+  Tom Dissevelt: 5
+  Weval: 5
+  Kraak & Smaak: 4
+  Titan: 2
+  Anneke van Giersbergen: 1
+  Anouk: 1
+
+=== New Zealand ===
+  Aldous Harding: 117
+  Neil Finn: 42
+  Split Enz: 31
+  Tiny Ruins: 3
+  Yumi Zouma: 3
+  BENEE: 1
+  The Clean: 1
+
+=== Niger ===
+  Mdou Moctar: 3
+
+=== Nigeria ===
+  William Onyeabor: 9
+
+=== Norway ===
+  Thomas Dybdahl: 1162
+  Aurora: 692
+  Kakkmaddafakka: 627
+  Ulver: 586
+  Eivind Aarset: 463
+  a-ha: 437
+  Motorpsycho: 373
+  Madrugada: 305
+  Erlend Øye: 198
+  Datarock: 84
+
+=== Pakistan ===
+  Ghulam Ali: 3
+
+=== Philippines ===
+  Nikki Gil: 1
+  explanations of strange devices: 1
+
+=== Poland ===
+  SBB: 93
+  Motion Trio: 52
+  Hania Rani: 51
+  Leszek Możdżer: 18
+  Quidam: 17
+  Dorota: 16
+  Frédéric Chopin: 11
+  Abraxas: 9
+  Zbigniew Preisner: 5
+  Behemoth: 3
+
+=== Republic of Korea ===
+  Psy: 1
+
+=== Romania ===
+  Balanescu Quartet: 5
+  Cal Vid: 1
+  Impact: 1
+
+=== Russian Federation ===
+  Igor Stravinsky: 11
+  Sergei Prokofiev: 10
+  Tchaikovsky: 10
+  Sergei Rachmaninoff: 4
+  Gultskra Artikler: 3
+  Pavel Milyakov: 3
+  t.A.T.u.: 3
+  Modest Petrovich Mussorgsky: 1
+  Pyotr Ilyich Tchaikovsky: 1
+
+=== South Africa ===
+  Alice Phoebe Lou: 32
+  Carlo Mombelli & The Prisoners of Strange: 24
+  Trevor Rabin: 7
+
+=== Spain ===
+  Jordi Savall: 113
+  Psicotropia: 28
+  Warmth: 2
+  Pepe Romero: 1
+
+=== Sweden ===
+  Opeth: 470
+  Mando Diao: 326
+  Sugarplum Fairy: 321
+  Jens Lekman: 300
+  Lucky Lo: 289
+  José González: 232
+  Mammoth Volume: 173
+  Katatonia: 153
+  Jonas Hellborg: 99
+  Änglagård: 80
+
+=== Switzerland ===
+  l'éclair: 146
+  L'eclair: 12
+  Billy Cobham: 11
+  Celtic Frost: 9
+  Jaywalker: 6
+  Monkey3: 2
+  Anton Bruhin: 1
+  Grauzone: 1
+
+=== Thailand ===
+  Phum Viphurit: 1
+
+=== Turkey ===
+  Kudsi Erguner: 4
+  Tarkan: 1
+
+=== Ukraine ===
+  Esthetic Education: 6
+  Risin: 2
+
+=== United Kingdom of Great Britain and Northern Ireland ===
+  Stornoway: 1690
+  Turin Brakes: 1422
+  XTC: 1221
+  The Coral: 975
+  Belle and Sebastian: 967
+  Yes: 828
+  Athlete: 824
+  Supergrass: 762
+  Suede: 746
+  Mike Oldfield: 695
+
+=== United States of America ===
+  The Dear Hunter: 2382
+  Fleet Foxes: 1683
+  Midlake: 1222
+  Death Cab for Cutie: 1220
+  Sufjan Stevens: 1214
+  Todd Rundgren: 1117
+  R.E.M.: 917
+  Grizzly Bear: 883
+  Minus the Bear: 870
+  Foster the People: 768
+
+=== Venezuela ===
+  Karolina: 1
+
+=== Zambia ===
+  Witch: 2
+
+2. Top 3 per country
+```
+uv run python -c @"
+import pandas as pd
+from pathlib import Path
+PQ_DIR = Path('C:/acidvuca/canonfodder/PQ')
+scrobbles = pd.read_parquet(PQ_DIR / 'jurda_scrobble.parquet')
+artist_info = pd.read_parquet(PQ_DIR / 'artist_info.parquet')
+countries = pd.read_parquet(PQ_DIR / 'c.parquet')
+df = scrobbles.merge(artist_info[['artist_name', 'country']], on='artist_name', how='left')
+df = df.merge(countries[['ISO-2', 'en_name']], left_on='country', right_on='ISO-2', how='left')
+artist_counts = df.groupby(['en_name', 'artist_name']).size().reset_index(name='play_count').dropna(subset=['en_name'])
+top_10 = artist_counts.sort_values(['en_name', 'play_count'], ascending=[True, False]).groupby('en_name').head(3)
+for country, group in top_10.groupby('en_name'):
+    print(f'\n=== {country} ===')
+    for _, row in group.iterrows():
+        print(f"  {row['artist_name']}: {row['play_count']}")
+"@
+```
+
+=== Argentina ===
+  Guillermo Klein: 124
+  Massacre: 13
+  Juana Molina: 1
+
+=== Armenia ===
+  Tigran Hamasyan: 12
+
+=== Australia ===
+  King Gizzard & The Lizard Wizard: 504
+  Crowded House: 403
+  INXS: 176
+
+=== Austria ===
+  Gandalf: 124
+  Wolfgang Amadeus Mozart: 79
+  Joseph Haydn: 54
+
+=== Belarus ===
+  Nürnberg: 4
+
+=== Belgium ===
+  dEUS: 155
+  Telex: 28
+  After All: 23
+
+=== Brazil ===
+  Amon Tobin: 49
+  Ana Caram: 41
+  Sepultura: 7
+
+=== Bulgaria ===
+  Невена Цонева: 1
+
+=== Cameroon ===
+  Richard Bona: 44
+
+=== Canada ===
+  Feist: 470
+  Close Talker: 295
+  Neil Young: 263
+
+=== China ===
+  Tan Dun: 47
+
+=== Croatia ===
+  2Cellos: 2
+
+=== Cuba ===
+  Irakere: 2
+  Los Van Van: 2
+
+=== Czechia ===
+  Iva Bittova: 20
+  Bran: 19
+  Jiři Stivín: 16
+
+=== Democratic Republic of the Congo ===
+  Staff Benda Bilili: 4
+
+=== Denmark ===
+  Mew: 1308
+  Efterklang: 627
+  Oh No Ono: 255
+
+=== Estonia ===
+  Ewert and the Two Dragons: 730
+  Arvo Pärt: 24
+
+=== Finland ===
+  Liekki: 647
+  Pharaoh Overlord: 249
+  Callisto: 207
+
+=== France ===
+  Tahiti 80: 527
+  Jean-Michel Jarre: 353
+  Air: 286
+
+=== Germany ===
+  The Whitest Boy Alive: 693
+  Tangerine Dream: 336
+  Nils Frahm: 256
+
+=== Greece ===
+  Vangelis: 304
+  Aphrodite's Child: 98
+  Ismeretlen előadó: 1
+
+=== Hungary ===
+  Kaláka: 1707
+  Barják András: 1385
+  Heaven Street Seven: 1280
+
+=== Iceland ===
+  Hjaltalín: 764
+  Sin Fang: 755
+  Agent Fresco: 454
+
+=== India ===
+  Robert Miles And Trilok Gurtu: 72
+  Hari Prasad Chaurasia & Zakir Hussain: 7
+  Amjad Ali Khan: 3
+
+=== Ireland ===
+  Fionn Regan: 610
+  U2: 208
+  God Is an Astronaut: 117
+
+=== Israel ===
+  The Living Tombstone: 19
+  Infected Mushroom: 2
+
+=== Italy ===
+  Eliot Sumner: 58
+  Calibro 35: 23
+  Domenico Scarlatti: 19
+
+=== Jamaica ===
+  Bob Marley & The Wailers: 2
+  Jimmy Cliff: 1
+
+=== Japan ===
+  Kitaro: 248
+  Yellow Magic Orchestra: 230
+  ROVO: 140
+
+=== Malaysia ===
+  Hazami: 1
+
+=== Mali ===
+  Vieux Farka Touré: 19
+  Tinariwen: 14
+  Rokia Traoré: 12
+
+=== Mexico ===
+  Murcof: 22
+
+=== Mongolia ===
+  The HU: 2
+
+=== Netherlands ===
+  The Gathering: 31
+  Focus: 27
+  Georg Graewe, Ernst Reijseger & Gerry Hemingway: 15
+
+=== New Zealand ===
+  Aldous Harding: 117
+  Neil Finn: 42
+  Split Enz: 31
+
+=== Niger ===
+  Mdou Moctar: 3
+
+=== Nigeria ===
+  William Onyeabor: 9
+
+=== Norway ===
+  Thomas Dybdahl: 1242
+  Aurora: 712
+  Kakkmaddafakka: 637
+
+=== Pakistan ===
+  Ghulam Ali: 3
+
+=== Philippines ===
+  Nikki Gil: 1
+  explanations of strange devices: 1
+
+=== Poland ===
+  SBB: 93
+  Hania Rani: 55
+  Motion Trio: 52
+
+=== Republic of Korea ===
+  Psy: 1
+
+=== Romania ===
+  Balanescu Quartet: 5
+  Cal Vid: 1
+  Impact: 1
+
+=== Russian Federation ===
+  Igor Stravinsky: 11
+  Sergei Prokofiev: 10
+  Tchaikovsky: 10
+
+=== South Africa ===
+  Alice Phoebe Lou: 32
+  Carlo Mombelli & The Prisoners of Strange: 24
+  Trevor Rabin: 7
+
+=== Spain ===
+  Jordi Savall: 113
+  Psicotropia: 28
+  Warmth: 2
+
+=== Sweden ===
+  Opeth: 512
+  Katatonia: 462
+  Jens Lekman: 352
+
+=== Switzerland ===
+  l'éclair: 146
+  L'eclair: 16
+  Billy Cobham: 11
+
+=== Thailand ===
+  Phum Viphurit: 1
+
+=== Turkey ===
+  Kudsi Erguner: 4
+  Tarkan: 1
+
+=== Ukraine ===
+  Esthetic Education: 6
+  Risin: 2
+
+=== United Kingdom of Great Britain and Northern Ireland ===
+  Stornoway: 1773
+  Turin Brakes: 1546
+  XTC: 1223
+
+=== United States of America ===
+  The Dear Hunter: 2397
+  Fleet Foxes: 1697
+  Midlake: 1345
+
+=== Venezuela ===
+  Karolina: 1
+
+=== Zambia ===
+  Witch: 2
