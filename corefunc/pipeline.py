@@ -303,8 +303,22 @@ def run_data_profiling(
         # Report progress
         progress_callback("Profiling", 0, "Starting data profiling")
 
-        # Run data profiling
-        dp.run_profiling()
+        # Loading scrobble data from parquet or database
+        progress_callback("Profiling", 10, "Loading scrobble data")
+        try:
+            data = pd.read_parquet(latest_parquet())
+        except Exception:
+            data, _ = load_scrobble_table_from_db_to_df(engine)
+        if data is None or data.empty:
+            progress_callback("Error", 100, "No data available for profiling")
+            return {
+                'status': 'error',
+                'message': "No data available for profiling"
+            }
+
+        # Running data profiling
+        progress_callback("Profiling", 30, "Analysing data")
+        dp.run_profiling(data)
 
         logger.info("Data profiling complete")
         progress_callback("Complete", 100, "Data profiling complete")

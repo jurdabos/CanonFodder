@@ -372,19 +372,49 @@ class CliInterface:
             curses.init_pair(20, curses.COLOR_BLACK, curses.COLOR_WHITE)  # Silver highlight
 
     def _animated_type(self, y, x, text, color_pair=0, delay=0.03, highlight=False):
-        """Type text with animation effect."""
+        """Type text with animation effect, clamping to window bounds."""
+        h, w = self.stdscr.getmaxyx()
+        # Clamping y and x to valid window coordinates
+        y = max(0, min(y, h - 1))
+        x = max(0, min(x, w - 1))
+        attr = curses.A_BOLD if highlight else 0
+        style = curses.color_pair(color_pair) | attr
         if DISABLE_ANIMATIONS:
             # If animations disabled, just print the text immediately
-            attr = curses.A_BOLD if highlight else 0
-            self.stdscr.addstr(y, x, text, curses.color_pair(color_pair) | attr)
+            try:
+                self.stdscr.addnstr(y, x, text, w - x, style)
+            except curses.error:
+                pass
             self.stdscr.refresh()
             return
-
         for i, char in enumerate(text):
-            attr = curses.A_BOLD if highlight else 0
-            self.stdscr.addstr(y, x + i, char, curses.color_pair(color_pair) | attr)
+            col = x + i
+            if col >= w:
+                break
+            try:
+                self._safe_addstr(y, col, char, style)
+            except curses.error:
+                pass
             self.stdscr.refresh()
             time.sleep(delay * random.uniform(0.5, 1.5))
+
+    def _safe_addstr(self, y, x, text, attr=0):
+        """Write text to the screen with bounds checking.
+
+        Clamps coordinates to the window, truncates text that would
+        overflow the right edge, and silently catches curses errors
+        (e.g. writing to the bottom-right corner).
+        """
+        h, w = self.stdscr.getmaxyx()
+        y = max(0, min(y, h - 1))
+        x = max(0, min(x, w - 1))
+        max_len = w - x
+        if max_len <= 0:
+            return
+        try:
+            self.stdscr.addnstr(y, x, text, max_len, attr)
+        except curses.error:
+            pass
 
     def _show_welcome_screen(self):
         """Display the welcome screen and username prompt."""
@@ -445,7 +475,7 @@ class CliInterface:
             elif c == curses.KEY_BACKSPACE or c == 127:  # Backspace
                 if username:
                     username = username[:-1]
-                    self.stdscr.addstr(prompt_y, 2 + username_x + len(username), " ")
+                    self._safe_addstr(prompt_y, 2 + username_x + len(username), " ")
                     self.stdscr.refresh()
             elif 32 <= c <= 126:  # Printable ASCII
                 username += chr(c)
@@ -457,7 +487,7 @@ class CliInterface:
         # Validate username
         if not username.strip():
             # Show error message
-            self.stdscr.addstr(prompt_y + 1, 2, "Username cannot be empty! Press any key to try again.",
+            self._safe_addstr(prompt_y + 1, 2, "Username cannot be empty! Press any key to try again.",
                                curses.color_pair(4) | curses.A_BOLD)
             self.stdscr.refresh()
             self.stdscr.getch()
@@ -489,7 +519,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(3, 1, separator, curses.color_pair(2))
+        self._safe_addstr(3, 1, separator, curses.color_pair(2))
 
         # Menu options
         menu_title = "MAIN MENU"
@@ -518,9 +548,9 @@ class CliInterface:
                     "Null %".rjust(8)
                 ]
                 header_row = " ".join(headers)
-                self.stdscr.addstr(8, 4, header_row, curses.color_pair(2) | curses.A_BOLD)
+                self._safe_addstr(8, 4, header_row, curses.color_pair(2) | curses.A_BOLD)
                 # Adding a line separator
-                self.stdscr.addstr(9, 4, "─" * (len(header_row)), curses.color_pair(2))
+                self._safe_addstr(9, 4, "─" * (len(header_row)), curses.color_pair(2))
                 # Displaying each row of statistics
                 for i, row in scrobble_stats.iterrows():
                     if i < 5:  # Limit to 5 rows to save space
@@ -532,7 +562,7 @@ class CliInterface:
                             f"{row['non_null_percentage']:>11.2f} "
                             f"{row['null_percentage']:>8.2f}"
                         )
-                        self.stdscr.addstr(10 + i, 4, row_text, curses.color_pair(1))
+                        self._safe_addstr(10 + i, 4, row_text, curses.color_pair(1))
 
                 # Display Artist Info statistics table (right side)
                 if artist_info_stats is not None and not artist_info_stats.empty:
@@ -540,9 +570,9 @@ class CliInterface:
                     self._animated_type(7, middle_x + 4, stats_title, color_pair=3, highlight=True, delay=0.01)
 
                     # Table headers with padding to ensure alignment (same as left side)
-                    self.stdscr.addstr(8, middle_x + 4, header_row, curses.color_pair(2) | curses.A_BOLD)
+                    self._safe_addstr(8, middle_x + 4, header_row, curses.color_pair(2) | curses.A_BOLD)
                     # Adding a line separator
-                    self.stdscr.addstr(9, middle_x + 4, "─" * (len(header_row)), curses.color_pair(2))
+                    self._safe_addstr(9, middle_x + 4, "─" * (len(header_row)), curses.color_pair(2))
                     # Displaying each row of statistics
                     for i, row in artist_info_stats.iterrows():
                         if i < 5:  # Limit to 5 rows to save space
@@ -554,19 +584,19 @@ class CliInterface:
                                 f"{row['non_null_percentage']:>11.2f} "
                                 f"{row['null_percentage']:>8.2f}"
                             )
-                            self.stdscr.addstr(10 + i, middle_x + 4, row_text, curses.color_pair(1))
+                            self._safe_addstr(10 + i, middle_x + 4, row_text, curses.color_pair(1))
 
                 option_start_y = 16
             else:
                 # If no statistics available, display a message
-                self.stdscr.addstr(7, 4, "No database statistics available", curses.color_pair(4))
+                self._safe_addstr(7, 4, "No database statistics available", curses.color_pair(4))
                 option_start_y = 9
         except Exception as e:
             # If there's an error, display it and continue
             error_msg = f"Error displaying statistics: {str(e)}"
             if len(error_msg) > w - 8:
                 error_msg = error_msg[:w - 11] + "..."
-            self.stdscr.addstr(7, 4, error_msg, curses.color_pair(4))
+            self._safe_addstr(7, 4, error_msg, curses.color_pair(4))
             option_start_y = 9
         options = [
             "1. Data Gathering",
@@ -581,13 +611,13 @@ class CliInterface:
         instructions = "Press a number key to select an option..."
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
         # Handle menu selection
         while True:
             # Highlight the menu options to clarify selection
             for i, option in enumerate(options):
-                self.stdscr.addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
+                self._safe_addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
             self.stdscr.refresh()
             c = self.stdscr.getch()
             if c == ord('1'):
@@ -619,7 +649,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(3, 1, separator, curses.color_pair(2))
+        self._safe_addstr(3, 1, separator, curses.color_pair(2))
 
         # Menu options
         menu_title = "DATA GATHERING OPTIONS"
@@ -640,14 +670,14 @@ class CliInterface:
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
 
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
 
         # Handle menu selection
         while True:
             # Highlight the menu options to clarify selection
             for i, option in enumerate(options):
-                self.stdscr.addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
+                self._safe_addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
             self.stdscr.refresh()
             c = self.stdscr.getch()
             if c == ord('1'):
@@ -668,16 +698,16 @@ class CliInterface:
         self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
         # Initial progress message
-        self.stdscr.addstr(4, 2, "Initializing...", curses.color_pair(1))
+        self._safe_addstr(4, 2, "Initializing...", curses.color_pair(1))
         # Draw progress bar outline
         bar_width = w - 6
-        self.stdscr.addstr(6, 2, "┌" + "─" * bar_width + "┐", curses.color_pair(1))
-        self.stdscr.addstr(7, 2, "│" + " " * bar_width + "│", curses.color_pair(1))
-        self.stdscr.addstr(8, 2, "└" + "─" * bar_width + "┘", curses.color_pair(1))
+        self._safe_addstr(6, 2, "┌" + "─" * bar_width + "┐", curses.color_pair(1))
+        self._safe_addstr(7, 2, "│" + " " * bar_width + "│", curses.color_pair(1))
+        self._safe_addstr(8, 2, "└" + "─" * bar_width + "┘", curses.color_pair(1))
         # Additional status message area
-        self.stdscr.addstr(10, 2, "Status: Starting up...", curses.color_pair(1))
+        self._safe_addstr(10, 2, "Status: Starting up...", curses.color_pair(1))
         self.stdscr.refresh()
 
         # Return a proper progress callback class instance
@@ -689,12 +719,12 @@ class CliInterface:
 
             def __call__(self, task: str, percentage: float, message: Optional[str] = None) -> None:
                 # Update task name
-                self.stdscr.addstr(4, 2, " " * (self.width - 4))  # Clear the line
-                self.stdscr.addstr(4, 2, f"Task: {task}", curses.color_pair(1))
+                self._safe_addstr(4, 2, " " * (self.width - 4))  # Clear the line
+                self._safe_addstr(4, 2, f"Task: {task}", curses.color_pair(1))
 
                 # Update progress bar
                 filled_width = int((percentage / 100) * self.bar_width)
-                self.stdscr.addstr(7, 3, "█" * filled_width + " " * (self.bar_width - filled_width),
+                self._safe_addstr(7, 3, "█" * filled_width + " " * (self.bar_width - filled_width),
                                    curses.color_pair(3))
 
                 # Show percentage
@@ -702,11 +732,11 @@ class CliInterface:
                 percent_pos = min(3 + filled_width - len(percent_str) // 2, self.width - len(percent_str) - 3)
                 if percent_pos < 3:
                     percent_pos = 3
-                self.stdscr.addstr(7, percent_pos, percent_str, curses.color_pair(7))
+                self._safe_addstr(7, percent_pos, percent_str, curses.color_pair(7))
 
                 # Update status message
                 if message:
-                    self.stdscr.addstr(10, 2, " " * (self.width - 4))  # Clear the line
+                    self._safe_addstr(10, 2, " " * (self.width - 4))  # Clear the line
                     status_text = f"Status: {message}"
                     # Only truncate if necessary (not enough space on screen)
                     if len(status_text) > self.width - 4:
@@ -717,7 +747,7 @@ class CliInterface:
                         else:
                             # For other messages, truncate with ellipsis
                             status_text = status_text[:self.width - 7] + "..."
-                    self.stdscr.addstr(10, 2, status_text, curses.color_pair(1))
+                    self._safe_addstr(10, 2, status_text, curses.color_pair(1))
 
                 self.stdscr.refresh()
 
@@ -738,7 +768,7 @@ class CliInterface:
 
                 # Show completion message
                 haa, duplavee = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
+                self._safe_addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
 
                 if result['status'] == 'success':
                     fetch_result = result.get('fetch_result', {})
@@ -752,14 +782,14 @@ class CliInterface:
                     cleaned = clean_result.get('cleaned', 0)
 
                     success_msg = f"Data gathering completed successfully!"
-                    self.stdscr.addstr(12, 2, success_msg, curses.color_pair(3) | curses.A_BOLD)
+                    self._safe_addstr(12, 2, success_msg, curses.color_pair(3) | curses.A_BOLD)
 
                     if new_scrobbles > 0:
                         details_msg = f"Fetched {new_scrobbles} new scrobbles."
-                        self.stdscr.addstr(13, 2, details_msg, curses.color_pair(1))
+                        self._safe_addstr(13, 2, details_msg, curses.color_pair(1))
 
                     artist_msg = f"Artists: processed {processed}, created {created}, updated {updated}, cleaned {cleaned}"
-                    self.stdscr.addstr(14, 2, artist_msg, curses.color_pair(1))
+                    self._safe_addstr(14, 2, artist_msg, curses.color_pair(1))
                 else:
                     error_msg = f"Error: {result['message']}"
                     # Only truncate if necessary (not enough space on screen)
@@ -771,14 +801,14 @@ class CliInterface:
                         else:
                             # For other messages, truncate with ellipsis
                             error_msg = error_msg[:duplavee - 7] + "..."
-                    self.stdscr.addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
+                    self._safe_addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
 
-                self.stdscr.addstr(16, 2, "Press any key to return to the menu...", curses.color_pair(1))
+                self._safe_addstr(16, 2, "Press any key to return to the menu...", curses.color_pair(1))
                 self.stdscr.refresh()
             except Exception as e:
                 # Show error message
                 haa, duplavee = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
+                self._safe_addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
                 error_msg = f"Error: {str(e)}"
                 # Only truncate if necessary (not enough space on screen)
                 if len(error_msg) > duplavee - 4:
@@ -789,8 +819,8 @@ class CliInterface:
                     else:
                         # For other messages, truncate with ellipsis
                         error_msg = error_msg[:duplavee - 7] + "..."
-                self.stdscr.addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
-                self.stdscr.addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
+                self._safe_addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
+                self._safe_addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
                 self.stdscr.refresh()
                 logging.exception("Error during data gathering")
 
@@ -804,14 +834,14 @@ class CliInterface:
             c = self.stdscr.getch()
             if c == 27:  # ESC key
                 h, w = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, "Attempting to cancel operation...",
+                self._safe_addstr(12, 2, "Attempting to cancel operation...",
                                    curses.color_pair(4) | curses.A_BOLD)
                 self.stdscr.refresh()
                 # Can't forcibly stop the thread, but we can signal it's done
                 thread.join(timeout=0.1)
                 if thread.is_alive():
                     # If thread is still running, wait for it to finish naturally
-                    self.stdscr.addstr(13, 2, "Please wait for current operation to complete...",
+                    self._safe_addstr(13, 2, "Please wait for current operation to complete...",
                                        curses.color_pair(1))
                     self.stdscr.refresh()
         # Wait for a keypress before returning to menu
@@ -830,7 +860,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Check model server status
         status = get_server_status()
@@ -905,7 +935,7 @@ class CliInterface:
         while thread.is_alive():
             # Update spinner
             spinner_text = f"Processing data {spinner_chars[spinner_idx]}"
-            self.stdscr.addstr(9, 4, spinner_text, curses.color_pair(3))
+            self._safe_addstr(9, 4, spinner_text, curses.color_pair(3))
             self.stdscr.refresh()
 
             # Increment spinner index
@@ -917,12 +947,12 @@ class CliInterface:
             # Check for ESC key to cancel
             c = self.stdscr.getch()
             if c == 27:  # ESC key
-                self.stdscr.addstr(11, 4, "Cancellation requested. Please wait for current operations to complete...",
+                self._safe_addstr(11, 4, "Cancellation requested. Please wait for current operations to complete...",
                                   curses.color_pair(4))
                 self.stdscr.refresh()
 
         # Clear processing messages
-        self.stdscr.addstr(9, 4, " " * (w - 8), curses.color_pair(0))
+        self._safe_addstr(9, 4, " " * (w - 8), curses.color_pair(0))
 
         # Display results
         if canonization_results.get("success", False):
@@ -1035,13 +1065,13 @@ class CliInterface:
             c = self.stdscr.getch()
             if c == 27:  # ESC key
                 h, w = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, "Attempting to cancel operation...",
+                self._safe_addstr(12, 2, "Attempting to cancel operation...",
                                    curses.color_pair(4) | curses.A_BOLD)
                 self.stdscr.refresh()
                 thread.join(timeout=0.1)
 
         # Wait for keypress
-        self.stdscr.addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
+        self._safe_addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
         self.stdscr.refresh()
         self.stdscr.getch()
 
@@ -1059,7 +1089,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Loading message
         loading_msg = "Loading data for analysis..."
@@ -1152,7 +1182,7 @@ class CliInterface:
         while thread.is_alive():
             # Update spinner
             spinner_text = f"Analyzing data {spinner_chars[spinner_idx]}"
-            self.stdscr.addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
+            self._safe_addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
             self.stdscr.refresh()
 
             # Increment spinner index
@@ -1164,7 +1194,7 @@ class CliInterface:
             # Check for ESC key to cancel
             c = self.stdscr.getch()
             if c == 27:  # ESC key
-                self.stdscr.addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
+                self._safe_addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
                                  curses.color_pair(4))
                 self.stdscr.refresh()
 
@@ -1173,7 +1203,7 @@ class CliInterface:
 
         # Redraw title and separator
         self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Check if profiling was successful
         if profiling_results.get("success", False):
@@ -1231,7 +1261,7 @@ class CliInterface:
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
 
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
 
         # Wait for keypress
@@ -1251,7 +1281,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Menu options
         menu_title = "VISUALIZATION OPTIONS"
@@ -1273,14 +1303,14 @@ class CliInterface:
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
 
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
 
         # Handle menu selection
         while True:
             # Highlight the menu options to clarify selection
             for i, option in enumerate(options):
-                self.stdscr.addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
+                self._safe_addstr(option_start_y + i, 4, option, curses.color_pair(1) | curses.A_BOLD)
             self.stdscr.refresh()
 
             c = self.stdscr.getch()
@@ -1308,7 +1338,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Loading message
         loading_msg = "Loading data and generating visualizations..."
@@ -1358,7 +1388,7 @@ class CliInterface:
         while thread.is_alive():
             # Update spinner
             spinner_text = f"Generating visualizations {spinner_chars[spinner_idx]}"
-            self.stdscr.addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
+            self._safe_addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
             self.stdscr.refresh()
 
             # Increment spinner index
@@ -1370,7 +1400,7 @@ class CliInterface:
             # Check for ESC key to cancel
             c = self.stdscr.getch()
             if c == 27:  # ESC key
-                self.stdscr.addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
+                self._safe_addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
                                   curses.color_pair(4))
                 self.stdscr.refresh()
 
@@ -1379,7 +1409,7 @@ class CliInterface:
 
         # Redraw title and separator
         self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Check if visualizations were generated successfully
         if visualization_results.get("success", False):
@@ -1425,7 +1455,7 @@ class CliInterface:
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
 
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
 
         # Wait for keypress
@@ -1445,7 +1475,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Loading message
         loading_msg = "Loading data and generating visualizations..."
@@ -1500,7 +1530,7 @@ class CliInterface:
         while thread.is_alive():
             # Update spinner
             spinner_text = f"Generating visualizations {spinner_chars[spinner_idx]}"
-            self.stdscr.addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
+            self._safe_addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
             self.stdscr.refresh()
 
             # Increment spinner index
@@ -1512,7 +1542,7 @@ class CliInterface:
             # Check for ESC key to cancel
             c = self.stdscr.getch()
             if c == 27:  # ESC key
-                self.stdscr.addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
+                self._safe_addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
                                   curses.color_pair(4))
                 self.stdscr.refresh()
 
@@ -1521,7 +1551,7 @@ class CliInterface:
 
         # Redraw title and separator
         self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Check if visualizations were generated successfully
         if visualization_results.get("success", False):
@@ -1581,7 +1611,7 @@ class CliInterface:
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
 
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
 
         # Wait for keypress
@@ -1601,7 +1631,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Loading message
         loading_msg = "Loading data and identifying trusted companions..."
@@ -1645,7 +1675,7 @@ class CliInterface:
         while thread.is_alive():
             # Update spinner
             spinner_text = f"Analyzing data {spinner_chars[spinner_idx]}"
-            self.stdscr.addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
+            self._safe_addstr(6, (w - len(spinner_text)) // 2, spinner_text, curses.color_pair(3))
             self.stdscr.refresh()
 
             # Increment spinner index
@@ -1657,7 +1687,7 @@ class CliInterface:
             # Check for ESC key to cancel
             c = self.stdscr.getch()
             if c == 27:  # ESC key
-                self.stdscr.addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
+                self._safe_addstr(8, 4, "Cancellation requested. Please wait for current operations to complete...",
                                   curses.color_pair(4))
                 self.stdscr.refresh()
 
@@ -1666,7 +1696,7 @@ class CliInterface:
 
         # Redraw title and separator
         self._animated_type(1, (w - len(title)) // 2, title, color_pair=2, highlight=True, delay=0.01)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Check if visualizations were generated successfully
         if visualization_results.get("success", False):
@@ -1722,7 +1752,7 @@ class CliInterface:
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
 
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
 
         # Wait for keypress
@@ -1742,7 +1772,7 @@ class CliInterface:
 
         # Draw separator
         separator = "═" * (w - 2)
-        self.stdscr.addstr(2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(2, 1, separator, curses.color_pair(2))
 
         # Get server status
         status = get_server_status()
@@ -1800,7 +1830,7 @@ class CliInterface:
         self._animated_type(h - 3, (w - len(instructions)) // 2, instructions, color_pair=6, delay=0.01)
 
         # Bottom border
-        self.stdscr.addstr(h - 2, 1, separator, curses.color_pair(2))
+        self._safe_addstr(h - 2, 1, separator, curses.color_pair(2))
         self.stdscr.refresh()
 
         # Handle menu selection
@@ -1810,26 +1840,26 @@ class CliInterface:
                 # Start or stop server
                 if is_running:
                     # Stop server
-                    self.stdscr.addstr(h - 5, 4, "Stopping server...", curses.color_pair(4))
+                    self._safe_addstr(h - 5, 4, "Stopping server...", curses.color_pair(4))
                     self.stdscr.refresh()
 
                     success = stop_server()
 
                     if success:
-                        self.stdscr.addstr(h - 5, 4, "Server stopped successfully!", curses.color_pair(3))
+                        self._safe_addstr(h - 5, 4, "Server stopped successfully!", curses.color_pair(3))
                     else:
-                        self.stdscr.addstr(h - 5, 4, "Failed to stop server.", curses.color_pair(4))
+                        self._safe_addstr(h - 5, 4, "Failed to stop server.", curses.color_pair(4))
                 else:
                     # Start server
-                    self.stdscr.addstr(h - 5, 4, "Starting server...", curses.color_pair(3))
+                    self._safe_addstr(h - 5, 4, "Starting server...", curses.color_pair(3))
                     self.stdscr.refresh()
 
                     success = start_server()
 
                     if success:
-                        self.stdscr.addstr(h - 5, 4, "Server started successfully!", curses.color_pair(3))
+                        self._safe_addstr(h - 5, 4, "Server started successfully!", curses.color_pair(3))
                     else:
-                        self.stdscr.addstr(h - 5, 4, "Failed to start server.", curses.color_pair(4))
+                        self._safe_addstr(h - 5, 4, "Failed to start server.", curses.color_pair(4))
 
                 self.stdscr.refresh()
                 time.sleep(1.5)
@@ -1884,7 +1914,7 @@ class CliInterface:
 
                 # Show completion message
                 haa, duplavee = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
+                self._safe_addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
 
                 if result['status'] == 'success':
                     fetch_result = result.get('fetch_result', {})
@@ -1898,14 +1928,14 @@ class CliInterface:
                     cleaned = clean_result.get('cleaned', 0)
 
                     success_msg = f"Pipeline completed successfully!"
-                    self.stdscr.addstr(12, 2, success_msg, curses.color_pair(3) | curses.A_BOLD)
+                    self._safe_addstr(12, 2, success_msg, curses.color_pair(3) | curses.A_BOLD)
 
                     if new_scrobbles > 0:
                         details_msg = f"Fetched {new_scrobbles} new scrobbles."
-                        self.stdscr.addstr(13, 2, details_msg, curses.color_pair(1))
+                        self._safe_addstr(13, 2, details_msg, curses.color_pair(1))
 
                     artist_msg = f"Artists: processed {processed}, created {created}, updated {updated}, cleaned {cleaned}"
-                    self.stdscr.addstr(14, 2, artist_msg, curses.color_pair(1))
+                    self._safe_addstr(14, 2, artist_msg, curses.color_pair(1))
                 else:
                     error_msg = f"Error: {result['message']}"
                     # Only truncate if necessary (not enough space on screen)
@@ -1917,14 +1947,14 @@ class CliInterface:
                         else:
                             # For other messages, truncate with ellipsis
                             error_msg = error_msg[:duplavee - 7] + "..."
-                    self.stdscr.addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
+                    self._safe_addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
 
-                self.stdscr.addstr(16, 2, "Press any key to return to the menu...", curses.color_pair(1))
+                self._safe_addstr(16, 2, "Press any key to return to the menu...", curses.color_pair(1))
                 self.stdscr.refresh()
             except Exception as e:
                 # Show error message
                 haa, duplavee = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
+                self._safe_addstr(12, 2, " " * (duplavee - 4))  # Clear any previous message
                 error_msg = f"Error: {str(e)}"
                 # Only truncate if necessary (not enough space on screen)
                 if len(error_msg) > duplavee - 4:
@@ -1935,8 +1965,8 @@ class CliInterface:
                     else:
                         # For other messages, truncate with ellipsis
                         error_msg = error_msg[:duplavee - 7] + "..."
-                self.stdscr.addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
-                self.stdscr.addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
+                self._safe_addstr(12, 2, error_msg, curses.color_pair(4) | curses.A_BOLD)
+                self._safe_addstr(14, 2, "Press any key to return to the menu...", curses.color_pair(1))
                 self.stdscr.refresh()
                 logging.exception("Error during pipeline execution")
 
@@ -1950,14 +1980,14 @@ class CliInterface:
             c = self.stdscr.getch()
             if c == 27:  # ESC key
                 h, w = self.stdscr.getmaxyx()
-                self.stdscr.addstr(12, 2, "Attempting to cancel operation...",
+                self._safe_addstr(12, 2, "Attempting to cancel operation...",
                                    curses.color_pair(4) | curses.A_BOLD)
                 self.stdscr.refresh()
                 # Can't forcibly stop the thread, but we can signal it's done
                 thread.join(timeout=0.1)
                 if thread.is_alive():
                     # If thread is still running, wait for it to finish naturally
-                    self.stdscr.addstr(13, 2, "Please wait for current operation to complete...",
+                    self._safe_addstr(13, 2, "Please wait for current operation to complete...",
                                        curses.color_pair(1))
                     self.stdscr.refresh()
         # Wait for a keypress before returning to menu

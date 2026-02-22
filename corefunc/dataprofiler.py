@@ -69,7 +69,19 @@ def run_profiling(data: pd.DataFrame) -> ProfileResult:
             errors="coerce",
         )
         data = data.assign(uts=uts_dt)
-    data.columns = ["Artist", "Album", "Song", "Datetime"]
+    # Renaming columns to analysis-friendly names via explicit mapping
+    column_mapping = {
+        "artist_name": "Artist",
+        "album_title": "Album",
+        "play_time": "Datetime",
+        "track_title": "Song",
+        "artist_mbid": "MBID",
+        # Legacy column names for backward compatibility
+        "album_name": "Album",
+        "track_name": "Song",
+        "uts": "Datetime",
+    }
+    data = data.rename(columns={k: v for k, v in column_mapping.items() if k in data.columns})
     data = data.drop_duplicates(subset=["Artist", "Album", "Song", "Datetime"])
     LOGGER.info("Dropped %d duplicate rows", before - len(data))
     data = data.dropna(subset=["Datetime"])

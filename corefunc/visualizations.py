@@ -46,9 +46,9 @@ def load_data() -> pd.DataFrame:
         if "artist_name" in data.columns:
             data = data.rename(columns={
                 "artist_name": "Artist",
-                "album_name": "Album",
+                "album_title": "Album",
                 "play_time": "Datetime",
-                "track_name": "Song",
+                "track_title": "Song",
                 "artist_mbid": "MBID"
             })
         # Converting timestamp to datetime if needed
