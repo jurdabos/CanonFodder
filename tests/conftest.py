@@ -25,6 +25,7 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         "AVC_PQ": pq / "avc.parquet",
         "C_PQ": pq / "c.parquet",
         "UC_PQ": pq / "uc.parquet",
+        "QA_REPORT_PQ": pq / "qa_report.parquet",
     }
     # Patching helpers.io (canonical source)
     for name, path in paths.items():
@@ -38,6 +39,7 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         ("corefunc.data_cleaning", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.enrich", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.canon", ["AVC_PQ"]),
+        ("corefunc.qa", ["SCROBBLE_PQ", "QA_REPORT_PQ"]),
         ("helpers.cli", ["PQ_DIR", "AVC_PQ", "UC_PQ"]),
         ("HTTP.lfAPI", ["C_PQ", "UC_PQ", "SCROBBLE_PQ"]),
         ("HTTP.mbAPI", ["ARTIST_INFO_PQ"]),

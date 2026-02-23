@@ -32,6 +32,7 @@ ARTIST_INFO_PQ = PQ_DIR / "artist_info.parquet"
 AVC_PQ = PQ_DIR / "avc.parquet"
 C_PQ = PQ_DIR / "c.parquet"
 UC_PQ = PQ_DIR / "uc.parquet"
+QA_REPORT_PQ = PQ_DIR / "qa_report.parquet"
 
 # ── PyArrow schemas ───────────────────────────────────────────────────────────
 SCROBBLE_SCHEMA = pa.schema([
@@ -75,10 +76,11 @@ OP_TOKENS = {
     r"\s\/\s": "_div_",
 }
 
-_UUID_RE = re.compile(
+UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
+_UUID_RE = UUID_RE  # to keep backward compat for internal references
 
 
 # ── Core I/O helpers ──────────────────────────────────────────────────────────

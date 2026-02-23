@@ -163,6 +163,53 @@ def purge(purge_all: bool) -> None:
         click.echo(f"Deleted {p.name}")
 
 
+# ── qa ─────────────────────────────────────────────────────────────────────
+@cli.command()
+@click.option("--hours", "-h", default=None, type=int, help="Only check scrobbles from the last N hours.")
+def qa(hours: int | None) -> None:
+    """Runs post-ingestion quality checks on scrobble.parquet."""
+    from corefunc.qa import qa_lb_ingest, ALBUM_NULL_THRESHOLD
+    click.echo("Running QA checks …")
+    report = qa_lb_ingest(last_n_hours=hours)
+    if report.get("status") == "skipped":
+        click.echo(f"Skipped: {report['reason']}")
+        return
+    # Printing summary
+    passed = report["passed"]
+    click.echo(f"\nRows checked: {report['row_count']:,}")
+    click.echo(f"Overall: {'PASS' if passed else 'FAIL'}")
+    # Schema
+    sch = report["schema"]
+    if not sch["pass"]:
+        click.echo(f"  Schema FAIL — missing: {sch['missing']}, unexpected: {sch['unexpected']}")
+    # Nulls
+    for col, stats in report["nulls"].items():
+        if stats["null_pct"] > 0 or stats["empty_pct"] > 0:
+            click.echo(f"  {col}: {stats['null_pct']}% null, {stats['empty_pct']}% empty")
+    # Timestamps
+    ts = report["timestamps"]
+    if not ts["pass"]:
+        for issue in ts["issues"]:
+            click.echo(f"  Timestamp: {issue}")
+    # Duplicates
+    dup = report["duplicates"]
+    click.echo(f"  Duplicates: {dup['duplicate_count']:,} ({dup['duplicate_pct']}%)")
+    if not dup["pass"]:
+        click.echo("  ⚠ Duplicate rate exceeds 5% threshold")
+    # MBIDs
+    mb = report["mbids"]
+    click.echo(f"  MBID fill: {mb.get('fill_rate', 0)}%, valid: {mb.get('valid_rate', 0)}%")
+    # Encoding
+    enc = report["encoding"]
+    if not enc["pass"]:
+        click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
+    # Reconciliation
+    rec = report["reconciliation"]
+    if rec.get("fetched") is not None:
+        click.echo(f"  Reconciliation: fetched={rec['fetched']:,}, stored={rec['stored']:,}, diff={rec.get('diff', 0):,}")
+    click.echo("\nReport appended to PQ/qa_report.parquet")
+
+
 # ── flow ───────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", help="Data source.")

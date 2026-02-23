@@ -1,0 +1,110 @@
+# c9r repo tree
+# Updated: 2026-02-23
+
+canonfodder/
+├── .env.example                                        # Env-var template (LASTFM_API_KEY, LB_TOKEN, etc.)
+├── .gitattributes
+├── .gitignore
+├── .pre-commit-config.yaml                             # gitleaks + pre-commit hooks
+├── Dockerfile                                          # Multi-stage build (python:3.12-slim + uv)
+├── main.py                                             # Click CLI entry point (c9r)
+├── pyproject.toml                                      # PEP 621 metadata, deps, tool config
+├── README.md
+├── uv.lock                                             # Pinned dependency lock
+├── WARP.md                                             # Warp guidance
+│
+├── corefunc/                                           # Core pipeline logic
+│   ├── canon.py                                        # XGBoost model training + evaluation
+│   ├── canon_rules.yaml                                # Canonisation rule definitions
+│   ├── data_cleaning.py                                # artist_info dedup by completeness score
+│   ├── enrich.py                                       # MusicBrainz country/MBID enrichment
+│   ├── model_server.py                                 # FastAPI app: /health, /predict, /predict_batch
+│   └── workflow.py                                     # Data-gathering orchestrator (Last.fm or LB)
+│
+├── docs/                                               # Documentation
+│   ├── 20250531_Balázs_Torda_92128244_DLBDSEDAV01.pdf  # Academic submission
+│   ├── BI_architecture.mmd                             # Mermaid diagram of the full BI architecture
+│   ├── CanonFodder_requirementsanddesigndocumentation.pdf  # Requirements engineering doc
+│   ├── MIGRATION_LOG.md                                # Reverse-chronological migration history
+│   ├── PREFECT_SETUP.md                                # Prefect 3.x setup and usage guide
+│   ├── repo_tree.txt                                   # This document
+│   └── state_of_development_<DATE>.txt                 # Living snapshot of where c9r stands
+│
+├── flows/                                              # Orchestration
+│   └── cf_ingest.py                                    # Prefect 3.x flow: fetch → enrich → clean
+│
+├── helpers/                                            # Shared utilities
+│   ├── cli.py                                          # Click-based interactive prompts, timeline editor
+│   ├── cluster.py                                      # DBSCAN, fuzzy scoring, ML similarity
+│   ├── io.py                                           # Parquet I/O, PyArrow schemas, normalisation
+│   ├── query.py                                        # DuckDB-over-Parquet analytical queries
+│   └── stats.py                                        # Statistical utilities (Cramér's V, etc.)
+│
+├── HTTP/                                               # API clients
+│   ├── client.py                                       # Resilient HTTP GET with retries (tenacity)
+│   ├── lblink.py                                       # ListenBrainz scrobble ingestion
+│   ├── lfAPI.py                                        # Last.fm scrobble fetch, MBID enrichment, country sync
+│   └── mbAPI.py                                        # MusicBrainz artist lookup (country, aliases)
+│
+├── JSON/                                               # Application config stored as JSON
+│   ├── countries.geojson                               # Country boundaries for map visualisations
+│   ├── palettes.json                                   # Custom colour palettes for EDA/frontend
+│   └── selected_features.json                          # Feature-selection config for ML
+│
+├── ML/                                                 # Trained model artefacts
+│   ├── xgb.json                                        # Serialised XGBoost classifier
+│   └── xgb_columns.json                                # Feature column list
+│
+├── pics/                                               # Tracked visualisation outputs
+│   ├── artist_countries_map.html                       # Folium choropleth
+│   ├── artist_track_distribution.png
+│   ├── decomposition.png
+│   ├── monthly_variance_ridgeline.png
+│   ├── population_vs_scrobbles.png
+│   ├── population_vs_scrobbles_log.png
+│   ├── scrobbles.html
+│   ├── top_artists_by_country.png
+│   ├── top_artists_without_record_linkage.png
+│   ├── top_countries.png
+│   ├── trusted_companions_heatmap.png
+│   ├── trusted_companions_std_dev.png
+│   ├── user_countries.png
+│   ├── yearly_top_artists.png
+│   └── yearly_top_artists_table.png
+│
+├── PQ/                                                 # Parquet data store (zstd-compressed)
+│   ├── scrobble.parquet                                # Fact: artist_name, album_title, track_title, artist_mbid, play_time
+│   ├── artist_info.parquet                             # Dim: artist_name, mbid, country, disambiguation_comment, aliases
+│   ├── avc.parquet                                     # Dim: artist_variants_hash, artist_variants_text, canonical_name, …
+│   ├── uc.parquet                                      # Dim: country_code, start_date, end_date
+│   ├── c.parquet                                       # Dim: ISO-2, ISO-3, en_name, hu_name
+│   ├── jurda_scrobble.parquet                          # User-specific scrobble snapshot
+│   └── forevian_scrobble.parquet                       # User-specific scrobble snapshot
+│
+└── tests/                                              # pytest suite
+    ├── conftest.py                                     # Parquet temp-dir fixtures
+    ├── test_prefect_flow.py                            # Prefect flow tests
+    ├── integration/
+    │   ├── test_model_server.py                        # FastAPI endpoint tests
+    │   └── test_workflow.py                            # End-to-end workflow tests
+    └── unit/
+        ├── test_canon.py
+        ├── test_cli.py
+        ├── test_cli_helpers.py
+        ├── test_cli_interactive.py
+        ├── test_cli_more.py
+        ├── test_client.py
+        ├── test_cluster.py
+        ├── test_data_cleaning.py
+        ├── test_enrich.py
+        ├── test_io.py
+        ├── test_io_extra.py
+        ├── test_lblink.py
+        ├── test_lblink_extra.py
+        ├── test_lfapi.py
+        ├── test_lfapi_extra.py
+        ├── test_lfapi_pagination.py
+        ├── test_mbapi.py
+        ├── test_mbapi_extra.py
+        ├── test_query.py
+        └── test_stats.py
