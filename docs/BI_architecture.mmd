@@ -1,28 +1,40 @@
-%% CanonFodder – BI Reference Architecture
+%% c9r v0.6 – BI Reference Architecture (post‑migration)
 flowchart TB
 
 %% ───── Source layer ─────
 subgraph Source_Systems["Source systems"]
     direction LR
-    lfAPI["lfAPI  ⤵️\n• scrobble JSON\n• fields: Artist, Album, Song, uts, artist mbid"]
-    mbAPI["mbAPI  ⤵️\n• artist JSON\n• alias, primary_alias, comment, country"]
-    userCLI["User CLI  ⤵️\n• artist variant canonisation\n• user‑country timeline"]
+    lfAPI["HTTP/lfAPI  ⤵️\n• Last.fm scrobble JSON\n• Artist, Album, Song, uts, artist_mbid"]
+    lblink["HTTP/lblink  ⤵️\n• ListenBrainz listen JSON\n• artist, track, release, listened_at, artist_mbid"]
+    mbAPI["HTTP/mbAPI  ⤵️\n• MusicBrainz artist JSON\n• alias, primary_alias, comment, country"]
+    userCLI["Click CLI  ⤵️\n• c9r canonise / review\n• user‑country timeline"]
 end
 
 %% ───── Integration / Staging layer ─────
-subgraph Staging["Integration layer  ➜  Staging area (Python ETL)"]
+subgraph Staging["Integration layer  ➜  Python ETL (Click CLI + helpers)"]
     direction LR
-    extract["Extract"] --- transform["Transform"] --- load["Load"]
+    extract["Extract"] --- transform["Transform\n(normalise_scrobble_df)"] --- load["Load\n(append_to_parquet)"]
 end
 
 %% ───── Data‑storage layer ─────
-subgraph DWH["Data‑storage layer  ➜  CanonFodder DWH (SQLAlchemy‑based backend-agnostic RDBMS)"]
-    cdw["Core Data Warehouse\n\nTables\n───────────────\n• scrobble\n• artist_info\n• artist_variants_canonized\n• user_country"]
+subgraph DWH["Data‑storage layer  ➜  Parquet store (zstd) + DuckDB query layer"]
+    direction LR
+    pqstore["PQ/ Parquet files\n───────────────\n• scrobble.parquet\n• artist_info.parquet\n• avc.parquet\n• uc.parquet\n• c.parquet"]
+    duckdb["helpers/query.py\n───────────────\nDuckDB‑over‑Parquet\n• top_artists\n• scrobble_count\n• unique_artists\n• ascii_freq"]
+    pqstore --- duckdb
 end
 
-%% ───── Output / evaluation layer ─────
-subgraph Output["Output layer  ➜  Evaluation DBs"]
-    parquet[".parquet snapshots\n(star schema)\n• fact_scrobble (Y/M/D expanded)\n• dim_artist_info\n• dim_avc\n• dim_uc\n• dim_country_code"]
+%% ───── ML layer ─────
+subgraph MLPipeline["ML pipeline"]
+    direction LR
+    xgb["XGBoost model\nML/xgb.json\nML/xgb_columns.json"]
+    fastapi["FastAPI model server\ncorefunc/model_server.py\n/predict  /health"]
+    xgb --- fastapi
+end
+
+%% ───── Output / star schema layer ─────
+subgraph Output["Output layer  ➜  Star schema (Parquet)"]
+    star["Star schema views\n• fact_scrobble (Y/M/D expanded)\n• dim_artist_info\n• dim_avc\n• dim_uc\n• dim_country_code"]
 end
 
 %% ───── Front‑end / analytics layer ─────
@@ -32,33 +44,36 @@ end
 
 %% ───── Metadata side‑rail ─────
 subgraph Metadata["Metadata management"]
-    mapping["Mapping\n Artist → artist_name\n Album  → album_title\n Song   → track_title\n uts    → SQL DATETIME"]
+    mapping["Mapping\n Artist → artist_name\n Album  → album_title\n Song   → track_title\n uts    → pd.Timestamp"]
 end
 
-%% ───── DevOps / packaging note ─────
-Docker["Docker container\n(canonfodder:latest)"]:::docker
-classDef docker fill:#E0F7FA,stroke:#0288D1,stroke-width:2px,color:#01579B
+%% ───── Orchestration ─────
+Prefect["Prefect 3.x\nflows/cf_ingest.py\nweekly_ingest_flow"]:::orch
+classDef orch fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px,color:#1A237E
 
 %% ───── Configure layout directions ─────
-%% Force a more centered layout
 Source_Systems --> Staging --> DWH --> Output --> Frontend
+DWH --> MLPipeline --> Frontend
 
 %% ───── Data flow arrows ─────
 lfAPI --> extract
+lblink --> extract
 mbAPI --> extract
 userCLI --> extract
 
-extract --> transform --> load --> cdw
-cdw --> parquet --> viz
+extract --> transform --> load --> pqstore
+duckdb --> star --> viz
+duckdb --> xgb
+fastapi --> viz
 
 %% metadata dotted links
 Metadata --- Source_Systems
 mapping -. manages .-> extract
 mapping -. manages .-> transform
-mapping -. governs .-> cdw
-mapping -. documents .-> parquet
+mapping -. governs .-> pqstore
+mapping -. documents .-> star
 
-%% packaging
-Docker -.-> viz
-Docker -.-> parquet
-Docker -.-> cdw
+%% orchestration
+Prefect -.-> Staging
+Prefect -.-> DWH
+Prefect -.-> MLPipeline

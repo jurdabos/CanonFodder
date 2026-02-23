@@ -1,28 +1,23 @@
 """
 Provides interactive command-line helpers for data cleaning and user prompts.
 """
+from __future__ import annotations
+import hashlib
+import logging
+import os
+import sys
+from datetime import datetime, UTC
+from pathlib import Path
+from typing import Optional
+import click
+import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
-from datetime import datetime
-from DB import get_session as _get_session
-from DB.models import ArtistVariantsCanonized
-import hashlib
-from .io import PQ_DIR
-import logging
+from .io import PQ_DIR, AVC_PQ, UC_PQ, read_parquet, append_to_parquet, dump_parquet
 log = logging.getLogger(__name__)
-import os
-import pandas as pd
-from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[1] if "__file__" in globals() else Path.cwd()
-import questionary
-from sqlalchemy import select, insert, update
-import sys
-from typing import Optional
 SEPARATOR = "{"
-os.makedirs(PQ_DIR, exist_ok=True)
-AVC_PARQUET_PATH = os.path.join(PQ_DIR, "avc.parquet")
-UC_PARQUET = PQ_DIR / "uc.parquet"
 
 
 def _apply_canonical(canonical: str,
@@ -57,50 +52,24 @@ def _parse_date(d: str) -> Optional[pd.Timestamp]:
         raise ValueError(f"❌  '{d}' is not a valid date (YYYY‑MM‑DD)") from err
 
 
-def _remember_artist_variant(signature: str, canonical: str, link_flag: bool, comment: str | None, sess):
-    """Universal UPSERT for artist_variants_canonized."""
-    signature_hash = hashlib.sha256(signature.encode('utf-8')).hexdigest()
-    existing = sess.execute(
-        select(ArtistVariantsCanonized)
-        .where(ArtistVariantsCanonized.artist_variants_hash == signature_hash)
-    ).scalar_one_or_none()
-    if existing:
-        sess.execute(
-            update(ArtistVariantsCanonized)
-            .where(ArtistVariantsCanonized.artist_variants_hash == signature_hash)
-            .values(
-                canonical_name=canonical,
-                to_link=link_flag,
-                comment=comment,
-                artist_variants_text=signature
-            )
-        )
-    else:
-        sess.execute(
-            insert(ArtistVariantsCanonized)
-            .values(
-                artist_variants_hash=signature_hash,
-                artist_variants_text=signature,
-                canonical_name=canonical,
-                to_link=link_flag,
-                comment=comment
-            )
-        )
+def _remember_artist_variant(signature: str, canonical: str, link_flag: bool, comment: str | None) -> None:
+    """Upserts a variant decision into avc.parquet."""
+    signature_hash = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+    row = pd.DataFrame([{
+        "artist_variants_hash": signature_hash,
+        "artist_variants_text": signature,
+        "canonical_name": canonical,
+        "to_link": link_flag,
+        "comment": comment or "",
+        "stamp": datetime.now(UTC).isoformat(),
+    }])
+    append_to_parquet(row, AVC_PQ, dedup_cols=["artist_variants_hash"])
 
 
 def _split_variants(sig: str) -> list[str]:
     return [v.strip() for v in sig.split(SEPARATOR) if v.strip()]
 
 
-def _write_to_avc_parquet(record: dict):
-    """Write a single record to avc.parquet"""
-    record_df = pd.DataFrame([record])
-    if os.path.exists(AVC_PARQUET_PATH):
-        existing_df = pd.read_parquet(AVC_PARQUET_PATH)
-        updated_df = pd.concat([existing_df, record_df], ignore_index=True)
-    else:
-        updated_df = record_df
-    updated_df.to_parquet(AVC_PARQUET_PATH, index=False)
 
 
 def ask(question: str,
@@ -174,34 +143,35 @@ def choose_timeline(default: str = "Y") -> str:
 #  Timeline editor
 # ---------------------------------------------------------------------------
 def edit_country_timeline() -> pd.DataFrame:
-    uc = pd.read_parquet(UC_PARQUET) if UC_PARQUET.exists() else pd.DataFrame(
-        columns=["country", "start_date", "end_date"], dtype="object")
-    print("\nEnter your country timeline. Blank to finish.\n")
+    """Interactively edits the user-country timeline stored in uc.parquet."""
+    uc = read_parquet(UC_PQ)
+    if uc is None or uc.empty:
+        uc = pd.DataFrame(columns=["country_code", "start_date", "end_date"], dtype="object")
+    click.echo("\nEnter your country timeline. Blank to finish.\n")
     if not uc.empty:
-        print(uc.to_string(index=False))
+        click.echo(uc.to_string(index=False))
     while True:
-        name = input("Country name  (blank = done): ").strip()
+        name = click.prompt("Country code (blank = done)", default="", show_default=False)
         if not name:
             break
-        s_in = input("   Start YYYY‑MM‑DD: ")
-        e_in = input("   End YYYY‑MM‑DD  (blank = ongoing): ")
+        s_in = click.prompt("   Start YYYY-MM-DD")
+        e_in = click.prompt("   End YYYY-MM-DD (blank = ongoing)", default="", show_default=False)
         try:
             s_ts, e_ts = _parse_date(s_in), _parse_date(e_in)
             _interval_ok(s_ts, e_ts)
             if _overlaps(uc, s_ts, e_ts):
-                print("⚠ Overlaps existing interval – try again\n")
+                click.echo("Overlaps existing interval - try again\n")
                 continue
             uc.loc[len(uc)] = [name, s_ts, e_ts]
-            print("✔ added", name, s_ts.date(), "→", e_ts.date() if e_ts else "open‑ended")
-        except ValueError as e:
-            print("❌", e)
+            click.echo(f"Added {name} {s_ts.date()} -> {e_ts.date() if e_ts else 'open-ended'}")
+        except ValueError as exc:
+            click.echo(f"Error: {exc}")
     if uc.empty:
-        print("No intervals – leaving uc.parquet untouched.")
+        click.echo("No intervals - leaving uc.parquet untouched.")
         return uc
-    PQ_DIR.mkdir(parents=True, exist_ok=True)
     uc.sort_values("start_date", inplace=True)
-    uc.to_parquet(UC_PARQUET, compression="zstd", index=False)
-    log.info("Saved timeline → %s", UC_PARQUET.relative_to(PROJECT_ROOT))
+    dump_parquet(uc, UC_PQ)
+    log.info("Saved timeline -> %s", UC_PQ)
     return uc
 
 
@@ -220,98 +190,57 @@ def unify_artist_names_cli(
         similar_artist_groups: list[list[str]],
 ):
     """
-    Interactive resolver for artist-name duplicates with splitting capability.
-    Commits each decision immediately, and writes incrementally to Parquet.
+    Interactively resolves artist-name duplicates using Click prompts.
+
+    Commits each decision immediately to avc.parquet.
     """
+    avc_df = read_parquet(AVC_PQ)
     groups_to_review = similar_artist_groups.copy()
     while groups_to_review:
         group = groups_to_review.pop(0)
         if len(group) <= 1:
             continue
         signature = make_signature(group)
-        with _get_session() as sess:
-            with sess.begin():
-                prev_row = sess.execute(
-                    select(ArtistVariantsCanonized)
-                    .where(ArtistVariantsCanonized.artist_variants_text == signature)
-                ).scalar_one_or_none()
-                if prev_row:
-                    if not prev_row.to_link:
-                        # print(f"\nUser previously SKIPPED {group}.")
-                        continue
-                    # print(f"\nUser previously unified {group} → '{prev_row.canonical_name}'. Applying again.")
-                    _apply_canonical(prev_row.canonical_name, group, data, fltrd_artcount)
-                    continue
-                print("\n---")
-                print("These artist names appear to be duplicates:")
-                print("\n".join(f"  - {v}" for v in group))
-                choice = questionary.select(
-                    "Which name should become canonical?",
-                    choices=group + ["Custom name…", "Split group...", "Skip this group"]
-                ).ask()
-                if not choice or choice.startswith("Skip"):
-                    comment = questionary.text(
-                        "Optional comment (reason for skip, hit ↵ to skip):"
-                    ).ask().strip() or None
-                    _remember_artist_variant(signature, "__SKIP__", False, comment, sess)
-                    record = {
-                        "artist_variants": signature,
-                        "canonical_name": "__SKIP__",
-                        "to_link": False,
-                        "comment": comment,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    _write_to_avc_parquet(record)
-                    continue
-                if choice == "Split group...":
-                    selected_subgroup = questionary.checkbox(
-                        "Select variants to move into a separate group:",
-                        choices=group
-                    ).ask()
-                    if selected_subgroup and 0 < len(selected_subgroup) < len(group):
-                        remaining_group = [v for v in group if v not in selected_subgroup]
-                        groups_to_review.insert(0, selected_subgroup)
-                        groups_to_review.insert(1, remaining_group)
-                        print("Group split into two new groups for further review.")
-                    else:
-                        print("Invalid selection. Re-queuing current group.")
-                        groups_to_review.append(group)
-                    continue
-                canonical = (
-                    questionary.text("Enter the custom canonical name:").ask().strip()
-                    if choice.startswith("Custom") else choice
-                )
-                if not canonical:
-                    print("No canonical name provided, skipping.")
-                    _remember_artist_variant(
-                        signature,
-                        "__SKIP__",
-                        False,
-                        "Skipped: no canonical name provided",
-                        sess
-                    )
-                    record = {
-                        "artist_variants": signature,
-                        "canonical_name": "__SKIP__",
-                        "to_link": False,
-                        "comment": "Skipped: no canonical name provided",
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    _write_to_avc_parquet(record)
-                    continue
-                comment = questionary.text(
-                    "Optional comment/disambiguation (hit ↵ to skip):"
-                ).ask().strip() or None
-                _apply_canonical(canonical, group, data, fltrd_artcount)
-                _remember_artist_variant(signature, canonical, True, comment, sess)
-                record = {
-                    "artist_variants": signature,
-                    "canonical_name": canonical,
-                    "to_link": True,
-                    "comment": comment,
-                    "timestamp": datetime.now().isoformat()
-                }
-                _write_to_avc_parquet(record)
+        # Checking previous decisions in avc.parquet
+        if avc_df is not None and not avc_df.empty:
+            prev = avc_df.loc[avc_df["artist_variants_text"] == signature]
+            if not prev.empty:
+                row = prev.iloc[-1]
+                if not row["to_link"]:
+                    continue  # to skip previously skipped group
+                _apply_canonical(row["canonical_name"], group, data, fltrd_artcount)
+                continue
+        click.echo("\n---")
+        click.echo("These artist names appear to be duplicates:")
+        for v in group:
+            click.echo(f"  - {v}")
+        choices = {str(i + 1): name for i, name in enumerate(group)}
+        choices["c"] = "Custom name"
+        choices["s"] = "Skip this group"
+        click.echo("Choose canonical name:")
+        for key, label in choices.items():
+            click.echo(f"  [{key}] {label}")
+        choice = click.prompt("Selection", type=str, default="s")
+        if choice == "s":
+            comment = click.prompt("Optional comment (Enter to skip)", default="", show_default=False) or None
+            _remember_artist_variant(signature, "__SKIP__", False, comment)
+            continue
+        if choice == "c":
+            canonical = click.prompt("Enter the custom canonical name").strip()
+        elif choice in choices:
+            canonical = choices[choice]
+        else:
+            click.echo("Invalid choice, skipping.")
+            continue
+        if not canonical:
+            click.echo("No canonical name provided, skipping.")
+            _remember_artist_variant(signature, "__SKIP__", False, "Skipped: no name")
+            continue
+        comment = click.prompt("Optional comment (Enter to skip)", default="", show_default=False) or None
+        _apply_canonical(canonical, group, data, fltrd_artcount)
+        _remember_artist_variant(signature, canonical, True, comment)
+        # Reloading avc_df after each write to keep it fresh
+        avc_df = read_parquet(AVC_PQ)
     refreshed = (
         data["Artist"]
         .value_counts()

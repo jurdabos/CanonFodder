@@ -43,6 +43,11 @@ logs/
 *.tar
 *.gz
 
+# Project-specific output directories
+ML/
+pics/
+visualizations/
+
 
 # Ignore sensitive or environment-specific configurations
 .env
@@ -55,9 +60,6 @@ dist/
 *.egg-info/
 .eggs/
 *.spec
-
-# Alembic caches
-alembic/versions/__pycache__/
 
 # Test/typing caches
 .pytest_cache/

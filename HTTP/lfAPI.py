@@ -1,31 +1,22 @@
 from __future__ import annotations
+import hashlib
+import logging
+import os
 import time
+from datetime import date, datetime, UTC
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
-from datetime import date
-from DB import SessionLocal
-import hashlib
 from HTTP.client import make_request, USER_AGENT
-import logging
+from helpers.io import C_PQ, UC_PQ, SCROBBLE_PQ, read_parquet, dump_parquet
 log = logging.getLogger("lfAPI")
-import os
-import pandas as pd
-from pathlib import Path
-from sqlalchemy import select, or_
-from sqlalchemy.orm import Session
-import typing
-from typing import Any, Callable, Dict, Optional
-if typing.TYPE_CHECKING:  # pragma: no cover
-    from DB.models import UserCountry
 LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/"
 HERE = Path(__file__).resolve().parent
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY")
 LASTFM_SECRET = os.environ.get("LASTFM_SECRET")
 USERNAME = os.getenv("LASTFM_USER")
-if not LASTFM_API_KEY:
-    raise RuntimeError(
-        "LASTFM_API_KEY not found – did you forget to put it into .env "
-        "or call load_dotenv(<path>) before importing lfAPI?")
 PER_PAGE = 200
 
 
@@ -51,19 +42,17 @@ def _clean_track(rec: object) -> dict | None:
 
 def _fetch_country_from_lastfm(username: str) -> str:
     """
-    Call Last.fm and return the *ISO* country code.
+    Calls Last.fm and returns the ISO country code.
     Raises RuntimeError if the API call fails or the country cannot be mapped.
     """
     payload = lastfm_request("user.getInfo", user=username)
-    country_name = payload["user"].get("country")  # '' when user hid location
+    country_name = payload["user"].get("country")
     if not country_name:
         raise RuntimeError("Last.fm did not return a country for that user.")
-    # Create a session to use for country code lookup
-    with SessionLocal() as session:
-        code = iso2_for_en_name(session, country_name)
-        if code is None:
-            raise RuntimeError(f"Unknown country «{country_name}» – extend mapping.")
-        return code
+    code = iso2_for_en_name(country_name)
+    if code is None:
+        raise RuntimeError(f"Unknown country «{country_name}» – extend mapping.")
+    return code
 
 
 def _normalise_tracks(tracks: list[dict]) -> list[dict]:
@@ -172,42 +161,34 @@ def _paginate(method: str,
     return results
 
 
-def _update_user_country(session: Session, new_code: str) -> bool:
+def _update_user_country(new_code: str) -> bool:
     """
-    Persist the new country if it differs from *today's* entry.
-    Returns
-    -------
-    True  … when the DB was changed
-    False … when nothing had to be changed
+    Persists the new country if it differs from today's entry in uc.parquet.
+    Returns True when the file was changed, False otherwise.
     """
-    today = date.today()
-    # 1) locate the *current* row (start ≤ today < end OR end IS NULL)
-    stmt = (select(UserCountry)
-            .where(UserCountry.start_date <= today)
-            .where(or_(UserCountry.end_date.is_(None),
-                       UserCountry.end_date > today))
-            .order_by(UserCountry.start_date.desc())
-            .limit(1))
-    current: Optional[UserCountry] = session.scalars(stmt).first()
-    if current and current.country_code == new_code:
-        return False  # already up-to-date
-    # 2) close old row (if any)
-    if current:
-        current.end_date = today
-    # 3) insert the new row
-    uc = UserCountry(country_code=new_code,
-                     start_date=today,
-                     end_date=None)
-    session.add(uc)
-    session.commit()
+    today = str(date.today())
+    df = read_parquet(UC_PQ)
+    if df is not None and not df.empty:
+        # Finding the current row (start ≤ today, end is null or > today)
+        mask = (df["start_date"] <= today) & (df["end_date"].isna() | (df["end_date"] > today))
+        current = df[mask].sort_values("start_date", ascending=False).head(1)
+        if not current.empty and current.iloc[0]["country_code"] == new_code:
+            return False
+        # Closing old row
+        if not current.empty:
+            df.at[current.index[0], "end_date"] = today
+    else:
+        df = pd.DataFrame(columns=["country_code", "start_date", "end_date"])
+    # Adding new row
+    new_row = pd.DataFrame([{"country_code": new_code, "start_date": today, "end_date": None}])
+    df = pd.concat([df, new_row], ignore_index=True)
+    dump_parquet(df, UC_PQ)
     return True
 
 
-def enrich_artist_mbids(username, progress_callback=None):
+def enrich_artist_mbids(username: str, progress_callback: Optional[Callable] = None) -> dict:
     """
-    Fetch artist MBIDs from Last.fm API and update the database.
-    This function gets recent tracks for the user and extracts artist MBIDs,
-    then updates the database with these values.
+    Fetches artist MBIDs from Last.fm API and updates scrobble.parquet.
 
     Parameters
     ----------
@@ -222,130 +203,54 @@ def enrich_artist_mbids(username, progress_callback=None):
         Status information about the operation
     """
     try:
-        from sqlalchemy import text
-        from DB import engine, SessionLocal
         if progress_callback:
             progress_callback("Initializing", 0, "Starting artist MBID enrichment")
-
-        # First, get a count of artists without MBIDs in the database
-        with engine.connect() as conn:
-            missing_count_query = text("""
-                SELECT COUNT(DISTINCT artist_name) 
-                FROM scrobble 
-                WHERE artist_mbid IS NULL OR artist_mbid = ''
-            """)
-            missing_count = conn.execute(missing_count_query).scalar() or 0
-            if missing_count == 0:
-                return {
-                    "status": "success", 
-                    "message": "No artists missing MBIDs in database",
-                    "enriched": 0
-                }
-
-            if progress_callback:
-                progress_callback("Analyzing", 5, f"Found {missing_count} artists without MBIDs")
-
-            # Getting the list of artists needing MBIDs
-            artists_query = text("""
-                SELECT DISTINCT artist_name 
-                FROM scrobble 
-                WHERE artist_mbid IS NULL OR artist_mbid = '' 
-                ORDER BY artist_name
-            """)
-            artists = [row[0] for row in conn.execute(artists_query).fetchall()]
-
-        # Processing in batches to avoid overwhelming the API
+        df = read_parquet(SCROBBLE_PQ)
+        if df is None or df.empty:
+            return {"status": "success", "message": "No scrobbles found", "enriched": 0}
+        # Finding artists without MBIDs
+        missing_mask = df["artist_mbid"].isna() | (df["artist_mbid"] == "")
+        artists = df.loc[missing_mask, "artist_name"].unique().tolist()
+        if not artists:
+            return {"status": "success", "message": "No artists missing MBIDs", "enriched": 0}
+        if progress_callback:
+            progress_callback("Analyzing", 5, f"Found {len(artists)} artists without MBIDs")
+        # Fetching MBIDs from Last.fm in batches
+        artist_mbid_map: dict[str, str] = {}
         batch_size = 50
-        total_enriched = 0
-        artist_mbid_map = {}
-
         for i in range(0, len(artists), batch_size):
-            batch = artists[i:i+batch_size]
+            batch = artists[i:i + batch_size]
             if progress_callback:
-                percentage = 5 + (i / len(artists)) * 45
-                progress_callback("Fetching", percentage, f"Getting MBIDs for artists {i+1}-{i+len(batch)} of {len(
-                    artists)}")
-
-            # Getting recent tracks for each artist
+                pct = 5 + (i / len(artists)) * 45
+                progress_callback("Fetching", pct, f"Getting MBIDs {i + 1}-{i + len(batch)} of {len(artists)}")
             for artist_name in batch:
                 try:
-                    # Using the user's recent tracks to find MBIDs for this artist
-                    # Using lastfm_request instead of direct requests.get
-                    data = lastfm_request(
-                        "user.getRecentTracks",
-                        user=username,
-                        limit=10,  # Just need a few to find the MBID
-                        artist=artist_name
-                    )
-
-                    if 'recenttracks' in data and 'track' in data['recenttracks']:
-                        tracks = data['recenttracks']['track']
-                        if isinstance(tracks, list) and tracks:
-                            for track in tracks:
-                                if ('artist' in track and '@attr' in track['artist'] and
-                                        'mbid' in track['artist']['@attr'] and
-                                        track['artist']['@attr']['mbid']):
-                                    mbid = track['artist']['@attr']['mbid']
-                                    artist_mbid_map[artist_name] = mbid
-                                    break
-
-                        # If we didn't find the MBID in track artist attr, try artist.getInfo
-                        if artist_name not in artist_mbid_map:
-                            # Use lastfm_request instead of direct requests.get
-                            data = lastfm_request(
-                                "artist.getInfo",
-                                artist=artist_name
-                            )
-
-                            if 'artist' in data and 'mbid' in data['artist'] and data['artist']['mbid']:
-                                artist_mbid_map[artist_name] = data['artist']['mbid']
-
-                except LastFMError as e:
-                    logging.warning(f"Last.fm API error for artist '{artist_name}': {e}")
+                    data = lastfm_request("artist.getInfo", artist=artist_name)
+                    if "artist" in data and data["artist"].get("mbid"):
+                        artist_mbid_map[artist_name] = data["artist"]["mbid"]
+                except (LastFMError, Exception) as exc:
+                    log.warning(f"Error fetching MBID for '{artist_name}': {exc}")
                     continue
-                except Exception as e:
-                    logging.warning(f"Error fetching MBID for artist '{artist_name}': {e}")
-                    continue
-
-                # Small delay to avoid rate limiting
                 time.sleep(0.2)
-            # After processing a batch, update the database
-            if artist_mbid_map:
-                if progress_callback:
-                    progress_callback("Updating", 50 + (i / len(artists)) * 45, 
-                                      f"Updating database with {len(artist_mbid_map)} MBIDs")
-                with engine.connect() as conn:
-                    conn.execute(text("BEGIN"))
-                    try:
-                        for artist_name, mbid in artist_mbid_map.items():
-                            update_query = text("""
-                                UPDATE scrobble 
-                                SET artist_mbid = :mbid 
-                                WHERE artist_name = :artist_name
-                                AND (artist_mbid IS NULL OR artist_mbid = '')
-                            """)
-                            conn.execute(update_query, {"mbid": mbid, "artist_name": artist_name})
-                            total_enriched += 1
-                        conn.execute(text("COMMIT"))
-                    except Exception as e:
-                        conn.execute(text("ROLLBACK"))
-                        logging.error(f"Database error during MBID update: {e}")
-                        raise
-        # Final status update
+        # Applying MBIDs to the DataFrame and writing back
+        if artist_mbid_map:
+            if progress_callback:
+                progress_callback("Updating", 70, f"Updating {len(artist_mbid_map)} artist MBIDs")
+            for name, mbid in artist_mbid_map.items():
+                mask = (df["artist_name"] == name) & (df["artist_mbid"].isna() | (df["artist_mbid"] == ""))
+                df.loc[mask, "artist_mbid"] = mbid
+            dump_parquet(df, SCROBBLE_PQ)
         if progress_callback:
-            progress_callback("Complete", 100, f"Enriched {total_enriched} artists with MBIDs")
+            progress_callback("Complete", 100, f"Enriched {len(artist_mbid_map)} artists with MBIDs")
         return {
             "status": "success",
-            "message": f"Successfully enriched {total_enriched} artists with MBIDs",
-            "enriched": total_enriched
+            "message": f"Enriched {len(artist_mbid_map)} artists with MBIDs",
+            "enriched": len(artist_mbid_map),
         }
-    except Exception as e:
+    except Exception as exc:
         if progress_callback:
-            progress_callback("Error", 100, f"Error: {str(e)}")
-        return {
-            "status": "error",
-            "message": f"Error enriching artist MBIDs: {str(e)}"
-        }
+            progress_callback("Error", 100, f"Error: {exc}")
+        return {"status": "error", "message": f"Error enriching artist MBIDs: {exc}"}
 
 
 # --------------------------------------------------------------
@@ -535,32 +440,28 @@ def generate_lastfm_signature(params, secret):
     return signature
 
 
-def iso2_for_en_name(session: Session, en_name: str) -> str | None:
+def iso2_for_en_name(en_name: str) -> str | None:
     """
-    Translate an English country name into ISO-3166 alpha-2 using the
-    `country_code` reference table.  The comparison is *case-insensitive* and
-    falls back to a very small Levenshtein threshold (≤ 1).
-    """
-    from DB.models import CountryCode  # local import to avoid circular deps
-    stmt = (
-        select(CountryCode.iso2)  # DB column is named `ISO2`
-        .where(CountryCode.en_name.ilike(en_name))
-    )
-    iso = session.scalars(stmt).first()
-    if iso:
-        return iso
+    Translates an English country name into ISO-3166 alpha-2 using c.parquet.
 
-    # optional fuzzy fallback – avoid extra deps, so we do simple len-1 edit
+    The comparison is case-insensitive and falls back to a single-edit-distance
+    fuzzy match.
+    """
+    df = read_parquet(C_PQ)
+    if df is None or df.empty:
+        return None
+    # Exact (case-insensitive) match
+    match = df.loc[df["en_name"].str.lower() == en_name.lower(), "ISO2"]
+    if not match.empty:
+        return str(match.iloc[0])
+    # Fuzzy fallback (edit distance ≤ 1)
     def _very_close(a: str, b: str) -> bool:
         if abs(len(a) - len(b)) > 1:
             return False
-        # naive "distance" count
         return sum(c1 != c2 for c1, c2 in zip(a.lower(), b.lower())) <= 1
-
-    rows = session.execute(select(CountryCode.en_name, CountryCode.iso2))
-    for db_en, db_iso in rows:
-        if _very_close(db_en, en_name):
-            return db_iso
+    for _, row in df.iterrows():
+        if _very_close(str(row["en_name"]), en_name):
+            return str(row["ISO2"])
     return None
 
 
@@ -621,7 +522,11 @@ def lastfm_request(
         q["sk"] = session_key
     else:
         if not LASTFM_API_KEY:
-            raise LastFMError(-3, "No API KEY in env", LASTFM_API_URL)
+            raise LastFMError(
+                -3,
+                "LASTFM_API_KEY not found in environment — set it in .env or use --source listenbrainz",
+                LASTFM_API_URL,
+            )
         q["api_key"] = LASTFM_API_KEY
     # optional parameters ----------------------------------------------------------
     if user is not None:
@@ -680,7 +585,7 @@ def get_recent_tracks_with_progress(
     from_timestamp: Optional[int] = None,
     to_timestamp: Optional[int] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None
-        ) -> typing.List[Dict[str, Any]]:
+        ) -> List[Dict[str, Any]]:
     """
     Enhanced version of get_recent_tracks that provides detailed progress updates.
     Parameters
@@ -769,105 +674,21 @@ class LastFMError(RuntimeError):
         self.url = url
 
 
-def fetch_lastfm_with_progress(username: str, start_progress: int = 30, progress_range: int = 30) -> typing.List[Dict[
-        str, Any]]:
+def sync_user_country(lastfm_username: str, *, ask: bool = True) -> bool:
     """
-    Fetch Last.fm data with detailed progress updates.
-
-    Parameters
-    ----------
-    username : str
-        Last.fm username
-    start_progress : int, optional
-        The starting point for progress percentage, by default 30
-    progress_range : int, optional
-        How much of the total progress this operation represents, by default 30
-
-    Returns
-    -------
-    List[Dict[str, Any]]
-        List of scrobble data from Last.fm
-    """
-    # Import ProgressManager here to avoid circular imports
-    from helpers.progress import ProgressManager
-
-    # Global progress manager instance
-    progress_manager = ProgressManager()
-
-    # Defining a progress callback that updates our progress manager
-    def progress_update(current: int, total: int, message: str) -> None:
-        progress_manager.update_subtask(current, total, message)
-
-    # Starting the task
-    progress_manager.update_progress(start_progress, f"Fetching Last.fm data for {username}...")
-
-    # Fetching the data with progress updates
-    try:
-        scrobbles = get_recent_tracks_with_progress(
-            username=username,
-            limit=200,  # Maximum allowed by Last.fm API
-            progress_callback=progress_update
-        )
-
-        # Task complete
-        progress_manager.update_progress(
-            start_progress + progress_range,
-            f"Fetched {len(scrobbles)} scrobbles from Last.fm"
-        )
-
-        return scrobbles
-
-    except Exception as e:
-        progress_manager.update_progress(
-            start_progress,
-            f"Error fetching Last.fm data: {str(e)}"
-        )
-        raise
-
-
-def sync_user_country(
-        session: Session,
-        lastfm_username: str,
-        ask: bool = True,
-) -> bool:
-    """
-    High-level helper: fetch the country for `lastfm_username` via Last.fm,
-    translate it to ISO-2 with `iso2_for_en_name`, and update `user_country`
-    so that the current row ends yesterday (end_date = today) and a fresh one
-    starts today.
-    Returns True when the DB was changed, False when no action was necessary.
-    Raises RuntimeError for any unexpected problem.
+    Fetches the country for *lastfm_username* via Last.fm, translates it
+    to ISO-2, and updates uc.parquet with a timeline row.
+    Returns True when the file was changed.
     """
     payload = lastfm_request("user.getInfo", user=lastfm_username)
     raw_country = payload["user"].get("country") or ""
     if not raw_country:
         raise RuntimeError("Last.fm did not return a country for that user.")
-    code = iso2_for_en_name(session, raw_country)
+    code = iso2_for_en_name(raw_country)
     if code is None:
         raise RuntimeError(f"Country «{raw_country}» not found in reference table.")
     if ask:
-        from helpers.cli import yes_no  # existing helper for Y/N prompts
-        if not yes_no(f"Last.fm says your country is «{code}».  Save it?"):
+        answer = input(f"Last.fm says your country is «{code}».  Save it? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
             return False
-    # ------------------------------------------------------------- timeline fix
-    from DB.models import UserCountry  # local import to avoid circular deps
-    today = date.today()
-    current: UserCountry | None = (
-        session.scalars(
-            select(UserCountry)
-            .where(UserCountry.start_date <= today)
-            .where(or_(UserCountry.end_date.is_(None),
-                       UserCountry.end_date > today))
-            .order_by(UserCountry.start_date.desc())
-            .limit(1)
-        ).first()
-    )
-    if current and current.country_code == code:
-        return False  # nothing to do
-    if current:
-        current.end_date = today
-    session.add(UserCountry(country_code=code,
-                            start_date=today,
-                            end_date=None))
-    session.commit()
-    return True
+    return _update_user_country(code)

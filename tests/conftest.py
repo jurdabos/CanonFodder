@@ -1,122 +1,98 @@
-# tests/conftest.py
-# This is just boilerplate for now. Tests are coming in CanonFodder 1.3.
-import contextlib
-import sys
+"""
+Pytest configuration and shared Parquet-based fixtures for c9r.
+"""
 import pathlib
-from datetime import datetime, UTC
-
+import sys
 import pandas as pd
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import pytest
-import shutil
-import tempfile
 
 
-@pytest.fixture(scope="session")
-def tmp_sqlite_url():
-    tmp_dir = tempfile.mkdtemp()
-    db_path = pathlib.Path(tmp_dir) / "canonfodder_test.sqlite"
-    url = f"sqlite:///{db_path}"
-    yield url
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+@pytest.fixture()
+def tmp_pq_dir(monkeypatch, tmp_path):
+    """Creates a temporary PQ directory and patches all modules that import PQ path constants."""
+    pq = tmp_path / "PQ"
+    pq.mkdir()
+    import helpers.io as io_mod
+    import helpers.query as q_mod
+    # Mapping of constant name → temp path
+    paths = {
+        "PQ_DIR": pq,
+        "SCROBBLE_PQ": pq / "scrobble.parquet",
+        "ARTIST_INFO_PQ": pq / "artist_info.parquet",
+        "AVC_PQ": pq / "avc.parquet",
+        "C_PQ": pq / "c.parquet",
+        "UC_PQ": pq / "uc.parquet",
+    }
+    # Patching helpers.io (canonical source)
+    for name, path in paths.items():
+        monkeypatch.setattr(io_mod, name, path)
+    # Patching every module that copies these constants at import time
+    import_map = {
+        q_mod: ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ"],
+    }
+    # Lazily importing optional consumer modules
+    for mod_path, attrs in [
+        ("corefunc.data_cleaning", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
+        ("corefunc.enrich", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
+        ("corefunc.canon", ["AVC_PQ"]),
+        ("helpers.cli", ["PQ_DIR", "AVC_PQ", "UC_PQ"]),
+        ("HTTP.lfAPI", ["C_PQ", "UC_PQ", "SCROBBLE_PQ"]),
+        ("HTTP.mbAPI", ["ARTIST_INFO_PQ"]),
+    ]:
+        try:
+            mod = __import__(mod_path, fromlist=["_"])
+            import_map[mod] = attrs
+        except ImportError:
+            pass
+    for mod, attrs in import_map.items():
+        for attr in attrs:
+            if attr in paths and hasattr(mod, attr):
+                monkeypatch.setattr(mod, attr, paths[attr])
+    return pq
 
 
-@pytest.fixture
-def session(tmp_sqlite_url, monkeypatch):
-    monkeypatch.setenv("DB_URL", tmp_sqlite_url)
-    sys.modules.pop("DB", None)
-    from importlib import reload
-    import DB
-    reload(DB)  # so ML bind to new URL
-    engine = DB.get_engine()
-    DB.Base.metadata.create_all(engine)  # to bootstrap the tables
-    Session = DB.get_session
-    with Session() as sess:
-        yield sess
-"""
-Pytest configuration and shared fixtures.
-"""
-import pytest
-import sys
-import os
-import pandas as pd
-from unittest.mock import MagicMock
-
-# Add the parent directory to sys.path so we can import the main module
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-
-@pytest.fixture
+@pytest.fixture()
 def sample_scrobble_df():
-    """Provide a sample DataFrame with scrobbles for testing."""
+    """Provides a small scrobble DataFrame with UTC timestamps."""
     return pd.DataFrame({
-        'artist_name': ['Artist1', 'Artist2', 'Artist3'],
-        'artist_mbid': ['mbid1', 'mbid2', ''],
-        'track_title': ['Track1', 'Track2', 'Track3'],
-        'album_title': ['Album1', 'Album2', 'Album3'],
-        'play_time': [
-            pd.Timestamp('2023-01-01'),
-            pd.Timestamp('2023-01-02'),
-            pd.Timestamp('2023-01-03')
-        ]
+        "artist_name": ["Bohren & der Club of Gore", "Ry Cooder", "Bohren & der Club of Gore"],
+        "album_title": ["Sunset Mission", "Paris, Texas", "Sunset Mission"],
+        "track_title": ["Prowler", "Paris, Texas", "Midnight Walker"],
+        "artist_mbid": [
+            "a4074512-87e0-4820-b609-0c4a18142a70",
+            "4d6b954c-3022-4515-966e-30c3e7081bce",
+            "a4074512-87e0-4820-b609-0c4a18142a70",
+        ],
+        "play_time": pd.to_datetime([
+            "2024-01-15 20:00:00",
+            "2024-01-15 20:05:00",
+            "2024-01-15 20:10:00",
+        ], utc=True),
     })
 
 
-@pytest.fixture
-def mock_progress_callback():
-    """Provide a mock progress callback for testing."""
-    callback = MagicMock()
-    return callback
+@pytest.fixture()
+def sample_artist_info_df():
+    """Provides a small artist_info DataFrame."""
+    return pd.DataFrame({
+        "artist_name": ["Bohren & der Club of Gore", "Ry Cooder"],
+        "mbid": [
+            "a4074512-87e0-4820-b609-0c4a18142a70",
+            "4d6b954c-3022-4515-966e-30c3e7081bce",
+        ],
+        "country": ["DE", "US"],
+        "disambiguation_comment": ["", ""],
+        "aliases": ["", ""],
+    })
 
 
-@pytest.fixture
-def mock_session():
-    """Provide a mock database session for testing."""
-    mock = MagicMock()
-    # Configure the mock to return itself from context manager methods
-    mock.__enter__.return_value = mock
-    mock.__exit__.return_value = None
-    return mock
-
-
-@pytest.fixture
-def mock_engine():
-    """Provide a mock SQLAlchemy engine for testing."""
-    mock = MagicMock()
-    # Configure the mock to handle with statement
-    mock.connect.return_value.__enter__.return_value = mock.connect.return_value
-    return mock
-
-@pytest.fixture
-def toy_scrobbles(session):
-    from DB.models import Scrobble
-    now = datetime.now(UTC)
-    rows = [
-        Scrobble(artist_name="Bohren & der Club of Gore",
-                 album_title="", track_title="A", play_time=now),
-        Scrobble(artist_name="Bohren und der Club of Gore",
-                 album_title="", track_title="A", play_time=now),
-        Scrobble(artist_name="Ry Cooder & V. M. Bhatt",
-                 album_title="", track_title="B", play_time=now),
-    ]
-    session.add_all(rows)
-    session.commit()
-
-
-def make_groups():
-    return [["Bohren & der Club of Gore", "Bohren und der Club of Gore"]]
-
-
-def auto_answers(monkeypatch):
-    # always pick the first variant as canonical, no comment
-    monkeypatch.setattr(
-        "helpers.cli.questionary.select",
-        lambda *a, **k: type("Ans", (), {"ask": lambda self: k["choices"][0]})()
-    )
-    monkeypatch.setattr(
-        "helpers.cli.questionary.text",
-        lambda *a, **k: type("Ans", (), {"ask": lambda self: ""})()
-    )
+@pytest.fixture()
+def populated_pq(tmp_pq_dir, sample_scrobble_df, sample_artist_info_df):
+    """Writes sample data into the temp PQ directory and returns the path."""
+    sample_scrobble_df.to_parquet(tmp_pq_dir / "scrobble.parquet", index=False)
+    sample_artist_info_df.to_parquet(tmp_pq_dir / "artist_info.parquet", index=False)
+    return tmp_pq_dir
 

@@ -1,236 +1,201 @@
 """
-Provides small I/O helpers: pick the latest csv or parquet dump, write new
-parquet snapshots, register seaborn palettes, and save dataframes to Word.
+Provides Parquet-native I/O for c9r.
+
+All persistence goes through this module.  Parquet files live under PQ_DIR
+(default ``PQ/`` relative to project root) and use zstd compression.
+Application-layer deduplication is performed before every append.
 """
+from __future__ import annotations
+import logging
+import os
 from collections import Counter
 from datetime import datetime, UTC
-from DB import engine
-from DB.ops import load_scrobble_table_from_db_to_df
-from docx import Document
-import pandas as pd
 from pathlib import Path
+from typing import Sequence
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import re
-if '__file__' in globals():
-    HERE = Path(__file__).resolve().parent
-    PROJECT_ROOT = HERE.parent
+
+logger = logging.getLogger(__name__)
+
+# ── Path constants ────────────────────────────────────────────────────────────
+if "__file__" in globals():
+    _HERE = Path(__file__).resolve().parent
+    PROJECT_ROOT = _HERE.parent
 else:
     PROJECT_ROOT = Path.cwd()
-PQ_DIR = PROJECT_ROOT / "PQ"
+PQ_DIR = Path(os.getenv("PQ_DIR", str(PROJECT_ROOT / "PQ")))
 PQ_DIR.mkdir(exist_ok=True)
+SCROBBLE_PQ = PQ_DIR / "scrobble.parquet"
+ARTIST_INFO_PQ = PQ_DIR / "artist_info.parquet"
+AVC_PQ = PQ_DIR / "avc.parquet"
+C_PQ = PQ_DIR / "c.parquet"
+UC_PQ = PQ_DIR / "uc.parquet"
+
+# ── PyArrow schemas ───────────────────────────────────────────────────────────
+SCROBBLE_SCHEMA = pa.schema([
+    ("artist_name", pa.string()),
+    ("album_title", pa.string()),
+    ("track_title", pa.string()),
+    ("artist_mbid", pa.string()),
+    ("play_time", pa.timestamp("us", tz="UTC")),
+])
+ARTIST_INFO_SCHEMA = pa.schema([
+    ("artist_name", pa.string()),
+    ("mbid", pa.string()),
+    ("country", pa.string()),
+    ("disambiguation_comment", pa.string()),
+    ("aliases", pa.string()),
+])
+AVC_SCHEMA = pa.schema([
+    ("artist_variants_hash", pa.string()),
+    ("artist_variants_text", pa.string()),
+    ("canonical_name", pa.string()),
+    ("to_link", pa.bool_()),
+    ("comment", pa.string()),
+    ("stamp", pa.timestamp("us", tz="UTC")),
+])
+
+# ── Column aliases (Last.fm API → c9r canonical names) ────────────────────────
+_COLUMN_ALIASES = {
+    "Artist": "artist_name",
+    "Album": "album_title",
+    "Song": "track_title",
+    "artist mbid": "artist_mbid",
+    "mbid": "artist_mbid",
+}
+SCROBBLE_COLS = ["artist_name", "album_title", "track_title", "artist_mbid", "play_time"]
+
+# Operator tokens for sanitising column names
 OP_TOKENS = {
     r"\s\-\s": "_minus_",
     r"\s\+\s": "_plus_",
     r"\s\*\s": "_mul_",
-    r"\s\/\s": "_div_"
+    r"\s\/\s": "_div_",
 }
 
-
-def _parquet_name(stamp: datetime | None = None, *, constant: bool = False) -> Path:
-    """
-    Builds a parquet path inside PQ_DIR
-    Args:
-        stamp: Optional timestamp to use in the filename
-        constant: If True, returns a constant filename (scrobble.parquet) instead of timestamped
-    Returns:
-        Path to the parquet file
-    """
-    if constant:
-        return PQ_DIR / "scrobble.parquet"
-    now = datetime.now(UTC)
-    stamp = stamp or now
-    return PQ_DIR / f"scrobbles_{stamp:%Y%m%d_%H%M%S}.parquet"
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
-def append_or_create_parquet(df: pd.DataFrame, path: Path) -> None:
-    """
-    Appends data to an existing parquet file or creates a new one if it doesn't exist
-    Args:
-        df: DataFrame containing the data to append
-        path: Path to the parquet file
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    # Column name mappings between Last.fm API and CanonFodder DB
-    column_mappings = {
-        # Last.fm API → CanonFodder DB
-        "Artist": "artist_name",
-        "Song": "track_title",
-        "Album": "album_title",
-        "artist mbid": "artist_mbid",
-        # Ensuring we also handle the canonical names
-        "artist_name": "artist_name", 
-        "track_title": "track_title",
-        "album_title": "album_title",
-        "artist_mbid": "artist_mbid"
-    }
-    # Define the expected column order (matching what's used in profile.py)
-    expected_column_order = ["artist_name", "album_title", "play_time", "track_title", "artist_mbid"]
+# ── Core I/O helpers ──────────────────────────────────────────────────────────
+def read_parquet(path: Path) -> pd.DataFrame | None:
+    """Reads a Parquet file or returns None when missing."""
+    if not path.exists():
+        return None
+    return pd.read_parquet(path)
 
-    # Creating a normalized copy of the dataframe
-    normalized_df = df.copy()
-    # Normalizing column names in the new dataframe
-    for original, normalized in column_mappings.items():
-        if original in normalized_df.columns and normalized not in normalized_df.columns:
-            normalized_df[normalized] = normalized_df[original]
-    # Handling timestamp/play_time conversion
-    if "play_time" not in normalized_df.columns and "uts" in normalized_df.columns:
-        normalized_df["play_time"] = pd.to_datetime(normalized_df["uts"], unit="s", utc=True)
+
+def dump_parquet(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    compression: str = "zstd",
+) -> Path:
+    """Overwrites *path* with *df* as a Parquet file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path, index=False, compression=compression)
+    logger.info("Wrote %d rows → %s", len(df), path)
+    return path
+
+
+def append_to_parquet(
+    df: pd.DataFrame,
+    path: Path,
+    *,
+    dedup_cols: Sequence[str] | None = None,
+    compression: str = "zstd",
+) -> Path:
+    """
+    Appends *df* to an existing Parquet file with deduplication.
+
+    If *path* does not exist yet, creates it.  When *dedup_cols* is given,
+    duplicates (keeping last) are dropped after concatenation.
+    """
+    if df.empty:
+        logger.info("Empty DataFrame — nothing to append to %s", path)
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
-        # Reading existing data
-        existing_df = pd.read_parquet(path)
-        # Normalizing column names in the existing dataframe
-        normalized_existing = existing_df.copy()
-        for original, normalized in column_mappings.items():
-            if original in normalized_existing.columns and normalized not in normalized_existing.columns:
-                normalized_existing[normalized] = normalized_existing[original]
-        # Standard deduplication columns in order of priority
-        dedup_candidates = [
-            # These three together form a unique key in the database
-            ["artist_name", "track_title", "play_time"],
-            # Fall back to just artist and track if no play_time
-            ["artist_name", "track_title"],
-            # Last resort - just artist name
-            ["artist_name"]
-        ]
-        # Finding the first set of deduplication columns that exists in both dataframes
-        dedup_cols = None
-        for candidate_cols in dedup_candidates:
-            if all(col in normalized_df.columns for col in candidate_cols) and \
-               all(col in normalized_existing.columns for col in candidate_cols):
-                dedup_cols = candidate_cols
-                break
+        existing = pd.read_parquet(path)
+        combined = pd.concat([existing, df], ignore_index=True)
         if dedup_cols:
-            logger.info(f"Deduplicating with columns: {dedup_cols}")
-            # Combining and deduplicate using normalized columns
-            combined_normalized = pd.concat([normalized_existing, normalized_df])
-            # Keep the latest version of each record
-            combined_normalized = combined_normalized.drop_duplicates(subset=dedup_cols, keep="last")
-            # Only keep the expected columns and any additional columns that are in both dataframes
-            # This prevents preserving unwanted columns like 'Album', 'Artist', 'Song', 'uts'
-            expected_columns = ["artist_name", "album_title", "play_time", "track_title", "artist_mbid"]
-            available_expected = [col for col in expected_columns if col in combined_normalized.columns]
-
-            # Only include additional columns that are in both dataframes to avoid preserving unwanted columns
-            additional_columns = [
-                col for col in combined_normalized.columns 
-                if col not in expected_columns and col not in ["Album", "Artist", "Song", "uts"]
-            ]
-
-            combined_df = combined_normalized[available_expected + additional_columns]
-        else:
-            logger.warning("No common deduplication columns found, concatenating without deduplication")
-            combined_df = pd.concat([existing_df, normalized_df])
-        # Ensure columns are in the expected order before saving
-        available_expected_columns = [col for col in expected_column_order if col in combined_df.columns]
-        other_columns = [col for col in combined_df.columns if col not in expected_column_order]
-        final_column_order = available_expected_columns + other_columns
-        combined_df = combined_df[final_column_order]
-        combined_df.to_parquet(path, index=False)
-        print(f"[io] parquet updated with {len(df)} rows → {path} (total: {len(combined_df)} rows)")
+            combined = combined.drop_duplicates(subset=list(dedup_cols), keep="last")
+        combined.to_parquet(path, index=False, compression=compression)
+        logger.info(
+            "Appended %d rows → %s (total: %d rows)",
+            len(df), path, len(combined),
+        )
     else:
-        # Ensure columns are in the expected order before saving
-        available_expected_columns = [col for col in expected_column_order if col in normalized_df.columns]
-        other_columns = [col for col in normalized_df.columns if col not in expected_column_order]
-        final_column_order = available_expected_columns + other_columns
-        normalized_df = normalized_df[final_column_order]
-
-        # Just write the new data, but ensure it has normalized column names for future consistency
-        normalized_df.to_parquet(path, index=False)
-        print(f"[io] new parquet created with {len(df)} rows → {path}")
+        if dedup_cols:
+            df = df.drop_duplicates(subset=list(dedup_cols), keep="last")
+        df.to_parquet(path, index=False, compression=compression)
+        logger.info("Created %s with %d rows", path, len(df))
+    return path
 
 
-def dump_latest_table_to_parquet() -> None:
+# ── Scrobble-specific helpers ─────────────────────────────────────────────────
+def normalise_scrobble_df(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Materialises the newest DB scrobble table as a parquet file.
-    Uses the constant filename (scrobble.parquet) instead of a timestamped one.
-    """
-    df_db, latest_tbl = load_scrobble_table_from_db_to_df(engine)
-    if df_db is None:
-        print("No scrobble table in DB – nothing to dump.")
-        return
-    pq_file = PQ_DIR / "scrobble.parquet"
-    df_db.to_parquet(pq_file, index=False)
-    print(f"Latest scrobble table persisted → {pq_file}")
+    Normalises a raw scrobble DataFrame into the canonical schema.
 
-
-def dump_parquet(df: pd.DataFrame | None = None,
-                 *,
-                 stamp: datetime | None = None,
-                 constant: bool = True) -> Path:
+    Renames columns, converts UTS → UTC datetime, cleans MBIDs,
+    deduplicates, and selects only the standard columns.
     """
-    Writes scrobble table df to a .parquet file
-    Args:
-        df: optional dataframe to dump
-        stamp: overrides the timestamp in the file name (used only if constant=False)
-        constant: if True, uses a constant filename rather than a timestamped one
-    Returns:
-        path to the written parquet file
-    """
-    if df is None:
-        from DB.ops import load_scrobble_table_from_db_to_df
-        df, _tbl = load_scrobble_table_from_db_to_df(engine)
-        if df is None:
-            raise RuntimeError("No scrobble table available to dump.")
-    # Define the expected column order (matching what's used in profile.py)
-    expected_column_order = ["artist_name", "album_title", "play_time", "track_title", "artist_mbid"]
-    # Ensure columns are in the expected order before saving
-    available_expected_columns = [col for col in expected_column_order if col in df.columns]
-    other_columns = [col for col in df.columns if col not in expected_column_order]
-    final_column_order = available_expected_columns + other_columns
-    df_ordered = df[final_column_order]
-    out = _parquet_name(stamp, constant=constant)
-    if constant:
-        append_or_create_parquet(df_ordered, out)
+    df = df.rename(columns=_COLUMN_ALIASES, errors="ignore")
+    # Handling timestamp conversion
+    if "uts" in df.columns:
+        df["play_time"] = pd.to_datetime(df["uts"].astype(int), unit="s", utc=True)
+    elif "Timestamp" in df.columns:
+        df["play_time"] = pd.to_datetime(df["Timestamp"], utc=True).dt.tz_convert("UTC")
+    # Cleaning artist_mbid
+    if "artist_mbid" not in df.columns:
+        df["artist_mbid"] = None
     else:
-        # Legacy behavior - create a new timestamped file, but still ensure column order
-        df_ordered.to_parquet(out, index=False)
-        print(f"[io] parquet written → {out}")
-    return out
+        df["artist_mbid"] = (
+            df["artist_mbid"]
+            .astype(str)
+            .str.strip()
+            .where(lambda s: s.str.match(_UUID_RE))
+        )
+    # Ensuring all expected columns exist
+    for col in SCROBBLE_COLS:
+        if col not in df.columns:
+            df[col] = None
+    # Deduplicating and selecting final columns
+    df = df.drop_duplicates(subset=["artist_name", "track_title", "play_time"])
+    return df[SCROBBLE_COLS].copy()
 
 
-def latest_parquet(*, return_df: bool = False, use_constant: bool = True):
+def ingest_scrobbles(df: pd.DataFrame) -> int:
     """
-    Returns the scrobble parquet file (either constant or newest timestamped one)
-    or tuple (df + path) when `return_df`
-    Args:
-        return_df: If True, returns a tuple (dataframe, path), otherwise just the path
-        use_constant: If True, looks for scrobble.parquet, otherwise finds the newest timestamped file
-    Returns:
-        Path to the parquet file or tuple (DataFrame, Path) if return_df=True
+    Normalises *df* and appends to scrobble.parquet with deduplication.
+
+    Returns the number of rows in the incoming DataFrame.
     """
-    if use_constant:
-        constant_file = PQ_DIR / "scrobble.parquet"
-        if constant_file.exists():
-            if return_df:
-                df = pd.read_parquet(constant_file)
-                return df, constant_file
-            return constant_file
-    # If last.fm API fetch lacks in quality, we fall back to LB JSON fetch
-    files = sorted(PQ_DIR.glob("jurda_scrobble.parquet"), reverse=True)
-    if not files:
-        return (None, None) if return_df else None
-    newest = files[0]
-    if return_df:
-        df = pd.read_parquet(newest)
-        return df, newest
-    return newest
-
-
-def load_country_timeline(path: Path) -> pd.DataFrame:
-    tl = (
-        pd.read_parquet(path)
-        .rename(columns={"country_code": "UserCountry"})
+    normalised = normalise_scrobble_df(df)
+    append_to_parquet(
+        normalised,
+        SCROBBLE_PQ,
+        dedup_cols=["artist_name", "track_title", "play_time"],
     )
-    tl["start_date"] = pd.to_datetime(tl["start_date"]).dt.normalize()
-    tl["end_date"] = pd.to_datetime(tl["end_date"]).dt.normalize()
-    tl.sort_values("start_date", inplace=True)
-    return tl
+    return len(normalised)
 
 
-def register_custom_palette(palette_name, palettes):
-    """
-    Register a custom palette in Seaborn from the palette dictionary.
-    """
+def latest_scrobble_ts() -> int | None:
+    """Returns the Unix timestamp of the newest scrobble, or None if empty."""
+    existing = read_parquet(SCROBBLE_PQ)
+    if existing is None or existing.empty:
+        return None
+    return int(existing["play_time"].max().timestamp())
+
+
+# ── Palette registration (kept for BI frontend) ──────────────────────────────
+def register_custom_palette(palette_name: str, palettes: list[dict]) -> list[str]:
+    """Registers a custom Seaborn palette from a palettes.json structure."""
     import seaborn as sns
     palette = next((p for p in palettes if p["paletteName"] == palette_name), None)
     if not palette:
@@ -243,35 +208,19 @@ def register_custom_palette(palette_name, palettes):
     return colors
 
 
+# ── Column-name sanitiser (for ML feature columns) ───────────────────────────
 def sanitize(col: str, seen: Counter) -> str:
     """
-    Turn 'partial_ratio - QRatio'  →  'partial_ratio_minus_QRatio'
-    Guarantees each result is a valid Python identifier **and unique**.
+    Turns 'partial_ratio - QRatio' → 'partial_ratio_minus_QRatio'.
+
+    Guarantees each result is a valid Python identifier and unique.
     """
     safe = col
     for pat, tok in OP_TOKENS.items():
-        safe = re.sub(pat, tok, safe)          # to encode operator
-    safe = re.sub(r"\W+", "_", safe).strip("_")  # to clean leftovers
-    # Guaranteeing uniqueness
+        safe = re.sub(pat, tok, safe)
+    safe = re.sub(r"\W+", "_", safe).strip("_")
     count = seen[safe]
     seen[safe] += 1
     if count:
-        safe = f"{safe}_{count}"               # to append _1, _2 …
+        safe = f"{safe}_{count}"
     return safe
-
-
-def save_as_word_table(dataframe, file_name):
-    """
-    Writes `dataframe` into a Word table saved as `file_name`.
-    """
-    doksi = Document()
-    doksi.add_heading("Categorical Feature Summary", level=1)
-    table = doksi.add_table(rows=1, cols=len(dataframe.columns))
-    table.style = "Table Grid"
-    for idx, column in enumerate(dataframe.columns):
-        table.cell(0, idx).text = column
-    for _, row in dataframe.iterrows():
-        cells = table.add_row().cells
-        for idx, value in enumerate(row):
-            cells[idx].text = str(value)
-    doksi.save(file_name)

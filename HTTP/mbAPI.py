@@ -31,53 +31,34 @@ MB_PASSWORD=my_mb_password
 ```
 """
 from __future__ import annotations
-
-from dotenv import load_dotenv
-
-load_dotenv()
 import logging
 import os
+import re
 import time
 from functools import wraps
 from typing import Any, Callable, Dict, Optional
 import musicbrainzngs as mb
-
-try:
-    from DB import engine as _default_engine, SessionLocal  # type: ignore
-    from DB.models import ArtistInfo  # Import ArtistInfo model
-except ModuleNotFoundError:  # running outside full project – OK for CLI test
-    _default_engine = None
-    SessionLocal = None
-    ArtistInfo = None
+import pandas as pd
+from dotenv import load_dotenv
+load_dotenv()
 from HTTP.client import USER_AGENT as DEFAULT_UA
-import re
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import declarative_base, Session
+from helpers.io import ARTIST_INFO_PQ, read_parquet, append_to_parquet
 from tenacity import retry, stop_after_attempt, wait_exponential
-
 _RETRY = retry(
     reraise=True,
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=1, max=10),
 )
 _UA_RE = re.compile(r"(?P<app>[^/]+)/(?P<ver>[^ ]+) \((?P<contact>[^)]+)\)")
-Base = declarative_base()
 
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
 LOGGER = logging.getLogger("mbAPI")
-# Configure basic logging if not already configured
 if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# Increase rate limit to avoid MusicBrainz throttling
-# MusicBrainz allows 1 request per second for non-authenticated users
-# Use an even more conservative limit to be safe (more wait time)
-DEFAULT_RATE_LIMIT = 2.0  # 2 seconds between requests to stay well within limits
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+DEFAULT_RATE_LIMIT = 2.0
 _last_call: float = 0.0
-_session_maker: Optional[Callable[[], Session]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -161,142 +142,55 @@ def _split_user_agent(ua: str = DEFAULT_UA) -> tuple[str, str, str]:
 # ---------------------------------------------------------------------------
 # Initialisation
 # ---------------------------------------------------------------------------
-def init(*, engine=None, session_maker=None, user_agent: str | None = None) -> None:
+def init(*, user_agent: str | None = None) -> None:
     """
-    Configure **musicbrainzngs** *once* and prepare connection to database.
+    Configures **musicbrainzngs** once (idempotent).
 
     Parameters
     ----------
-    engine : sqlalchemy.engine.Engine, optional
-        SQLAlchemy engine, by default None
-    session_maker : callable, optional
-        Session factory function, by default None
     user_agent : str, optional
         User agent string, by default None
     """
     if getattr(init, "_done", False):
-        return  # idempotent
-    # ── MusicBrainz client config ─────────────────────────────────────────
+        return
     app, ver, contact = _split_user_agent(user_agent or DEFAULT_UA)
     mb.set_useragent(app, ver, contact)
     mb_username = os.getenv("MB_USERNAME")
     mb_password = os.getenv("MB_PASSWORD")
     if mb_username and mb_password:
         mb.auth(mb_username, mb_password)
-    # ── DB config  ────────────────────────────────────────────────────────
-    global _session_maker
-    if session_maker is not None:
-        _session_maker = session_maker
-    elif SessionLocal is not None:
-        _session_maker = SessionLocal
-    else:
-        eng = engine or _default_engine or create_engine("sqlite:///canonfodder.db", echo=False)
-        from sqlalchemy.orm import sessionmaker  # local import
-        _session_maker = sessionmaker(bind=eng, expire_on_commit=False)
-    # ArtistInfo table is managed by alembic migrations, no need to create here
     init._done = True  # type: ignore[attr-defined]
-
-    # Display database connection information
-    if engine:
-        print(f"[mbAPI] Using database: {engine.url}")
 
 
 def _cache_artist(data: Dict[str, Any]) -> None:
     """
-    Cache artist data in the database.
+    Caches artist data into artist_info.parquet.
 
     Parameters
     ----------
     data : Dict[str, Any]
         Artist data from MusicBrainz API
     """
-    if _session_maker is None or ArtistInfo is None:
-        return
-
-    mbid = data.get("id")
     artist_name = data.get("name")
     if not artist_name:
         return
-
-    with _get_session() as sess:
-        # Check if artist already exists
-        existing = None
-        if mbid:
-            existing = sess.execute(
-                select(ArtistInfo).where(ArtistInfo.mbid == mbid)
-            ).scalar_one_or_none()
-
-        if not existing and artist_name:
-            # Using first() to handle multiple artists with same name
-            result = sess.execute(
-                select(ArtistInfo)
-                .where(ArtistInfo.artist_name == artist_name)
-                .order_by(ArtistInfo.id.desc())
-            ).first()
-            existing = result[0] if result else None
-
-        # Process aliases - ensure we're handling both direct list and nested 'alias-list'
-        aliases = []
-        if "aliases" in data and isinstance(data["aliases"], list):
-            aliases = data["aliases"]
-        elif "alias-list" in data and isinstance(data["alias-list"], list):
-            # Handle the MB API format where aliases are in an alias-list with name in 'alias' field
-            aliases = [a.get("alias") if isinstance(a, dict) else a for a in data["alias-list"]]
-
-        # Filter out any null/empty aliases and ensure they're all strings
-        aliases = [str(a) for a in aliases if a]
-        aliases_str = ",".join(aliases) if aliases else ""
-
-        LOGGER.debug(f"Caching {len(aliases)} aliases for {artist_name}: {aliases_str[:100]}")
-
-        # If exists, update it
-        if existing:
-            existing.artist_name = artist_name
-            # Only update MBID if it's not already set or if there's no conflict
-            if mbid and existing.mbid != mbid:
-                # Check if another record already has this MBID
-                conflicting = sess.execute(
-                    select(ArtistInfo).where(ArtistInfo.mbid == mbid)
-                ).first()
-                if conflicting and conflicting[0].id != existing.id:
-                    LOGGER.debug(
-                        f"Cannot update MBID for '{artist_name}' to {mbid} - already assigned to '{conflicting[0].artist_name}'"
-                    )
-                else:
-                    existing.mbid = mbid
-            existing.country = data.get("country")
-            existing.disambiguation_comment = data.get("disambiguation")
-            # Always update aliases, even if empty - this ensures we're not keeping stale data
-            existing.aliases = aliases_str
-            LOGGER.debug(f"Updated artist record for {artist_name} with {len(aliases)} aliases")
-        else:
-            # Otherwise create new entry
-            new_artist = ArtistInfo(
-                artist_name=artist_name,
-                mbid=mbid,
-                country=data.get("country"),
-                disambiguation_comment=data.get("disambiguation"),
-                aliases=aliases_str
-            )
-            sess.add(new_artist)
-            LOGGER.debug(f"Created new artist record for {artist_name} with {len(aliases)} aliases")
-
-        sess.commit()
-
-
-def _get_session() -> Session:
-    """
-    Get a database session, initializing the connection if necessary.
-
-    Returns
-    -------
-    Session
-        SQLAlchemy session
-    """
-    init()  # idempotent; guarantees factory
-    if _session_maker is None:  # should never happen, but mypy/pylint
-        raise RuntimeError("DB not initialised")
-    return _session_maker()
+    # Processing aliases
+    aliases: list[str] = []
+    if "aliases" in data and isinstance(data["aliases"], list):
+        aliases = data["aliases"]
+    elif "alias-list" in data and isinstance(data["alias-list"], list):
+        aliases = [a.get("alias") if isinstance(a, dict) else a for a in data["alias-list"]]
+    aliases = [str(a) for a in aliases if a]
+    aliases_str = ",".join(aliases)
+    row = pd.DataFrame([{
+        "artist_name": artist_name,
+        "mbid": data.get("id") or "",
+        "country": data.get("country") or "",
+        "disambiguation_comment": data.get("disambiguation") or "",
+        "aliases": aliases_str,
+    }])
+    append_to_parquet(row, ARTIST_INFO_PQ, dedup_cols=["artist_name"])
+    LOGGER.debug(f"Cached {artist_name} with {len(aliases)} aliases")
 
 
 def add_alias(mbid: str, alias: str, *, sort_name: str | None = None) -> None:
@@ -540,134 +434,72 @@ def get_aliases(mbid: str) -> list[str]:
 @_rate_limited
 def get_complete_artist_info(artist_identifier: str = None, **kwargs) -> dict[str, Any]:
     """
-    Return a fully-fledged artist record.
+    Returns a fully-fledged artist record.
 
     Parameters
     ----------
     artist_identifier : str, optional
         Either a MusicBrainz UUID (mbid) **or** a human-readable artist name.
     **kwargs : dict
-        Alternative ways to specify the artist:
-        - artist_mbid: MusicBrainz UUID
-        - artist_name: Human-readable artist name
-        - mbid: MusicBrainz UUID (alias for artist_mbid)
+        Alternative keys: artist_mbid, artist_name, mbid.
 
     Returns
     -------
     dict
-        {
-            "id": <mbid>,
-            "name": <str>,
-            "country": <str | None>,
-            "aliases": [<str>, …],
-            "disambiguation": <str | None>,
-        }
+        {"id", "name", "country", "aliases", "disambiguation"}
     """
     try:
-        # Handle different ways of passing identifiers
         if artist_identifier is None:
-            artist_identifier = kwargs.get('artist_mbid') or kwargs.get('mbid') or kwargs.get('artist_name')
-
+            artist_identifier = kwargs.get("artist_mbid") or kwargs.get("mbid") or kwargs.get("artist_name")
         if not artist_identifier:
             raise ValueError("No artist identifier provided")
-
         LOGGER.info(f"Getting complete artist info for: {artist_identifier}")
-        init()  # ensure client and DB are ready
-
-        # ── 1) decide whether this is an MBID or a plain name ────────────────
+        init()
         is_mbid = bool(re.fullmatch(r"[0-9a-fA-F-]{36}", artist_identifier))
-        LOGGER.debug(f"Identifier type: {'MBID' if is_mbid else 'Name'}")
-
-        # ── 2) hit local cache as fast as possible ────────────────────────────
-        if _session_maker is not None and ArtistInfo is not None:
-            with _get_session() as sess:
-                if is_mbid:
-                    cached = sess.execute(
-                        select(ArtistInfo).where(ArtistInfo.mbid == artist_identifier)
-                    ).scalar_one_or_none()
-                else:
-                    # Using first() instead of scalar_one_or_none() to handle multiple artists with same name
-                    result = sess.execute(
-                        select(ArtistInfo)
-                        .where(ArtistInfo.artist_name.ilike(artist_identifier))
-                        .order_by(ArtistInfo.id.desc())
-                    ).first()
-                    cached = result[0] if result else None
-
-                if cached and cached.country and cached.aliases:  # ensure both country and aliases are present
-                    LOGGER.info(f"Cache hit for {artist_identifier}: {cached.artist_name} ({cached.country})")
-                    # Process aliases from database correctly
-                    aliases = str(cached.aliases).split(",") if cached.aliases else []
+        # ── Parquet cache lookup ──────────────────────────────────────────
+        cached_df = read_parquet(ARTIST_INFO_PQ)
+        if cached_df is not None and not cached_df.empty:
+            if is_mbid:
+                hit = cached_df.loc[cached_df["mbid"] == artist_identifier]
+            else:
+                hit = cached_df.loc[cached_df["artist_name"].str.lower() == artist_identifier.lower()]
+            if not hit.empty:
+                row = hit.iloc[-1]  # to take the latest in case of dupes
+                if row.get("country") and row.get("aliases"):
+                    LOGGER.info(f"Cache hit for {artist_identifier}")
                     return {
-                        "id": cached.mbid,
-                        "name": cached.artist_name,
-                        "country": cached.country,
-                        "aliases": aliases,
-                        "disambiguation": cached.disambiguation_comment,
+                        "id": row["mbid"] or None,
+                        "name": row["artist_name"],
+                        "country": row["country"] or None,
+                        "aliases": str(row["aliases"]).split(",") if row["aliases"] else [],
+                        "disambiguation": row["disambiguation_comment"] or None,
                     }
-                else:
-                    if cached:
-                        reason = []
-                        if not cached.country: reason.append("missing country")
-                        if not cached.aliases: reason.append("missing aliases")
-                        LOGGER.debug(f"Cache incomplete for {artist_identifier}: {', '.join(reason)}")
-                    else:
-                        LOGGER.debug(f"Cache miss for {artist_identifier}")
-                    LOGGER.debug("Querying MusicBrainz for complete data")
-
-        # ── 3) remote calls ──────────────────────────────────────────────────
+        # ── Remote calls ──────────────────────────────────────────────────
         try:
             if is_mbid:
-                LOGGER.info(f"Looking up artist by MBID: {artist_identifier}")
                 data = lookup_artist(artist_identifier, with_aliases=True)
             else:
-                LOGGER.info(f"Looking up MBID for artist name: {artist_identifier}")
-                mbid = lookup_mb_for(artist_identifier)
-                if mbid is None:  # no MB hit ‑ still persist minimal row
+                found_mbid = lookup_mb_for(artist_identifier)
+                if found_mbid is None:
                     LOGGER.warning(f"No MusicBrainz ID found for {artist_identifier}")
-                    # Create minimal data to cache
-                    minimal_data = {"name": artist_identifier}
-                    _cache_artist(minimal_data)
-                    return {
-                        "id": None,
-                        "name": artist_identifier,
-                        "country": None,
-                        "aliases": [],
-                        "disambiguation": None,
-                    }
-                LOGGER.info(f"Found MBID {mbid} for {artist_identifier}, fetching complete data")
-                data = lookup_artist(mbid, with_aliases=True)
-
-            LOGGER.info(
-                f"Successfully retrieved data for {artist_identifier}: {data.get('name')} ({data.get('country')})")
-            if data.get('aliases'):
-                LOGGER.debug(f"Found {len(data['aliases'])} aliases for {data.get('name')}")
-            # data has already been cached by lookup_artist()
+                    _cache_artist({"name": artist_identifier})
+                    return {"id": None, "name": artist_identifier, "country": None, "aliases": [], "disambiguation": None}
+                data = lookup_artist(found_mbid, with_aliases=True)
             return data
-
-        except Exception as e:
-            LOGGER.error(f"Error during MusicBrainz API call for {artist_identifier}: {e}")
-            # Still return minimal data to avoid breaking the application
-            minimal_data = {
+        except Exception as exc:
+            LOGGER.error(f"MusicBrainz API error for {artist_identifier}: {exc}")
+            _cache_artist({"name": artist_identifier if not is_mbid else "Unknown Artist"})
+            return {
                 "id": artist_identifier if is_mbid else None,
                 "name": artist_identifier if not is_mbid else "Unknown Artist",
-                "country": None,
-                "aliases": [],
-                "disambiguation": None,
+                "country": None, "aliases": [], "disambiguation": None,
             }
-            # Try to cache even minimal data
-            _cache_artist(minimal_data)
-            return minimal_data
-
-    except Exception as e:
-        LOGGER.error(f"Unexpected error in get_complete_artist_info: {e}")
-        # Return minimal data to avoid breaking application
+    except Exception as exc:
+        LOGGER.error(f"Unexpected error in get_complete_artist_info: {exc}")
         return {
             "id": None,
             "name": str(artist_identifier) if artist_identifier else "Unknown Artist",
-            "country": None,
-            "aliases": [],
-            "disambiguation": None,
+            "country": None, "aliases": [], "disambiguation": None,
         }
 
 
