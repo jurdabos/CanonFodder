@@ -38,7 +38,7 @@ def fetch_scrobbles(username: str, *, full: bool = False, source: str = "lastfm"
     # Running post-ingestion QA checks
     if n > 0:
         logger.info("Running post-ingestion QA checks …")
-        report = qa_lb_ingest(fetched_count=n, last_n_hours=24)
+        report = qa_lb_ingest(fetched_count=n, last_n_hours=24, source=source)
         if report.get("status") != "skipped":
             if report.get("passed"):
                 logger.info("QA passed (%d rows checked).", report["row_count"])

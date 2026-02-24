@@ -37,11 +37,56 @@ class TestPurgeCommand:
         assert result.exit_code == 0
         assert not any(PQ_DIR.glob("*.parquet"))
 
-    def test_purge_without_all(self, runner, populated_pq):
-        """Reports nothing to purge without --all."""
-        result = runner.invoke(cli, ["purge", "--yes"])
+    def test_purge_all_prompts_without_yes(self, runner, populated_pq):
+        """Prompts for confirmation when --all is given without --yes."""
+        result = runner.invoke(cli, ["purge", "--all"], input="y\n")
         assert result.exit_code == 0
-        assert "Nothing to purge" in result.output
+        assert "This will delete all Parquet data files" in result.output
+
+    def test_purge_all_aborts_on_no(self, runner, populated_pq):
+        """Aborts when user declines the --all confirmation."""
+        from helpers.io import PQ_DIR
+        before = len(list(PQ_DIR.glob("*.parquet")))
+        result = runner.invoke(cli, ["purge", "--all"], input="n\n")
+        assert result.exit_code != 0
+        assert len(list(PQ_DIR.glob("*.parquet"))) == before
+
+    def test_purge_no_files(self, runner, tmp_pq_dir):
+        """Reports no files found when PQ directory is empty."""
+        result = runner.invoke(cli, ["purge"])
+        assert result.exit_code == 0
+        assert "No Parquet files found" in result.output
+
+    def test_purge_interactive_select_all(self, runner, populated_pq):
+        """Deletes all files when user confirms each one interactively."""
+        from helpers.io import PQ_DIR
+        count = len(list(PQ_DIR.glob("*.parquet")))
+        result = runner.invoke(cli, ["purge"], input="y\n" * count)
+        assert result.exit_code == 0
+        assert f"Purged {count} of {count} file(s)" in result.output
+        assert not any(PQ_DIR.glob("*.parquet"))
+
+    def test_purge_interactive_skip_all(self, runner, populated_pq):
+        """Skips all files when user declines each one interactively."""
+        from helpers.io import PQ_DIR
+        count = len(list(PQ_DIR.glob("*.parquet")))
+        result = runner.invoke(cli, ["purge"], input="n\n" * count)
+        assert result.exit_code == 0
+        assert f"Purged 0 of {count} file(s)" in result.output
+        assert len(list(PQ_DIR.glob("*.parquet"))) == count
+
+    def test_purge_interactive_partial(self, runner, populated_pq):
+        """Deletes only the files the user confirms."""
+        from helpers.io import PQ_DIR
+        count = len(list(PQ_DIR.glob("*.parquet")))
+        assert count >= 2, "Need at least 2 files for partial test"
+        # Confirming first, skipping the rest
+        answers = "y\n" + "n\n" * (count - 1)
+        result = runner.invoke(cli, ["purge"], input=answers)
+        assert result.exit_code == 0
+        assert "Deleted" in result.output
+        assert "Skipped" in result.output
+        assert f"Purged 1 of {count} file(s)" in result.output
 
 
 class TestIngestCommand:
@@ -159,6 +204,169 @@ class TestSourceHelpers:
         from main import _resolve_user
         with pytest.raises(click.UsageError, match="--user is required"):
             _resolve_user("lastfm", None)
+
+
+class TestQaGroup:
+    """Tests the 'qa' command group."""
+
+    def test_qa_no_subcommand_shows_help(self, runner):
+        """Shows help text when invoked without a subcommand."""
+        result = runner.invoke(cli, ["qa"])
+        assert result.exit_code == 0
+        assert "scrobble" in result.output
+        assert "show" in result.output
+
+    @patch("corefunc.qa.qa_lb_ingest")
+    def test_qa_scrobble_pass(self, mock_qa, runner, tmp_pq_dir):
+        """Reports PASS when all scrobble checks succeed."""
+        mock_qa.return_value = {
+            "row_count": 100,
+            "passed": True,
+            "schema": {"pass": True, "missing": [], "unexpected": []},
+            "nulls": {"artist_name": {"null_pct": 0, "empty_pct": 0}},
+            "timestamps": {"pass": True, "issues": []},
+            "duplicates": {"duplicate_count": 0, "duplicate_pct": 0.0, "pass": True},
+            "mbids": {"fill_rate": 90, "valid_rate": 95},
+            "encoding": {"pass": True, "bad_char_rows": 0},
+            "reconciliation": {"fetched": None, "stored": 100, "pass": True},
+        }
+        result = runner.invoke(cli, ["qa", "scrobble"])
+        assert result.exit_code == 0
+        assert "PASS" in result.output
+
+    @patch("corefunc.qa.qa_artist_info")
+    def test_qa_a_i_pass(self, mock_qa, runner, tmp_pq_dir):
+        """Reports PASS when artist_info checks succeed."""
+        mock_qa.return_value = {
+            "row_count": 50,
+            "passed": True,
+            "schema": {"pass": True, "missing": [], "unexpected": []},
+            "nulls": {"artist_name": {"null_pct": 0, "empty_pct": 0}},
+            "duplicates": {"duplicate_count": 0, "duplicate_pct": 0.0, "pass": True},
+            "mbids": {"fill_rate": 95, "valid_rate": 100},
+            "encoding": {"pass": True, "bad_char_rows": 0},
+        }
+        result = runner.invoke(cli, ["qa", "a_i"])
+        assert result.exit_code == 0
+        assert "PASS" in result.output
+
+    @patch("corefunc.qa.qa_avc")
+    def test_qa_avc_pass(self, mock_qa, runner, tmp_pq_dir):
+        """Reports PASS when avc checks succeed."""
+        mock_qa.return_value = {
+            "row_count": 20,
+            "passed": True,
+            "schema": {"pass": True, "missing": [], "unexpected": []},
+            "nulls": {},
+            "duplicates": {"duplicate_count": 0, "duplicate_pct": 0.0, "pass": True},
+            "timestamps": {"pass": True, "issues": []},
+            "encoding": {"pass": True, "bad_char_rows": 0},
+        }
+        result = runner.invoke(cli, ["qa", "avc"])
+        assert result.exit_code == 0
+        assert "PASS" in result.output
+
+    @patch("corefunc.qa.qa_uc")
+    def test_qa_uc_summary(self, mock_qa, runner, tmp_pq_dir):
+        """Displays entry count and unique countries."""
+        mock_qa.return_value = {
+            "row_count": 3,
+            "unique_countries": 2,
+            "passed": True,
+        }
+        result = runner.invoke(cli, ["qa", "uc"])
+        assert result.exit_code == 0
+        assert "Entries: 3" in result.output
+        assert "Unique countries: 2" in result.output
+
+    def test_qa_show_empty(self, runner, tmp_pq_dir):
+        """Reports no reports when qa_report.parquet does not exist."""
+        result = runner.invoke(cli, ["qa", "show"])
+        assert result.exit_code == 0
+        assert "No QA reports found" in result.output
+
+    def test_qa_show_with_data(self, runner, tmp_pq_dir):
+        """Displays report rows with source/target in src= field."""
+        df = pd.DataFrame([{
+            "timestamp": "2026-02-24T12:00:00",
+            "source": "listenbrainz",
+            "target": "scrobble",
+            "row_count": 500,
+            "passed": True,
+            "schema_ok": True,
+            "artist_null_pct": 0.0,
+            "track_null_pct": 0.0,
+            "album_null_pct": 5.0,
+            "mbid_fill_rate": 80.0,
+            "mbid_valid_rate": 99.0,
+            "duplicate_count": 2,
+            "duplicate_pct": 0.4,
+            "ts_before_min": 0,
+            "ts_after_now": 0,
+            "bad_char_rows": 0,
+            "fetched": None,
+            "stored": 500,
+        }])
+        df.to_parquet(tmp_pq_dir / "qa_report.parquet", index=False)
+        result = runner.invoke(cli, ["qa", "show"])
+        assert result.exit_code == 0
+        assert "PASS" in result.output
+        assert "500" in result.output
+        assert "listenbrainz/scrobble" in result.output
+
+    def test_qa_show_target_only(self, runner, tmp_pq_dir):
+        """Shows only target when source is absent."""
+        df = pd.DataFrame([{
+            "timestamp": "2026-02-24T14:00:00",
+            "source": None,
+            "target": "artist_info",
+            "row_count": 100,
+            "passed": True,
+            "schema_ok": True,
+            "artist_null_pct": 0.0,
+            "track_null_pct": 0.0,
+            "album_null_pct": 0.0,
+            "mbid_fill_rate": 90.0,
+            "mbid_valid_rate": 100.0,
+            "duplicate_count": 0,
+            "duplicate_pct": 0.0,
+            "ts_before_min": 0,
+            "ts_after_now": 0,
+            "bad_char_rows": 0,
+            "fetched": None,
+            "stored": 100,
+        }])
+        df.to_parquet(tmp_pq_dir / "qa_report.parquet", index=False)
+        result = runner.invoke(cli, ["qa", "show"])
+        assert result.exit_code == 0
+        assert "src=artist_info" in result.output
+        # Ensuring no "n/a" or double slash appears
+        assert "n/a" not in result.output
+
+    def test_qa_show_fail_only(self, runner, tmp_pq_dir):
+        """Filters to failed reports when --fail-only is set."""
+        df = pd.DataFrame([
+            {"timestamp": "2026-02-24T12:00:00", "source": "lastfm",
+             "target": "scrobble", "row_count": 500, "passed": True,
+             "schema_ok": True, "artist_null_pct": 0.0, "track_null_pct": 0.0,
+             "album_null_pct": 0.0, "mbid_fill_rate": 80.0,
+             "mbid_valid_rate": 99.0, "duplicate_count": 0, "duplicate_pct": 0.0,
+             "ts_before_min": 0, "ts_after_now": 0, "bad_char_rows": 0,
+             "fetched": None, "stored": 500},
+            {"timestamp": "2026-02-24T13:00:00", "source": "listenbrainz",
+             "target": "scrobble", "row_count": 600, "passed": False,
+             "schema_ok": False, "artist_null_pct": 10.0, "track_null_pct": 0.0,
+             "album_null_pct": 0.0, "mbid_fill_rate": 50.0,
+             "mbid_valid_rate": 80.0, "duplicate_count": 50, "duplicate_pct": 8.3,
+             "ts_before_min": 0, "ts_after_now": 0, "bad_char_rows": 3,
+             "fetched": None, "stored": 600},
+        ])
+        df.to_parquet(tmp_pq_dir / "qa_report.parquet", index=False)
+        result = runner.invoke(cli, ["qa", "show", "--fail-only"])
+        assert result.exit_code == 0
+        assert "FAIL" in result.output
+        # Ensuring only the failed row appears (not 500-row PASS)
+        assert "500" not in result.output
 
 
 class TestTrainCommand:

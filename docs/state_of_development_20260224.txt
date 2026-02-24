@@ -1,5 +1,27 @@
 ## c9r (CanonFodder) — State of Development
 
+Change: 2026-02-24 | Version: 0.6.1
+
+c9r qa:
+•  c9r qa scrobble [--hours N] [--source S] — renamed from run
+•  c9r qa a_i — new; checks artist_info.parquet (nulls, MBID validity, duplicates on artist_name, encoding)
+•  c9r qa avc — new; checks avc.parquet (nulls, duplicate hashes, stamp timestamps, encoding)
+•  c9r qa uc — new; summary stats (entry count + unique country codes)
+•  c9r qa show — src= now displays source/target (e.g. src=listenbrainz/scrobble), omitting the source prefix when absent (e.g. src=artist_info), never showing n/a
+Backend (corefunc/qa.py):
+•  Refactored _check_schema, _check_nulls, _check_mbids, _check_encoding to accept column/target params
+•  _check_schema gained a strict kwarg (exact match for scrobble, subset-only for other targets)
+•  Added qa_artist_info(), qa_avc(), qa_uc() functions
+•  _persist_report now stores a target column alongside source
+Column constants added to helpers/io.py: ARTIST_INFO_COLS, AVC_COLS, UC_COLS.
+
+c9r purge:
+The three purge modes are now:
+•  c9r purge — interactive picker (one-by-one)
+•  c9r purge --all — prompts once for bulk deletion
+•  c9r purge --all --yes — deletes everything, no prompts
+---
+
 Snapshot: 2026-02-23 | Version: 0.6.0
 
 ---

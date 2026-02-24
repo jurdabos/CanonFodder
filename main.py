@@ -6,6 +6,7 @@ train, serve, dashboard, purge, flow.
 """
 from __future__ import annotations
 import logging
+import math
 import os
 import signal
 import sys
@@ -150,17 +151,33 @@ def dashboard(top: int) -> None:
 # ── purge ──────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--all", "purge_all", is_flag=True, help="Purge all Parquet files.")
-@click.confirmation_option(prompt="This will delete data. Continue?")
-def purge(purge_all: bool) -> None:
-    """Removes Parquet data files."""
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (only with --all).")
+def purge(purge_all: bool, yes: bool) -> None:
+    """Removes Parquet data files.
+
+    Without --all, presents each file interactively for selection.
+    """
     from helpers.io import PQ_DIR
-    targets = list(PQ_DIR.glob("*.parquet")) if purge_all else []
+    targets = sorted(PQ_DIR.glob("*.parquet"))
     if not targets:
-        click.echo("Nothing to purge (use --all).")
+        click.echo("No Parquet files found.")
         return
-    for p in targets:
-        p.unlink()
-        click.echo(f"Deleted {p.name}")
+    if purge_all:
+        if not yes:
+            click.confirm("This will delete all Parquet data files. Continue?", abort=True)
+        for p in targets:
+            p.unlink()
+            click.echo(f"Deleted {p.name}")
+    else:
+        deleted = 0
+        for p in targets:
+            if click.confirm(f"Delete {p.name}?"):
+                p.unlink()
+                click.echo(f"  Deleted {p.name}")
+                deleted += 1
+            else:
+                click.echo(f"  Skipped {p.name}")
+        click.echo(f"\nPurged {deleted} of {len(targets)} file(s).")
 
 
 # ── fix-encoding ─────────────────────────────────────────────────────────────────
@@ -177,13 +194,23 @@ def fix_encoding_cmd() -> None:
 
 
 # ── qa ─────────────────────────────────────────────────────────────────────────
-@cli.command()
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def qa(ctx: click.Context) -> None:
+    """Runs or queries post-ingestion quality checks."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@qa.command("scrobble")
 @click.option("--hours", "-h", default=None, type=int, help="Only check scrobbles from the last N hours.")
-def qa(hours: int | None) -> None:
-    """Runs post-ingestion quality checks on scrobble.parquet."""
-    from corefunc.qa import qa_lb_ingest, ALBUM_NULL_THRESHOLD
-    click.echo("Running QA checks …")
-    report = qa_lb_ingest(last_n_hours=hours)
+@click.option("--source", "-s", type=_SOURCE_CHOICES, default=None, envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
+def qa_scrobble(hours: int | None, source: str | None) -> None:
+    """Runs QA checks on scrobble.parquet."""
+    from corefunc.qa import qa_lb_ingest
+    source = _normalise_source(source) if source else None
+    click.echo("Running scrobble QA checks …")
+    report = qa_lb_ingest(last_n_hours=hours, source=source)
     if report.get("status") == "skipped":
         click.echo(f"Skipped: {report['reason']}")
         return
@@ -223,6 +250,145 @@ def qa(hours: int | None) -> None:
     if rec.get("fetched") is not None:
         click.echo(f"  Reconciliation: fetched={rec['fetched']:,}, stored={rec['stored']:,}, diff={rec.get('diff', 0):,}")
     click.echo("\nReport appended to PQ/qa_report.parquet")
+
+
+@qa.command("a_i")
+def qa_artist_info_cmd() -> None:
+    """Runs QA checks on artist_info.parquet."""
+    from corefunc.qa import qa_artist_info
+    click.echo("Running artist_info QA checks …")
+    report = qa_artist_info()
+    if report.get("status") == "skipped":
+        click.echo(f"Skipped: {report['reason']}")
+        return
+    passed = report["passed"]
+    click.echo(f"\nRows checked: {report['row_count']:,}")
+    click.echo(f"Overall: {'PASS' if passed else 'FAIL'}")
+    sch = report["schema"]
+    if not sch["pass"]:
+        click.echo(f"  Schema FAIL — missing: {sch['missing']}, unexpected: {sch['unexpected']}")
+    for col, stats in report["nulls"].items():
+        if stats["null_pct"] > 0 or stats["empty_pct"] > 0:
+            click.echo(f"  {col}: {stats['null_pct']}% null, {stats['empty_pct']}% empty")
+        else:
+            click.echo(f"  {col}: clean")
+    dup = report["duplicates"]
+    click.echo(f"  Duplicates: {dup['duplicate_count']:,} ({dup['duplicate_pct']}%)")
+    if not dup["pass"]:
+        click.echo("  ⚠ Duplicate rate exceeds 5% threshold")
+    mb = report["mbids"]
+    click.echo(f"  MBID fill: {mb.get('fill_rate', 0)}%, valid: {mb.get('valid_rate', 0)}%")
+    enc = report["encoding"]
+    if not enc["pass"]:
+        click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
+    click.echo("\nReport appended to PQ/qa_report.parquet")
+
+
+@qa.command("avc")
+def qa_avc_cmd() -> None:
+    """Runs QA checks on avc.parquet."""
+    from corefunc.qa import qa_avc
+    click.echo("Running avc QA checks …")
+    report = qa_avc()
+    if report.get("status") == "skipped":
+        click.echo(f"Skipped: {report['reason']}")
+        return
+    passed = report["passed"]
+    click.echo(f"\nRows checked: {report['row_count']:,}")
+    click.echo(f"Overall: {'PASS' if passed else 'FAIL'}")
+    sch = report["schema"]
+    if not sch["pass"]:
+        click.echo(f"  Schema FAIL — missing: {sch['missing']}, unexpected: {sch['unexpected']}")
+    for col, stats in report["nulls"].items():
+        if stats["null_pct"] > 0 or stats["empty_pct"] > 0:
+            click.echo(f"  {col}: {stats['null_pct']}% null, {stats['empty_pct']}% empty")
+        else:
+            click.echo(f"  {col}: clean")
+    dup = report["duplicates"]
+    click.echo(f"  Duplicates: {dup['duplicate_count']:,} ({dup['duplicate_pct']}%)")
+    ts = report["timestamps"]
+    if not ts["pass"]:
+        for issue in ts["issues"]:
+            click.echo(f"  Timestamp: {issue}")
+    enc = report["encoding"]
+    if not enc["pass"]:
+        click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
+    click.echo("\nReport appended to PQ/qa_report.parquet")
+
+
+@qa.command("uc")
+def qa_uc_cmd() -> None:
+    """Shows summary stats for uc.parquet (user-country history)."""
+    from corefunc.qa import qa_uc
+    click.echo("Running uc summary …")
+    report = qa_uc()
+    if report.get("status") == "skipped":
+        click.echo(f"Skipped: {report['reason']}")
+        return
+    click.echo(f"\n  Entries: {report['row_count']:,}")
+    click.echo(f"  Unique countries: {report['unique_countries']}")
+    click.echo("\nReport appended to PQ/qa_report.parquet")
+
+
+def _format_qa_src(row) -> str:
+    """Builds the src= display value from source and target columns."""
+    import pandas as pd
+    parts: list[str] = []
+    for key in ("source", "target"):
+        val = row.get(key)
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            continue
+        try:
+            if pd.isna(val):
+                continue
+        except (TypeError, ValueError):
+            pass
+        s = str(val).strip()
+        if s and s not in ("None", "nan", "<NA>"):
+            parts.append(s)
+    return "/".join(parts)
+
+
+@qa.command()
+@click.option("--last", "last_n", default=5, type=int, help="Number of recent reports to show.")
+@click.option("--all", "show_all", is_flag=True, help="Show all reports (overrides --last).")
+@click.option("--fail-only", is_flag=True, help="Only show failed reports.")
+def show(last_n: int, show_all: bool, fail_only: bool) -> None:
+    """Displays past QA reports from qa_report.parquet."""
+    from helpers.query import qa_reports
+    limit = None if show_all else last_n
+    df = qa_reports(last_n=limit, fail_only=fail_only)
+    if df.empty:
+        click.echo("No QA reports found.")
+        return
+    click.echo(f"{'All' if show_all else f'Last {last_n}'} QA reports"
+               f"{' (failures only)' if fail_only else ''}:\n")
+    for _, row in df.iterrows():
+        status = "PASS" if row["passed"] else "FAIL"
+        ts = str(row["timestamp"])[:19]
+        src = _format_qa_src(row)
+        src_str = f"  src={src}" if src else ""
+        target = str(row.get("target", ""))
+        _hr = row.get("hash_fill_rate", 0)
+        hash_rate = 0 if (_hr is None or (isinstance(_hr, float) and math.isnan(_hr))) else _hr
+        _mr = row.get("mbid_fill_rate", 0)
+        mbid_rate = 0 if (_mr is None or (isinstance(_mr, float) and math.isnan(_mr))) else _mr
+        if target == "user_country":
+            _uc = row.get("unique_countries")
+            countries = int(_uc) if _uc is not None and not (isinstance(_uc, float) and math.isnan(_uc)) else "?"
+            click.echo(f"  {ts}  {status}{src_str}"
+                       f"  rows={int(row['row_count']):,}"
+                       f"  countries={countries}")
+        else:
+            if target == "artist_variants_canonized":
+                fill_str = f"hash_fill={hash_rate}%"
+            else:
+                fill_str = f"mbid_fill={mbid_rate}%"
+            click.echo(f"  {ts}  {status}{src_str}"
+                       f"  rows={int(row['row_count']):,}"
+                       f"  dupes={row['duplicate_pct']}%"
+                       f"  {fill_str}"
+                       f"  bad_chars={int(row['bad_char_rows'])}")
 
 
 # ── flow ───────────────────────────────────────────────────────────────────

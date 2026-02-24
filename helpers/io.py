@@ -67,6 +67,9 @@ _COLUMN_ALIASES = {
     "mbid": "artist_mbid",
 }
 SCROBBLE_COLS = ["artist_name", "album_title", "track_title", "artist_mbid", "play_time"]
+ARTIST_INFO_COLS = ["artist_name", "mbid", "country", "disambiguation_comment", "aliases"]
+AVC_COLS = ["artist_variants_hash", "artist_variants_text", "canonical_name", "to_link", "comment", "stamp"]
+UC_COLS = ["country_code", "start_date", "end_date"]
 
 # Operator tokens for sanitising column names
 OP_TOKENS = {

@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import duckdb
 import pandas as pd
-from helpers.io import PQ_DIR, SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ
+from helpers.io import PQ_DIR, SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, QA_REPORT_PQ
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,34 @@ def scrobbles_between(start: str, end: str) -> pd.DataFrame:
         FROM {_pq(SCROBBLE_PQ)}
         WHERE play_time >= '{start}' AND play_time < '{end}'
         ORDER BY play_time
+    """)
+
+
+def qa_reports(
+    *,
+    last_n: int | None = None,
+    fail_only: bool = False,
+) -> pd.DataFrame:
+    """
+    Returns QA report rows from qa_report.parquet.
+
+    Parameters
+    ----------
+    last_n : int, optional
+        When set, returns only the most recent *last_n* rows.
+    fail_only : bool
+        When True, returns only rows where ``passed`` is False.
+    """
+    if not QA_REPORT_PQ.exists():
+        return pd.DataFrame()
+    where = "WHERE passed = false" if fail_only else ""
+    order = "ORDER BY timestamp DESC"
+    limit = f"LIMIT {last_n}" if last_n else ""
+    return query(f"""
+        SELECT * FROM {_pq(QA_REPORT_PQ)}
+        {where}
+        {order}
+        {limit}
     """)
 
 

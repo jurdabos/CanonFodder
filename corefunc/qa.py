@@ -1,5 +1,5 @@
 """
-Provides post-ingestion quality-assurance checks for scrobble data.
+Provides quality-assurance checks for all c9r Parquet stores.
 
 Covers schema conformance, null/empty rates, timestamp integrity,
 duplicate detection, MBID validation, row-count reconciliation,
@@ -13,7 +13,8 @@ from datetime import datetime, UTC
 from typing import Any
 import pandas as pd
 from helpers.io import (
-    SCROBBLE_COLS, SCROBBLE_PQ, QA_REPORT_PQ,
+    SCROBBLE_COLS, ARTIST_INFO_COLS, AVC_COLS,
+    SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, UC_PQ, QA_REPORT_PQ,
     UUID_RE, read_parquet, append_to_parquet,
 )
 
@@ -41,20 +42,33 @@ def _null_and_empty(series: pd.Series) -> dict[str, Any]:
     }
 
 
-def _check_schema(df: pd.DataFrame) -> dict[str, Any]:
-    """Verifies that the DataFrame has exactly the expected scrobble columns."""
-    expected = set(SCROBBLE_COLS)
+def _check_schema(
+    df: pd.DataFrame,
+    expected_cols: list[str] | None = None,
+    *,
+    strict: bool = True,
+) -> dict[str, Any]:
+    """
+    Verifies that the DataFrame has the expected columns.
+
+    When *strict* is True (the default), extra columns also cause a failure.
+    When False, only missing columns are flagged.
+    """
+    expected = set(expected_cols or SCROBBLE_COLS)
     actual = set(df.columns)
-    return {
-        "pass": actual == expected,
-        "missing": sorted(expected - actual),
-        "unexpected": sorted(actual - expected),
-    }
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    if strict:
+        ok = actual == expected
+    else:
+        ok = not missing
+    return {"pass": ok, "missing": missing, "unexpected": unexpected}
 
 
-def _check_nulls(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
+def _check_nulls(df: pd.DataFrame, cols: list[str] | None = None) -> dict[str, dict[str, Any]]:
     """Reports per-column null and empty-string rates."""
-    return {col: _null_and_empty(df[col]) for col in SCROBBLE_COLS if col in df.columns}
+    cols = cols or SCROBBLE_COLS
+    return {col: _null_and_empty(df[col]) for col in cols if col in df.columns}
 
 
 def _check_timestamps(df: pd.DataFrame) -> dict[str, Any]:
@@ -110,12 +124,12 @@ def _check_duplicates(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _check_mbids(df: pd.DataFrame) -> dict[str, Any]:
-    """Reports MBID fill rate and UUID-validity rate."""
-    if "artist_mbid" not in df.columns or df.empty:
+def _check_mbids(df: pd.DataFrame, col: str = "artist_mbid") -> dict[str, Any]:
+    """Reports MBID fill rate and UUID-validity rate for *col*."""
+    if col not in df.columns or df.empty:
         return {"fill_rate": 0.0, "valid_rate": 0.0, "total": 0}
     total = len(df)
-    non_null = df["artist_mbid"].dropna()
+    non_null = df[col].dropna()
     non_empty = non_null[non_null.astype(str).str.strip() != ""]
     filled = len(non_empty)
     valid = int(non_empty.astype(str).str.match(UUID_RE).sum())
@@ -128,9 +142,10 @@ def _check_mbids(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _check_encoding(df: pd.DataFrame) -> dict[str, Any]:
+def _check_encoding(df: pd.DataFrame, text_cols: list[str] | None = None) -> dict[str, Any]:
     """Scans string columns for replacement chars and control characters."""
-    text_cols = ["artist_name", "album_title", "track_title"]
+    if text_cols is None:
+        text_cols = ["artist_name", "album_title", "track_title"]
     bad_rows = 0
     bad_examples: list[str] = []
     for col in text_cols:
@@ -170,6 +185,7 @@ def qa_lb_ingest(
     *,
     fetched_count: int | None = None,
     last_n_hours: int | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """
     Runs all QA checks on scrobble.parquet and persists results.
@@ -181,6 +197,8 @@ def qa_lb_ingest(
     last_n_hours : int, optional
         When set, restricts the check to scrobbles ingested in the
         last *n* hours.  Otherwise checks the full file.
+    source : str, optional
+        Data origin label, e.g. ``"lastfm"`` or ``"listenbrainz"``.
 
     Returns
     -------
@@ -200,6 +218,8 @@ def qa_lb_ingest(
             return {"status": "skipped", "reason": f"no data in last {last_n_hours}h"}
     report: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
+        "source": source,
+        "target": "scrobble",
         "row_count": len(df),
         "schema": _check_schema(df),
         "nulls": _check_nulls(df),
@@ -228,21 +248,167 @@ def _persist_report(report: dict[str, Any]) -> None:
     nulls = report.get("nulls", {})
     row = pd.DataFrame([{
         "timestamp": report["timestamp"],
+        "source": report.get("source"),
+        "target": report.get("target", "scrobble"),
         "row_count": report["row_count"],
         "passed": report["passed"],
-        "schema_ok": report["schema"]["pass"],
+        "schema_ok": report.get("schema", {}).get("pass", True),
         "artist_null_pct": nulls.get("artist_name", {}).get("null_pct", 0),
         "track_null_pct": nulls.get("track_title", {}).get("null_pct", 0),
         "album_null_pct": nulls.get("album_title", {}).get("null_pct", 0),
-        "mbid_fill_rate": report["mbids"].get("fill_rate", 0),
-        "mbid_valid_rate": report["mbids"].get("valid_rate", 0),
-        "duplicate_count": report["duplicates"].get("duplicate_count", 0),
-        "duplicate_pct": report["duplicates"].get("duplicate_pct", 0),
-        "ts_before_min": report["timestamps"].get("before_min_count", 0),
-        "ts_after_now": report["timestamps"].get("after_now_count", 0),
-        "bad_char_rows": report["encoding"].get("bad_char_rows", 0),
-        "fetched": report["reconciliation"].get("fetched"),
-        "stored": report["reconciliation"].get("stored"),
+        "mbid_fill_rate": report.get("mbids", {}).get("fill_rate", 0),
+        "mbid_valid_rate": report.get("mbids", {}).get("valid_rate", 0),
+        "hash_fill_rate": report.get("hash_fill", {}).get("fill_rate", 0),
+        "unique_countries": report.get("unique_countries"),
+        "duplicate_count": report.get("duplicates", {}).get("duplicate_count", 0),
+        "duplicate_pct": report.get("duplicates", {}).get("duplicate_pct", 0),
+        "ts_before_min": report.get("timestamps", {}).get("before_min_count", 0),
+        "ts_after_now": report.get("timestamps", {}).get("after_now_count", 0),
+        "bad_char_rows": report.get("encoding", {}).get("bad_char_rows", 0),
+        "fetched": report.get("reconciliation", {}).get("fetched"),
+        "stored": report.get("reconciliation", {}).get("stored"),
     }])
     append_to_parquet(row, QA_REPORT_PQ)
     log.info("QA report appended to %s", QA_REPORT_PQ)
+
+
+# ── artist_info QA ────────────────────────────────────────────────────────────
+def qa_artist_info(*, source: str | None = None) -> dict[str, Any]:
+    """
+    Runs QA checks on artist_info.parquet.
+
+    Checks schema, null/empty rates, MBID validity, duplicates,
+    and encoding on text columns.
+    """
+    df = read_parquet(ARTIST_INFO_PQ)
+    if df is None or df.empty:
+        log.warning("artist_info.parquet is empty or missing — QA skipped.")
+        return {"status": "skipped", "reason": "no data"}
+    total = len(df)
+    schema = _check_schema(df, ARTIST_INFO_COLS, strict=False)
+    nulls = _check_nulls(df, ARTIST_INFO_COLS)
+    mbids = _check_mbids(df, "mbid")
+    # Duplicating on artist_name
+    dup_cols = ["artist_name"]
+    dup_mask = df.duplicated(subset=dup_cols, keep="first")
+    dup_count = int(dup_mask.sum())
+    dup_pct = round(dup_count / total * 100, 2) if total else 0.0
+    duplicates = {
+        "duplicate_count": dup_count,
+        "duplicate_pct": dup_pct,
+        "pass": (dup_pct / 100) <= DUPLICATE_RATE_THRESHOLD,
+    }
+    encoding = _check_encoding(df, ["artist_name", "disambiguation_comment", "aliases"])
+    report: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": source,
+        "target": "artist_info",
+        "row_count": total,
+        "schema": schema,
+        "nulls": nulls,
+        "duplicates": duplicates,
+        "mbids": mbids,
+        "encoding": encoding,
+    }
+    report["passed"] = all([
+        schema["pass"],
+        duplicates["pass"],
+        encoding["pass"],
+        nulls.get("artist_name", {}).get("null_pct", 0) == 0,
+    ])
+    _persist_report(report)
+    return report
+
+
+# ── avc QA ────────────────────────────────────────────────────────────────────
+def qa_avc(*, source: str | None = None) -> dict[str, Any]:
+    """
+    Runs QA checks on avc.parquet.
+
+    Checks schema, null/empty rates, duplicate hashes,
+    timestamp validity, and encoding on text columns.
+    """
+    df = read_parquet(AVC_PQ)
+    if df is None or df.empty:
+        log.warning("avc.parquet is empty or missing — QA skipped.")
+        return {"status": "skipped", "reason": "no data"}
+    total = len(df)
+    schema = _check_schema(df, AVC_COLS, strict=False)
+    nulls = _check_nulls(df, AVC_COLS)
+    # Duplicating on artist_variants_hash
+    dup_cols = ["artist_variants_hash"]
+    present = [c for c in dup_cols if c in df.columns]
+    if present:
+        dup_mask = df.duplicated(subset=present, keep="first")
+        dup_count = int(dup_mask.sum())
+        dup_pct = round(dup_count / total * 100, 2) if total else 0.0
+    else:
+        dup_count, dup_pct = 0, 0.0
+    duplicates = {
+        "duplicate_count": dup_count,
+        "duplicate_pct": dup_pct,
+        "pass": (dup_pct / 100) <= DUPLICATE_RATE_THRESHOLD,
+    }
+    # Validating stamp timestamps
+    timestamps = {"pass": True, "issues": [], "before_min_count": 0, "after_now_count": 0}
+    if "stamp" in df.columns and not df["stamp"].dropna().empty:
+        col = df["stamp"].dropna()
+        if pd.api.types.is_datetime64_any_dtype(col):
+            if col.dt.tz is None:
+                timestamps["pass"] = False
+                timestamps["issues"].append("stamp is not timezone-aware")
+        else:
+            timestamps["pass"] = False
+            timestamps["issues"].append(f"stamp has non-datetime dtype: {col.dtype}")
+    encoding = _check_encoding(df, ["artist_variants_text", "canonical_name", "comment"])
+    # Computing hash fill rate
+    if "artist_variants_hash" in df.columns:
+        hash_filled = int(df["artist_variants_hash"].notna().sum())
+        hash_fill_rate = round(hash_filled / total * 100, 2) if total else 0.0
+    else:
+        hash_filled, hash_fill_rate = 0, 0.0
+    report: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": source,
+        "target": "artist_variants_canonized",
+        "row_count": total,
+        "schema": schema,
+        "nulls": nulls,
+        "duplicates": duplicates,
+        "timestamps": timestamps,
+        "encoding": encoding,
+        "hash_fill": {"filled": hash_filled, "fill_rate": hash_fill_rate},
+    }
+    report["passed"] = all([
+        schema["pass"],
+        duplicates["pass"],
+        timestamps["pass"],
+        encoding["pass"],
+    ])
+    _persist_report(report)
+    return report
+
+
+# ── uc QA ─────────────────────────────────────────────────────────────────────
+def qa_uc(*, source: str | None = None) -> dict[str, Any]:
+    """
+    Produces a summary for uc.parquet (user-country history).
+
+    Reports total entries and distinct country codes.
+    """
+    df = read_parquet(UC_PQ)
+    if df is None or df.empty:
+        log.warning("uc.parquet is empty or missing — QA skipped.")
+        return {"status": "skipped", "reason": "no data"}
+    total = len(df)
+    unique_countries = int(df["country_code"].nunique()) if "country_code" in df.columns else 0
+    report: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": source,
+        "target": "user_country",
+        "row_count": total,
+        "unique_countries": unique_countries,
+        "passed": True,
+    }
+    _persist_report(report)
+    return report

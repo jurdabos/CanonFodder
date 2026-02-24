@@ -32,14 +32,14 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         monkeypatch.setattr(io_mod, name, path)
     # Patching every module that copies these constants at import time
     import_map = {
-        q_mod: ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ"],
+        q_mod: ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "QA_REPORT_PQ"],
     }
     # Lazily importing optional consumer modules
     for mod_path, attrs in [
         ("corefunc.data_cleaning", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.enrich", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.canon", ["AVC_PQ"]),
-        ("corefunc.qa", ["SCROBBLE_PQ", "QA_REPORT_PQ"]),
+        ("corefunc.qa", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "UC_PQ", "QA_REPORT_PQ"]),
         ("helpers.cli", ["PQ_DIR", "AVC_PQ", "UC_PQ"]),
         ("HTTP.lfAPI", ["C_PQ", "UC_PQ", "SCROBBLE_PQ"]),
         ("HTTP.mbAPI", ["ARTIST_INFO_PQ"]),
