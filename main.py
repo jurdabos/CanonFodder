@@ -199,6 +199,8 @@ def qa(hours: int | None) -> None:
     for col, stats in report["nulls"].items():
         if stats["null_pct"] > 0 or stats["empty_pct"] > 0:
             click.echo(f"  {col}: {stats['null_pct']}% null, {stats['empty_pct']}% empty")
+        else:
+            click.echo(f"  {col}: clean")
     # Timestamps
     ts = report["timestamps"]
     if not ts["pass"]:
