@@ -70,31 +70,29 @@ def ingest(user: str | None, source: str, full: bool) -> None:
 
 # ── enrich ─────────────────────────────────────────────────────────────────
 @cli.command()
-@click.option("--user", "-u", default=None, help="Username (env: LASTFM_USER or LB_USER).")
+@click.option("--user", "-u", default=None, help="Username (only needed for --country; env: LASTFM_USER or LB_USER).")
 @click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
 @click.option("--mbids/--no-mbids", default=True, help="Enrich missing artist MBIDs via Last.fm.")
 @click.option("--country/--no-country", default=True, help="Sync user country from Last.fm.")
 def enrich(user: str | None, source: str, mbids: bool, country: bool) -> None:
     """Enriches scrobble data with MBIDs and MusicBrainz metadata."""
     source = _normalise_source(source)
-    user = _resolve_user(source, user)
-    if source == "listenbrainz":
-        if mbids:
-            click.echo("Skipping MBID enrichment — ListenBrainz already provides MBIDs.")
-        if country:
-            click.echo("Skipping country sync — not available for ListenBrainz.")
-        return
-    from HTTP.lfAPI import enrich_artist_mbids, sync_user_country
     if mbids:
-        click.echo(f"Enriching artist MBIDs for {user} …")
-        result = enrich_artist_mbids(user)
+        from HTTP.lfAPI import enrich_artist_mbids
+        click.echo("Enriching missing artist MBIDs via Last.fm …")
+        result = enrich_artist_mbids()
         click.echo(f"{result['status']}: {result['message']}")
     if country:
-        try:
-            changed = sync_user_country(user, ask=False)
-            click.echo("Country updated." if changed else "Country already up-to-date.")
-        except RuntimeError as exc:
-            click.echo(f"Country sync skipped: {exc}")
+        if source == "listenbrainz":
+            click.echo("Skipping country sync — not available for ListenBrainz.")
+        else:
+            user = _resolve_user(source, user)
+            from HTTP.lfAPI import sync_user_country
+            try:
+                changed = sync_user_country(user, ask=False)
+                click.echo("Country updated." if changed else "Country already up-to-date.")
+            except RuntimeError as exc:
+                click.echo(f"Country sync skipped: {exc}")
 
 
 # ── canonise ───────────────────────────────────────────────────────────────

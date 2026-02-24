@@ -102,7 +102,7 @@ class TestEnrichArtistMbids:
     def test_no_scrobbles(self, mock_read, mock_req, mock_dump):
         """Returns success with 0 enriched when no scrobbles exist."""
         mock_read.return_value = None
-        result = enrich_artist_mbids("testuser")
+        result = enrich_artist_mbids()
         assert result["status"] == "success"
         assert result["enriched"] == 0
 
@@ -121,7 +121,7 @@ class TestEnrichArtistMbids:
         })
         mock_read.return_value = df
         mock_req.return_value = {"artist": {"name": "A", "mbid": "new-mbid"}}
-        result = enrich_artist_mbids("testuser")
+        result = enrich_artist_mbids()
         assert result["status"] == "success"
         assert result["enriched"] == 1
 

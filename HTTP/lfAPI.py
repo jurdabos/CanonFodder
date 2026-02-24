@@ -186,14 +186,14 @@ def _update_user_country(new_code: str) -> bool:
     return True
 
 
-def enrich_artist_mbids(username: str, progress_callback: Optional[Callable] = None) -> dict:
+def enrich_artist_mbids(progress_callback: Optional[Callable] = None) -> dict:
     """
     Fetches artist MBIDs from Last.fm API and updates scrobble.parquet.
 
+    Looks up each artist by name via artist.getInfo — no username needed.
+
     Parameters
     ----------
-    username : str
-        Last.fm username
     progress_callback : callable, optional
         Callback for progress updates (task_name, percentage, message)
 

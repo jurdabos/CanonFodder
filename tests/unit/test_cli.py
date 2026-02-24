@@ -120,6 +120,7 @@ class TestEnrichCommand:
         mock_country.return_value = False
         result = runner.invoke(cli, ["enrich", "--user", "testuser"])
         assert result.exit_code == 0
+        mock_mbids.assert_called_once_with()
 
 
 class TestIngestListenBrainz:
@@ -153,17 +154,27 @@ class TestIngestListenBrainz:
 class TestEnrichListenBrainz:
     """Tests the 'enrich --source listenbrainz' command."""
 
-    def test_enrich_lb_skips_mbids(self, runner, tmp_pq_dir):
-        """Skips MBID enrichment for ListenBrainz source."""
-        result = runner.invoke(cli, ["enrich", "--user", "lbuser", "--source", "listenbrainz"])
+    @patch("HTTP.lfAPI.enrich_artist_mbids")
+    def test_enrich_lb_runs_mbids(self, mock_mbids, runner, tmp_pq_dir):
+        """Runs MBID enrichment for ListenBrainz source (uses Last.fm artist.getInfo)."""
+        mock_mbids.return_value = {"status": "ok", "message": "Enriched 5 artists with MBIDs"}
+        result = runner.invoke(cli, ["enrich", "--source", "listenbrainz", "--no-country"])
         assert result.exit_code == 0
-        assert "Skipping MBID enrichment" in result.output
+        assert "Enriching missing artist MBIDs" in result.output
+        mock_mbids.assert_called_once_with()
 
     def test_enrich_lb_skips_country(self, runner, tmp_pq_dir):
         """Skips country sync for ListenBrainz source."""
-        result = runner.invoke(cli, ["enrich", "--user", "lbuser", "--source", "listenbrainz"])
+        result = runner.invoke(cli, ["enrich", "--source", "listenbrainz", "--no-mbids"])
         assert result.exit_code == 0
         assert "Skipping country sync" in result.output
+
+    @patch("HTTP.lfAPI.enrich_artist_mbids")
+    def test_enrich_lb_no_user_needed_for_mbids(self, mock_mbids, runner, tmp_pq_dir):
+        """Does not require --user when only --mbids is requested."""
+        mock_mbids.return_value = {"status": "ok", "message": "done"}
+        result = runner.invoke(cli, ["enrich", "--source", "lb", "--no-country"])
+        assert result.exit_code == 0
 
 
 class TestSourceHelpers:
