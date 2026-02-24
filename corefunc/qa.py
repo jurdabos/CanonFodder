@@ -69,6 +69,8 @@ def _check_timestamps(df: pd.DataFrame) -> dict[str, Any]:
     if col.dt.tz is None:
         result["pass"] = False
         result["issues"].append("play_time is not timezone-aware")
+        # Localizing to UTC so the remaining range checks can proceed
+        col = col.dt.tz_localize("UTC")
     # Checking plausible range
     now = pd.Timestamp.now(tz="UTC")
     min_ts = pd.Timestamp(f"{MIN_PLAUSIBLE_YEAR}-01-01", tz="UTC")

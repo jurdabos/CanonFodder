@@ -81,7 +81,7 @@ class _RequestsBackend:
         # remove None values so that the URL is clean
         params = {k: v for k, v in params.items() if v is not None}
         url = f"{API_ROOT}/user/{username}/listens"
-        resp = self.session.get(url, params=params, timeout=15)
+        resp = self.session.get(url, params=params, timeout=60)
         resp.raise_for_status()
         return resp.json()["payload"]["listens"]
 
@@ -100,7 +100,7 @@ class _RequestsBackend:
             params["metadata"] = "true"
             params["incs"] = incs
         url = f"{API_ROOT}/metadata/lookup/"
-        resp = self.session.get(url, params=params, timeout=15)
+        resp = self.session.get(url, params=params, timeout=60)
         resp.raise_for_status()
         return resp.json()
 
@@ -109,7 +109,7 @@ class _RequestsBackend:
         if not LB_TOKEN:
             raise RuntimeError("Submit requires an auth TOKEN – none configured.")
         url = f"{API_ROOT}/submit-listens"
-        resp = self.session.post(url, json=listen_doc, timeout=15)
+        resp = self.session.post(url, json=listen_doc, timeout=60)
         resp.raise_for_status()
         logger.info("✅ Listen submitted (status %s)", resp.status_code)
 
@@ -257,8 +257,10 @@ def fetch_scrobbles_since(
     rows: list[dict[str, Any]] = []
     for listen in all_listens:
         md = listen.get("track_metadata", {})
-        additional = md.get("additional_info", {})
-        mbids = additional.get("artist_mbids", [])
+        # Preferring mbid_mapping (ListenBrainz's own match) over submitter-supplied additional_info
+        mapping = md.get("mbid_mapping") or {}
+        additional = md.get("additional_info") or {}
+        mbids = mapping.get("artist_mbids") or additional.get("artist_mbids") or []
         rows.append({
             "Artist": md.get("artist_name", ""),
             "Song": md.get("track_name", ""),

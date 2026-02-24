@@ -46,7 +46,7 @@ def cli(verbose: bool) -> None:
 # ── ingest ─────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--user", "-u", default=None, help="Username (env: LASTFM_USER or LB_USER).")
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", help="Data source.")
+@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
 @click.option("--full", is_flag=True, help="Fetch full history instead of incremental.")
 def ingest(user: str | None, source: str, full: bool) -> None:
     """Fetches scrobbles and appends to scrobble.parquet."""
@@ -70,7 +70,7 @@ def ingest(user: str | None, source: str, full: bool) -> None:
 # ── enrich ─────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--user", "-u", default=None, help="Username (env: LASTFM_USER or LB_USER).")
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", help="Data source.")
+@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
 @click.option("--mbids/--no-mbids", default=True, help="Enrich missing artist MBIDs via Last.fm.")
 @click.option("--country/--no-country", default=True, help="Sync user country from Last.fm.")
 def enrich(user: str | None, source: str, mbids: bool, country: bool) -> None:
@@ -163,7 +163,20 @@ def purge(purge_all: bool) -> None:
         click.echo(f"Deleted {p.name}")
 
 
-# ── qa ─────────────────────────────────────────────────────────────────────
+# ── fix-encoding ─────────────────────────────────────────────────────────────────
+@cli.command("fix-encoding")
+def fix_encoding_cmd() -> None:
+    """Repairs encoding-corrupted strings in scrobble.parquet."""
+    from corefunc.data_cleaning import fix_encoding
+    click.echo("Scanning for encoding issues …")
+    fixed, total = fix_encoding()
+    if fixed:
+        click.echo(f"Repaired {fixed} rows out of {total:,} total.")
+    else:
+        click.echo("No encoding issues found.")
+
+
+# ── qa ─────────────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--hours", "-h", default=None, type=int, help="Only check scrobbles from the last N hours.")
 def qa(hours: int | None) -> None:
@@ -212,7 +225,7 @@ def qa(hours: int | None) -> None:
 
 # ── flow ───────────────────────────────────────────────────────────────────
 @cli.command()
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", help="Data source.")
+@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
 @click.option("--full", is_flag=True, help="Fetch full history instead of incremental.")
 def flow(source: str, full: bool) -> None:
     """Runs the full Prefect orchestration flow."""

@@ -110,6 +110,15 @@ class TestCheckTimestamps:
         assert result["pass"] is False
         assert result["after_now_count"] == 1
 
+    def test_tz_naive_timestamps(self):
+        """Flags tz-naive timestamps but still performs range checks."""
+        df = _good_df(2)
+        df["play_time"] = df["play_time"].dt.tz_localize(None)
+        result = _check_timestamps(df)
+        assert result["pass"] is False
+        assert any("timezone" in i.lower() for i in result["issues"])
+        assert "before_min_count" in result  # to confirm range checks ran
+
     def test_missing_play_time(self):
         """Fails gracefully when play_time column is absent."""
         df = _good_df().drop(columns=["play_time"])
