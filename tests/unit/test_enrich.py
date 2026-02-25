@@ -30,8 +30,8 @@ class TestEnrichArtistCountry:
         assert enrich_artist_country() == 0
 
     @patch("corefunc.enrich.time.sleep")
-    @patch("corefunc.enrich._cache_artist")
-    @patch("corefunc.enrich.search_artist")
+    @patch("HTTP.mbAPI._cache_artist")
+    @patch("HTTP.mbAPI.search_artist")
     def test_enriches_unknown_artist(self, mock_search, mock_cache, mock_sleep, tmp_pq_dir):
         """Enriches an unknown artist via mocked MusicBrainz search."""
         import helpers.io as io_mod
@@ -49,7 +49,7 @@ class TestEnrichArtistCountry:
         mock_sleep.assert_called()
 
     @patch("corefunc.enrich.time.sleep")
-    @patch("corefunc.enrich.search_artist")
+    @patch("HTTP.mbAPI.search_artist")
     def test_artist_with_mbid_skips_search(self, mock_search, mock_sleep, tmp_pq_dir):
         """Skips MB search for artists that already have an MBID in scrobbles."""
         import helpers.io as io_mod

@@ -49,7 +49,7 @@ def cli(verbose: bool) -> None:
 @click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
 @click.option("--full", is_flag=True, help="Fetch full history instead of incremental.")
 def ingest(user: str | None, source: str, full: bool) -> None:
-    """Fetches scrobbles and appends to scrobble.parquet."""
+    """Fetches scrobbles and appends to scrobble.parquet"""
     source = _normalise_source(source)
     user = _resolve_user(source, user)
     from helpers.io import ingest_scrobbles, latest_scrobble_ts
@@ -67,21 +67,36 @@ def ingest(user: str | None, source: str, full: bool) -> None:
     click.echo(f"Ingested {n} scrobbles.")
 
 
-# ── enrich ─────────────────────────────────────────────────────────────────
+# ── enrich ─────────────────────────────────────────────────────────────────────
 @cli.command()
-@click.option("--user", "-u", default=None, help="Username (only needed for --country; env: LASTFM_USER or LB_USER).")
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
-@click.option("--mbids/--no-mbids", default=True, help="Enrich missing artist MBIDs via Last.fm.")
-@click.option("--country/--no-country", default=True, help="Sync user country from Last.fm.")
-def enrich(user: str | None, source: str, mbids: bool, country: bool) -> None:
-    """Enriches scrobble data with MBIDs and MusicBrainz metadata."""
-    source = _normalise_source(source)
-    if mbids:
-        from HTTP.lfAPI import enrich_artist_mbids
-        click.echo("Enriching missing artist MBIDs via Last.fm …")
-        result = enrich_artist_mbids()
-        click.echo(f"{result['status']}: {result['message']}")
+@click.option("--mbapi", is_flag=True, help="Use remote MusicBrainz API instead of local mirror.")
+@click.option("--lastfmapi", is_flag=True, help="Use Last.fm API for MBIDs + remote MB API for metadata.")
+@click.option("--country", is_flag=True, default=False, help="Sync user country to uc.parquet (requires --user).")
+@click.option("--rebuild", is_flag=True, help="Rebuild artist_info.parquet from scratch.")
+@click.option("--user", "-u", default=None, help="Username (only for --country; env: LASTFM_USER or LB_USER).")
+@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (only for --country; env: C9R_SOURCE).")
+def enrich(mbapi: bool, lastfmapi: bool, country: bool, rebuild: bool, user: str | None, source: str) -> None:
+    """Enrich scrobble & artist_info with MBIDs and metadata
+
+    Default: local MusicBrainz mirror.  Use --mbapi or --lastfmapi for remote.
+    """
+    if mbapi and lastfmapi:
+        raise click.UsageError("--mbapi and --lastfmapi are mutually exclusive.")
+    backend = "mbapi" if mbapi else "lastfmapi" if lastfmapi else "local"
+    label = {"local": "local MB mirror", "mbapi": "remote MB API", "lastfmapi": "Last.fm + remote MB API"}[backend]
+    click.echo(f"Enriching via {label} …")
+    from corefunc.enrich import enrich_all
+    try:
+        result = enrich_all(backend=backend, rebuild=rebuild)
+        click.echo(
+            f"Done — {result['artist_info_rows']:,} artist_info rows, "
+            f"{result['mbids_backfilled']:,} MBIDs backfilled into scrobble.parquet."
+        )
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        return
     if country:
+        source = _normalise_source(source)
         if source == "listenbrainz":
             click.echo("Skipping country sync — not available for ListenBrainz.")
         else:
@@ -94,24 +109,10 @@ def enrich(user: str | None, source: str, mbids: bool, country: bool) -> None:
                 click.echo(f"Country sync skipped: {exc}")
 
 
-# ── enrich-local ───────────────────────────────────────────────────────────
-@cli.command("enrich-local")
-@click.option("--rebuild", is_flag=True, help="Rebuild artist_info.parquet from scratch.")
-def enrich_local(rebuild: bool) -> None:
-    """Bulk-enriches artist_info.parquet from the local MusicBrainz mirror."""
-    from corefunc.mb_local import enrich_from_local_mb
-    click.echo("Querying local MusicBrainz mirror …")
-    try:
-        n = enrich_from_local_mb(rebuild=rebuild)
-        click.echo(f"Done — {n:,} artist rows written to artist_info.parquet.")
-    except RuntimeError as exc:
-        click.echo(f"Error: {exc}", err=True)
-
-
 # ── canonise ───────────────────────────────────────────────────────────────
 @cli.command()
 def canonise() -> None:
-    """Runs the artist-name canonisation pipeline (fuzzy matching + ML)."""
+    """Run artist name canonisation w/ ML bump"""
     click.echo("Canonise command — will be wired in Phase 6/7.")
 
 
@@ -138,7 +139,7 @@ def train(run_name: str | None) -> None:
 @click.option("--host", default="127.0.0.1", help="Bind address.")
 @click.option("--port", "-p", default=5000, type=int, help="Port to listen on.")
 def mlflow_ui(host: str, port: int) -> None:
-    """Launches the MLflow tracking UI for experiment comparison."""
+    """Launches the MLflow tracking UI for experiment comparison"""
     from helpers.experiment import TRACKING_URI
     click.echo(f"Starting MLflow UI at http://{host}:{port}  (store: {TRACKING_URI})")
     os.execvp("mlflow", ["mlflow", "ui", "--backend-store-uri", TRACKING_URI, "--host", host, "--port", str(port)])
@@ -159,7 +160,7 @@ def serve(host: str, port: int) -> None:
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def dashboard(ctx: click.Context) -> None:
-    """Quick text dashboards for scrobble data."""
+    """Dash the board for scrobble data"""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -261,13 +262,16 @@ def purge(purge_all: bool, yes: bool) -> None:
 # ── fix-encoding ─────────────────────────────────────────────────────────────────
 @cli.command("fix-encoding")
 def fix_encoding_cmd() -> None:
-    """Repairs encoding-corrupted strings in scrobble.parquet."""
+    """Repair encoding-corrupted strings in scrobble & artist_info"""
     from corefunc.data_cleaning import fix_encoding
     click.echo("Scanning for encoding issues …")
-    fixed, total = fix_encoding()
-    if fixed:
-        click.echo(f"Repaired {fixed} rows out of {total:,} total.")
-    else:
+    results = fix_encoding()
+    any_fixed = False
+    for label, (fixed, total) in results.items():
+        if fixed:
+            click.echo(f"  {label}: repaired {fixed} of {total:,} rows.")
+            any_fixed = True
+    if not any_fixed:
         click.echo("No encoding issues found.")
 
 
@@ -499,7 +503,7 @@ def show(last_n: int, show_all: bool, fail_only: bool) -> None:
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def profile(ctx: click.Context) -> None:
-    """Data profiling — explores scrobble patterns and canonisation needs."""
+    """Data profiling (cf. subcommands)"""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -618,7 +622,7 @@ def countries(n: int) -> None:
 @click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
 @click.option("--full", is_flag=True, help="Fetch full history instead of incremental.")
 def flow(source: str, full: bool) -> None:
-    """Runs the full Prefect orchestration flow."""
+    """Run the full Prefect orchestration flow"""
     source = _normalise_source(source)
     from flows.cf_ingest import weekly_ingest_flow
     click.echo("Starting Prefect flow …")

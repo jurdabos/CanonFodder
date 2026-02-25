@@ -54,13 +54,13 @@ class TestRepairText:
 
 # ── fix_encoding integration tests ────────────────────────────────────────────
 class TestFixEncoding:
-    """Tests the fix_encoding end-to-end on a temp Parquet file."""
+    """Tests fix_encoding end-to-end on temp Parquet files."""
 
     def test_empty_parquet(self, tmp_pq_dir):
-        """Returns (0, 0) when scrobble.parquet does not exist."""
-        fixed, total = fix_encoding()
-        assert fixed == 0
-        assert total == 0
+        """Returns zeroes for both files when neither exists."""
+        results = fix_encoding()
+        assert results["scrobble"] == (0, 0)
+        assert results["artist_info"] == (0, 0)
 
     def test_no_bad_chars(self, tmp_pq_dir):
         """Returns (0, N) when all text is clean."""
@@ -73,12 +73,11 @@ class TestFixEncoding:
             "play_time": pd.date_range("2024-06-01", periods=2, freq="5min", tz="UTC"),
         })
         df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
-        fixed, total = fix_encoding()
-        assert fixed == 0
-        assert total == 2
+        results = fix_encoding()
+        assert results["scrobble"] == (0, 2)
 
-    def test_repairs_bad_chars(self, tmp_pq_dir):
-        """Repairs rows with encoding corruption and writes back."""
+    def test_repairs_scrobble_bad_chars(self, tmp_pq_dir):
+        """Repairs encoding corruption in scrobble.parquet."""
         import helpers.io as io_mod
         df = pd.DataFrame({
             "artist_name": ["Good Artist", "Good Artist 2"],
@@ -88,12 +87,29 @@ class TestFixEncoding:
             "play_time": pd.date_range("2024-06-01", periods=2, freq="5min", tz="UTC"),
         })
         df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
-        fixed, total = fix_encoding()
-        assert fixed == 1
-        assert total == 2
+        results = fix_encoding()
+        assert results["scrobble"] == (1, 2)
         # Verifying the repaired value
         result = pd.read_parquet(io_mod.SCROBBLE_PQ)
         assert result.loc[0, "track_title"] == "Don\u2019t Cry"
+
+    def test_repairs_artist_info_bad_chars(self, tmp_pq_dir):
+        """Repairs encoding corruption in artist_info.parquet."""
+        import helpers.io as io_mod
+        ai = pd.DataFrame({
+            "artist_name": ["Bj\x94rk", "Clean Artist"],
+            "mbid": ["id-a", "id-b"],
+            "country": ["IS", "US"],
+            "disambiguation_comment": ["Icelandic\x85singer", ""],
+            "aliases": ["", ""],
+        })
+        ai.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
+        results = fix_encoding()
+        assert results["artist_info"][0] >= 1
+        # Verifying the repaired values
+        fixed = pd.read_parquet(io_mod.ARTIST_INFO_PQ)
+        assert "\x94" not in fixed.loc[0, "artist_name"]
+        assert "\x85" not in fixed.loc[0, "disambiguation_comment"]
 
 
 # ── clean_artist_info tests ───────────────────────────────────────────────────

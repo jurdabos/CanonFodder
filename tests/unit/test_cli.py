@@ -126,7 +126,7 @@ class TestIngestCommand:
     def test_ingest_no_new(self, mock_fetch, runner, tmp_pq_dir):
         """Reports no new scrobbles."""
         mock_fetch.return_value = pd.DataFrame()
-        result = runner.invoke(cli, ["ingest", "--user", "testuser"])
+        result = runner.invoke(cli, ["ingest", "--user", "testuser", "--source", "lastfm"])
         assert result.exit_code == 0
         assert "No new scrobbles" in result.output
 
@@ -134,23 +134,77 @@ class TestIngestCommand:
     def test_ingest_with_data(self, mock_fetch, runner, tmp_pq_dir, sample_scrobble_df):
         """Ingests scrobbles and reports count."""
         mock_fetch.return_value = sample_scrobble_df
-        result = runner.invoke(cli, ["ingest", "--user", "testuser"])
+        result = runner.invoke(cli, ["ingest", "--user", "testuser", "--source", "lastfm"])
         assert result.exit_code == 0
         assert "Ingested" in result.output
 
 
 class TestEnrichCommand:
-    """Tests the 'enrich' command."""
+    """Tests the unified 'enrich' command."""
 
-    @patch("HTTP.lfAPI.sync_user_country")
-    @patch("HTTP.lfAPI.enrich_artist_mbids")
-    def test_enrich_runs(self, mock_mbids, mock_country, runner, tmp_pq_dir):
-        """Runs enrichment without errors."""
-        mock_mbids.return_value = {"status": "ok", "message": "done"}
-        mock_country.return_value = False
-        result = runner.invoke(cli, ["enrich", "--user", "testuser"])
+    @patch("corefunc.enrich.enrich_all")
+    def test_enrich_default_local(self, mock_all, runner, tmp_pq_dir):
+        """Defaults to local MB mirror backend."""
+        mock_all.return_value = {"artist_info_rows": 10, "mbids_backfilled": 5}
+        result = runner.invoke(cli, ["enrich"])
         assert result.exit_code == 0
-        mock_mbids.assert_called_once_with()
+        mock_all.assert_called_once_with(backend="local", rebuild=False)
+        assert "local MB mirror" in result.output
+        assert "10" in result.output
+
+    @patch("corefunc.enrich.enrich_all")
+    def test_enrich_mbapi_flag(self, mock_all, runner, tmp_pq_dir):
+        """Selects remote MB API backend with --mbapi."""
+        mock_all.return_value = {"artist_info_rows": 3, "mbids_backfilled": 1}
+        result = runner.invoke(cli, ["enrich", "--mbapi"])
+        assert result.exit_code == 0
+        mock_all.assert_called_once_with(backend="mbapi", rebuild=False)
+        assert "remote MB API" in result.output
+
+    @patch("corefunc.enrich.enrich_all")
+    def test_enrich_lastfmapi_flag(self, mock_all, runner, tmp_pq_dir):
+        """Selects Last.fm + remote MB backend with --lastfmapi."""
+        mock_all.return_value = {"artist_info_rows": 7, "mbids_backfilled": 2}
+        result = runner.invoke(cli, ["enrich", "--lastfmapi"])
+        assert result.exit_code == 0
+        mock_all.assert_called_once_with(backend="lastfmapi", rebuild=False)
+
+    def test_enrich_mutual_exclusion(self, runner, tmp_pq_dir):
+        """Rejects --mbapi and --lastfmapi together."""
+        result = runner.invoke(cli, ["enrich", "--mbapi", "--lastfmapi"])
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output
+
+    @patch("corefunc.enrich.enrich_all")
+    def test_enrich_rebuild(self, mock_all, runner, tmp_pq_dir):
+        """Passes rebuild=True to enrich_all."""
+        mock_all.return_value = {"artist_info_rows": 20, "mbids_backfilled": 0}
+        result = runner.invoke(cli, ["enrich", "--rebuild"])
+        assert result.exit_code == 0
+        mock_all.assert_called_once_with(backend="local", rebuild=True)
+
+    @patch("HTTP.lfAPI.sync_user_country", return_value=False)
+    @patch("corefunc.enrich.enrich_all", return_value={"artist_info_rows": 0, "mbids_backfilled": 0})
+    def test_enrich_country_flag(self, mock_all, mock_country, runner, tmp_pq_dir):
+        """Runs country sync only when --country is passed."""
+        result = runner.invoke(cli, ["enrich", "--country", "--user", "testuser", "--source", "lastfm"])
+        assert result.exit_code == 0
+        mock_country.assert_called_once()
+
+    @patch("corefunc.enrich.enrich_all", return_value={"artist_info_rows": 0, "mbids_backfilled": 0})
+    def test_enrich_no_country_by_default(self, mock_all, runner, tmp_pq_dir):
+        """Does not run country sync by default."""
+        result = runner.invoke(cli, ["enrich"])
+        assert result.exit_code == 0
+        assert "Country" not in result.output
+
+    @patch("corefunc.enrich.enrich_all")
+    def test_enrich_runtime_error(self, mock_all, runner, tmp_pq_dir):
+        """Reports RuntimeError (e.g. local mirror unavailable) gracefully."""
+        mock_all.side_effect = RuntimeError("Cannot reach local MB mirror")
+        result = runner.invoke(cli, ["enrich"])
+        assert result.exit_code == 0
+        assert "Cannot reach local MB mirror" in result.output
 
 
 class TestIngestListenBrainz:
@@ -181,30 +235,15 @@ class TestIngestListenBrainz:
         assert "listenbrainz" in result.output
 
 
-class TestEnrichListenBrainz:
-    """Tests the 'enrich --source listenbrainz' command."""
+class TestEnrichListenBrainzCountry:
+    """Tests the --country + --source listenbrainz interaction."""
 
-    @patch("HTTP.lfAPI.enrich_artist_mbids")
-    def test_enrich_lb_runs_mbids(self, mock_mbids, runner, tmp_pq_dir):
-        """Runs MBID enrichment for ListenBrainz source (uses Last.fm artist.getInfo)."""
-        mock_mbids.return_value = {"status": "ok", "message": "Enriched 5 artists with MBIDs"}
-        result = runner.invoke(cli, ["enrich", "--source", "listenbrainz", "--no-country"])
-        assert result.exit_code == 0
-        assert "Enriching missing artist MBIDs" in result.output
-        mock_mbids.assert_called_once_with()
-
-    def test_enrich_lb_skips_country(self, runner, tmp_pq_dir):
+    @patch("corefunc.enrich.enrich_all", return_value={"artist_info_rows": 0, "mbids_backfilled": 0})
+    def test_enrich_lb_skips_country(self, mock_all, runner, tmp_pq_dir):
         """Skips country sync for ListenBrainz source."""
-        result = runner.invoke(cli, ["enrich", "--source", "listenbrainz", "--no-mbids"])
+        result = runner.invoke(cli, ["enrich", "--country", "--source", "listenbrainz"])
         assert result.exit_code == 0
         assert "Skipping country sync" in result.output
-
-    @patch("HTTP.lfAPI.enrich_artist_mbids")
-    def test_enrich_lb_no_user_needed_for_mbids(self, mock_mbids, runner, tmp_pq_dir):
-        """Does not require --user when only --mbids is requested."""
-        mock_mbids.return_value = {"status": "ok", "message": "done"}
-        result = runner.invoke(cli, ["enrich", "--source", "lb", "--no-country"])
-        assert result.exit_code == 0
 
 
 class TestSourceHelpers:

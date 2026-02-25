@@ -13,7 +13,8 @@ log = logging.getLogger(__name__)
 # ── Encoding-repair constants ─────────────────────────────────────────────────
 # Matching Unicode replacement char or C0/C1 control chars (except \n \r \t)
 _BAD_CHAR_RE = re.compile(r"[\uFFFD\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]")
-_TEXT_COLS = ["artist_name", "album_title", "track_title"]
+_SCROBBLE_TEXT_COLS = ["artist_name", "album_title", "track_title"]
+_ARTIST_INFO_TEXT_COLS = ["artist_name", "disambiguation_comment", "aliases"]
 # CP1252 bytes 0x80–0x9F → proper Unicode (0x81/0x8D/0x8F/0x90/0x9D undefined)
 _CP1252_C1: dict[int, str] = {
     0x80: "\u20AC", 0x82: "\u201A", 0x83: "\u0192", 0x84: "\u201E",
@@ -97,25 +98,18 @@ def _repair_text(text: str) -> str:
     )
 
 
-def fix_encoding() -> tuple[int, int]:
+def _fix_df_encoding(df: pd.DataFrame, text_cols: list[str]) -> tuple[pd.DataFrame, int]:
     """
-    Repairs encoding-corrupted strings in scrobble.parquet.
+    Repairs encoding-corrupted strings in the given DataFrame.
 
-    Scans artist_name, album_title, and track_title for C1 control
-    characters and attempts to recover the intended text via a
-    cascade of codec round-trips.
+    Scans *text_cols* for C1 control characters and attempts to
+    recover the intended text via a cascade of codec round-trips.
 
-    Returns
-    -------
-    tuple[int, int]
-        (repaired_row_count, total_row_count)
+    Returns the (possibly modified) DataFrame and the number of
+    rows that were repaired.
     """
-    df = read_parquet(SCROBBLE_PQ)
-    if df is None or df.empty:
-        return 0, 0
-    total = len(df)
     repaired_indices: set[int] = set()
-    for col in _TEXT_COLS:
+    for col in text_cols:
         if col not in df.columns:
             continue
         mask = df[col].notna()
@@ -127,11 +121,41 @@ def fix_encoding() -> tuple[int, int]:
         df.loc[bad_idx, col] = series[bad_mask].apply(_repair_text)
         repaired_indices.update(bad_idx.tolist())
         log.info("Repaired %d values in column '%s'.", len(bad_idx), col)
-    repaired = len(repaired_indices)
-    if repaired:
-        dump_parquet(df, SCROBBLE_PQ)
-    log.info("Encoding fix complete: %d rows repaired out of %d total.", repaired, total)
-    return repaired, total
+    return df, len(repaired_indices)
+
+
+def fix_encoding() -> dict[str, tuple[int, int]]:
+    """
+    Repairs encoding-corrupted strings in scrobble.parquet and
+    artist_info.parquet.
+
+    Returns
+    -------
+    dict mapping file label ('scrobble', 'artist_info') to
+    (repaired_row_count, total_row_count).
+    """
+    results: dict[str, tuple[int, int]] = {}
+    # Repairing scrobble.parquet
+    df = read_parquet(SCROBBLE_PQ)
+    if df is not None and not df.empty:
+        df, repaired = _fix_df_encoding(df, _SCROBBLE_TEXT_COLS)
+        if repaired:
+            dump_parquet(df, SCROBBLE_PQ)
+        results["scrobble"] = (repaired, len(df))
+        log.info("scrobble.parquet: %d rows repaired out of %d.", repaired, len(df))
+    else:
+        results["scrobble"] = (0, 0)
+    # Repairing artist_info.parquet
+    ai = read_parquet(ARTIST_INFO_PQ)
+    if ai is not None and not ai.empty:
+        ai, repaired = _fix_df_encoding(ai, _ARTIST_INFO_TEXT_COLS)
+        if repaired:
+            dump_parquet(ai, ARTIST_INFO_PQ)
+        results["artist_info"] = (repaired, len(ai))
+        log.info("artist_info.parquet: %d rows repaired out of %d.", repaired, len(ai))
+    else:
+        results["artist_info"] = (0, 0)
+    return results
 
 
 # ── Artist-info dedup ─────────────────────────────────────────────────────────

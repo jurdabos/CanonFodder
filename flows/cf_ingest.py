@@ -77,18 +77,19 @@ def enrich_artists() -> int:
 
 @task(
     name="fix_encoding",
-    description="Repairs encoding-corrupted strings in scrobble.parquet.",
+    description="Repairs encoding-corrupted strings in scrobble & artist_info.",
     retries=3,
     retry_delay_seconds=30,
     log_prints=True,
 )
-def fix_encoding_task() -> tuple[int, int]:
-    """Repairs encoding issues; returns (fixed, total)."""
+def fix_encoding_task() -> dict[str, tuple[int, int]]:
+    """Repairs encoding issues; returns per-file (fixed, total) dict."""
     from corefunc.data_cleaning import fix_encoding
     logger = get_run_logger()
-    fixed, total = fix_encoding()
-    logger.info("Encoding fix: %d rows repaired out of %d.", fixed, total)
-    return fixed, total
+    results = fix_encoding()
+    for label, (fixed, total) in results.items():
+        logger.info("%s: %d rows repaired out of %d.", label, fixed, total)
+    return results
 
 
 @task(
@@ -134,7 +135,8 @@ def weekly_ingest_flow(*, full: bool = False, source: str | None = None) -> dict
             raise ValueError("LB_USER not set.")
     logger.info("c9r ingest flow started at %s for user '%s' (source=%s).", start, username, source)
     new_scrobbles = fetch_scrobbles(username, full=full, source=source)
-    encoding_fixed, _ = fix_encoding_task()
+    enc_results = fix_encoding_task()
+    encoding_fixed = sum(r[0] for r in enc_results.values())
     enriched = enrich_artists()
     removed, remaining = clean_artists()
     end = datetime.now(UTC)

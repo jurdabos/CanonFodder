@@ -41,7 +41,7 @@ class TestFetchScrobblesTask:
 class TestEnrichArtistsTask:
     """Tests the enrich_artists Prefect task."""
 
-    @patch("corefunc.enrich.search_artist", return_value=[])
+    @patch("HTTP.mbAPI.search_artist", return_value=[])
     def test_returns_zero_when_no_unknowns(self, mock_search, populated_pq):
         """Returns 0 when all artists are already known."""
         from flows.cf_ingest import enrich_artists
@@ -65,7 +65,7 @@ class TestWeeklyIngestFlow:
 
     @patch("corefunc.workflow.lfAPI.sync_user_country", return_value=False)
     @patch("corefunc.workflow.lfAPI.fetch_scrobbles_since")
-    @patch("corefunc.enrich.search_artist", return_value=[])
+    @patch("HTTP.mbAPI.search_artist", return_value=[])
     def test_full_flow(self, mock_search, mock_fetch, mock_country, tmp_pq_dir, sample_scrobble_df):
         """Runs the complete flow and returns a result dict."""
         mock_fetch.return_value = sample_scrobble_df
