@@ -121,25 +121,3 @@ class TestAvcDf:
         data.to_parquet(io_mod.AVC_PQ, index=False)
         df = avc_df()
         assert len(df) == 1
-
-
-class TestCanoniseCommand:
-    """Tests the placeholder canonise CLI command."""
-
-    def test_canonise_runs(self):
-        """Prints placeholder message."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["canonise"])
-        assert result.exit_code == 0
-        assert "Canonise" in result.output
-
-
-class TestReviewCommand:
-    """Tests the placeholder review CLI command."""
-
-    def test_review_runs(self):
-        """Prints placeholder message."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["review"])
-        assert result.exit_code == 0
-        assert "Review" in result.output

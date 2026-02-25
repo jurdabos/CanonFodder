@@ -132,6 +132,7 @@ def qa_reports(
     *,
     last_n: int | None = None,
     fail_only: bool = False,
+    target: str | None = None,
 ) -> pd.DataFrame:
     """
     Returns QA report rows from qa_report.parquet.
@@ -142,10 +143,17 @@ def qa_reports(
         When set, returns only the most recent *last_n* rows.
     fail_only : bool
         When True, returns only rows where ``passed`` is False.
+    target : str, optional
+        When set, filters to rows matching this ``target`` value.
     """
     if not QA_REPORT_PQ.exists():
         return pd.DataFrame()
-    where = "WHERE passed = false" if fail_only else ""
+    clauses: list[str] = []
+    if fail_only:
+        clauses.append("passed = false")
+    if target:
+        clauses.append(f"target = '{target}'")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     order = "ORDER BY timestamp DESC"
     limit = f"LIMIT {last_n}" if last_n else ""
     return query(f"""

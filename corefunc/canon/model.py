@@ -18,27 +18,45 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
 from xgboost import XGBClassifier
-from helpers.io import AVC_PQ, read_parquet
+from helpers.io import AVC_PQ, GS_MB_PQ, read_parquet
 from helpers import cluster, experiment, stats
 
 log = logging.getLogger(__name__)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 MODEL_DIR = PROJECT_ROOT / "ML"
 MODEL_PATH = MODEL_DIR / "xgb.json"
 COLUMNS_PATH = MODEL_DIR / "xgb_columns.json"
 
 
-def _build_gold_standard() -> pd.DataFrame:
-    """Loads avc.parquet, expands pairs, and computes fuzzy-score features."""
+def _build_gold_standard(augment: bool = False) -> pd.DataFrame:
+    """
+    Loads avc.parquet, expands pairs, and computes fuzzy-score features.
+
+    When augment is True and gs_mb.parquet exists, merges MBDB-sourced pairs
+    into the training set before computing features.
+    """
     gs = read_parquet(AVC_PQ)
     if gs is None or gs.empty:
-        raise FileNotFoundError("avc.parquet not found or empty — run 'c9r review' first.")
+        raise FileNotFoundError("avc.parquet not found or empty — run 'c9r canon avc seed' first.")
     # Expanding into pairwise rows
     if {"variant_a", "variant_b"}.issubset(gs.columns) is False:
         rows = []
         for _, row in gs.iterrows():
             rows.extend(cluster.expand_pairs(row))
         gs = pd.DataFrame(rows, columns=["variants", "variant_a", "variant_b", "to_link"])
+    # Merging MBDB augmentation pairs if requested
+    n_mb_pairs = 0
+    if augment:
+        mb = read_parquet(GS_MB_PQ)
+        if mb is not None and not mb.empty:
+            mb = mb[["variant_a", "variant_b", "to_link"]].copy()
+            # Synthesising a variants column for length_stats compatibility
+            mb["variants"] = mb["variant_a"] + "{" + mb["variant_b"]
+            n_mb_pairs = len(mb)
+            gs = pd.concat([gs, mb], ignore_index=True)
+            log.info("Merged %d MBDB pairs into gold standard (total: %d).", n_mb_pairs, len(gs))
+        else:
+            log.warning("augment=True but gs_mb.parquet not found — run 'c9r canon avc augment'.")
     # Computing fuzzy-score features
     score_cols = {"ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio", "WRatio", "QRatio"}
     if score_cols.difference(gs.columns):
@@ -54,16 +72,23 @@ def _build_gold_standard() -> pd.DataFrame:
     return gs
 
 
-def train_model(*, test_size: float = 0.25, random_state: int = 47, run_name: str | None = None) -> Pipeline:
+def train_model(
+    *,
+    test_size: float = 0.25,
+    random_state: int = 47,
+    run_name: str | None = None,
+    augment: bool = False,
+) -> Pipeline:
     """
     Trains an XGBoost classifier on the gold-standard pairs in avc.parquet.
 
+    When augment is True, also includes pairs from gs_mb.parquet.
     Saves the model to ML/xgb.json and columns to ML/xgb_columns.json.
     Logs parameters, metrics, and artefacts to MLflow.
     Returns the fitted sklearn Pipeline.
     """
     experiment.init_experiment()
-    gs = _build_gold_standard()
+    gs = _build_gold_standard(augment=augment)
     target = "to_link"
     num_cols = [c for c in gs.columns if c not in ["variants", target, "variant_a", "variant_b"]]
     X = gs[num_cols]
@@ -93,7 +118,9 @@ def train_model(*, test_size: float = 0.25, random_state: int = 47, run_name: st
         experiment.log_params({
             "test_size": test_size,
             "random_state": random_state,
+            "augment": augment,
             "n_features": len(num_cols),
+            "n_total_pairs": len(X),
             "n_train": len(X_train),
             "n_test": len(X_test),
             "pos_train": int(y_train.sum()),

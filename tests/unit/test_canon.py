@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import pandas as pd
 import pytest
-from corefunc.canon import _build_gold_standard, evaluate, train_model
+from corefunc.canon.model import _build_gold_standard, evaluate, train_model
 
 
 def _make_avc(n: int = 40) -> pd.DataFrame:
@@ -26,7 +26,7 @@ def _make_avc(n: int = 40) -> pd.DataFrame:
 class TestBuildGoldStandard:
     """Tests the gold-standard builder."""
 
-    @patch("corefunc.canon.read_parquet")
+    @patch("corefunc.canon.model.read_parquet")
     def test_builds_feature_matrix(self, mock_read):
         """Returns a DataFrame with fuzzy-score and length features."""
         mock_read.return_value = _make_avc(40)
@@ -36,13 +36,13 @@ class TestBuildGoldStandard:
         assert "avg_name_len" in gs.columns
         assert len(gs) > 0
 
-    @patch("corefunc.canon.read_parquet", return_value=None)
+    @patch("corefunc.canon.model.read_parquet", return_value=None)
     def test_raises_on_empty_avc(self, mock_read):
         """Raises FileNotFoundError when avc.parquet is empty."""
         with pytest.raises(FileNotFoundError, match="avc.parquet"):
             _build_gold_standard()
 
-    @patch("corefunc.canon.read_parquet")
+    @patch("corefunc.canon.model.read_parquet")
     def test_raises_on_empty_df(self, mock_read):
         """Raises FileNotFoundError when the DataFrame is empty."""
         mock_read.return_value = pd.DataFrame()
@@ -53,16 +53,16 @@ class TestBuildGoldStandard:
 class TestTrainModel:
     """Tests the full train_model pipeline."""
 
-    @patch("corefunc.canon.experiment")
-    @patch("corefunc.canon.read_parquet")
+    @patch("corefunc.canon.model.experiment")
+    @patch("corefunc.canon.model.read_parquet")
     def test_trains_and_returns_pipeline(self, mock_read, mock_exp, monkeypatch, tmp_path):
         """Trains a model, saves artefacts, and logs to MLflow."""
         mock_read.return_value = _make_avc(60)
         ml_dir = tmp_path / "ML"
         ml_dir.mkdir()
-        monkeypatch.setattr("corefunc.canon.MODEL_DIR", ml_dir)
-        monkeypatch.setattr("corefunc.canon.MODEL_PATH", ml_dir / "xgb.json")
-        monkeypatch.setattr("corefunc.canon.COLUMNS_PATH", ml_dir / "xgb_columns.json")
+        monkeypatch.setattr("corefunc.canon.model.MODEL_DIR", ml_dir)
+        monkeypatch.setattr("corefunc.canon.model.MODEL_PATH", ml_dir / "xgb.json")
+        monkeypatch.setattr("corefunc.canon.model.COLUMNS_PATH", ml_dir / "xgb_columns.json")
         # Making start_run usable as a context manager
         mock_exp.start_run.return_value.__enter__ = MagicMock()
         mock_exp.start_run.return_value.__exit__ = MagicMock(return_value=False)

@@ -1,0 +1,33 @@
+The local MBDB is an excellent source for boosting training data.
+
+What's available
+
+Positive pairs (alias → canonical, to_link = True):
+•  497,530 aliases across 287,837 artists — community-curated, high quality
+•  Alias types: Artist name (129K), Legal name (121K), Search hint (52K), untyped (195K)
+•  Each (alias.name, artist.name) where alias ≠ canonical is a verified positive pair
+•  Sample: Kwanza Posse → Kwanzaa Posse, Deepac Ram → Deepak Ram, Casting Crows → Casting Crowns
+
+Negative pairs (same name, different MBIDs, to_link = False):
+•  120,310 ambiguous names shared by multiple distinct artists
+•  100K+ same-name pairs where both artists have disambiguation comments (confirming they are genuinely different entities)
+•  Sample: !!! (California dance-punk group) vs !!! (has song "Inoshiro Honda")
+
+Compared to our current gold standard
+
+Our hand-labeled AVC has ~488 rows (~177 linked, ~311 skipped). Even a modest extraction from MBDB could easily yield 5K–50K labeled pairs with zero manual effort. The fuzzy_scores() and length_stats() functions already in helpers/cluster.py and helpers/stats.py can compute features identically.
+
+Practical approach
+
+The infrastructure is already there — corefunc/mb_local.py has _psql_csv() which pipes SQL through docker exec and returns a DataFrame. A new script could:
+
+1. Positive pairs: Query artist_alias ⟶ artist for (alias_name, canonical_name) pairs where the names differ. Optionally filter to aliases of type "Artist name" or "Search hint" (types most relevant to scrobble variant matching, as "Legal name" pairs like Christian Murariu → Goldfinger may introduce noise).
+2. Negative pairs: Self-join artist on name where id1 < id2 — same string, different MBIDs = verified not-the-same-artist. Sampling to balance with positives.
+3. Output a gold-standard DataFrame with the same schema that _build_gold_standard() already expects.
+
+For gathering negative pairs, we have a bit of a conundrum.
+Phase A – we gather pairs like ('Aurora', 'Aurora') where the same string refers to different MB artists (different MBIDs). These are to_link=False. We capped these at 500 'cause they are somewhat degenerate for future learning. All RapidFuzz scores will be 1.0, but that is kind of the point here at this point when we are experimenting with models for record linkage. The model we are developing will, by design, not receive tuples of identical artist names.
+Phase B –we find pairs that look similar but they are genuinely different artists like:
+- Coldplay/Coldploy (WRatio~90)
+- Radiohead/Radioheads (Wratio~95)
+Phase B pulls (name, gid) tuples from MBDB and only emits a hard-negative pair when the two names map to different MBIDs. So ('Beatles', 'The Beatles') would only become a negative if "Beatles" and "The Beatles" are listed as separate MB artist entries with distinct GIDs — not if one is just an alias of the other.

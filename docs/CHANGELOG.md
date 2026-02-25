@@ -4,6 +4,23 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-02-25 – c9r canon sketched out
+
+### Added
+- corefunc/avc_seed.py — MySQL dump parser that seeded PQ/avc.parquet with 488 rows (177 linked, 311 skipped) from the old gold standard
+- tests/unit/test_canonize.py — 15 unit tests covering all functions (all passing)
+
+### Changed
+- corefunc/canon.py — business logic for all four subcommands: avc_summary(), propagate_avc(), undecided_rows() / update_avc_decision(), list_mlflow_runs() / load_run_model() / discover_candidates() / write_new_candidates()
+- main.py — replaced the placeholder canonise and review commands with the canon group housing:
+- c9r canon avc show (with --decided / --undecided / --last N filters, tabular output with variants column last)
+- c9r canon avc propagate (renames artist_info rows, appends to aliases without overwriting)
+- c9r canon avc seed <sql_path> (one-time migration command)
+- c9r canon human (interactive review of NULL-to_link rows with progress counter and [q]uit)
+- c9r canon machine (lists MLflow runs with metrics, user picks a model, RapidFuzz pre-filter → ML classification → union-find grouping → writes new candidates with to_link=NULL)
+
+---
+
 ## 2026-02-25 — MLflow experiment tracking + dashboard expansion (v0.6.2)
 
 ### Added

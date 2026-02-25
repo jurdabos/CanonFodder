@@ -33,6 +33,7 @@ AVC_PQ = PQ_DIR / "avc.parquet"
 C_PQ = PQ_DIR / "c.parquet"
 UC_PQ = PQ_DIR / "uc.parquet"
 QA_REPORT_PQ = PQ_DIR / "qa_report.parquet"
+GS_MB_PQ = PQ_DIR / "gs_mb.parquet"
 
 # ── PyArrow schemas ───────────────────────────────────────────────────────────
 SCROBBLE_SCHEMA = pa.schema([
@@ -126,7 +127,9 @@ def append_to_parquet(
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         existing = pd.read_parquet(path)
-        combined = pd.concat([existing, df], ignore_index=True)
+        # Dropping all-NA columns before concat to avoid FutureWarning
+        parts = [d.dropna(axis=1, how="all") for d in (existing, df) if not d.empty]
+        combined = pd.concat(parts, ignore_index=True)
         if dedup_cols:
             combined = combined.drop_duplicates(subset=list(dedup_cols), keep="last")
         combined.to_parquet(path, index=False, compression=compression)

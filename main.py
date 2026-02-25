@@ -109,28 +109,189 @@ def enrich(mbapi: bool, lastfmapi: bool, country: bool, rebuild: bool, user: str
                 click.echo(f"Country sync skipped: {exc}")
 
 
-# ── canonise ───────────────────────────────────────────────────────────────
-@cli.command()
-def canonise() -> None:
-    """Run artist name canonisation w/ ML bump"""
-    click.echo("Canonise command — will be wired in Phase 6/7.")
+# ── canon (command group) ──────────────────────────────────────────────────
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def canon(ctx: click.Context) -> None:
+    """Artist name canonisation — show, propagate, review, discover"""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
-# ── review ─────────────────────────────────────────────────────────────────
-@cli.command()
-def review() -> None:
-    """Review artist-name variant groups interactively"""
-    click.echo("Review command — will be wired in Phase 6.")
+@canon.group(invoke_without_command=True)
+@click.pass_context
+def avc(ctx: click.Context) -> None:
+    """Artist Variants Canonized table operations"""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@avc.command("show")
+@click.option("--decided", is_flag=True, help="Show only decided rows (to_link 0 or 1).")
+@click.option("--undecided", is_flag=True, help="Show only undecided rows (to_link NULL).")
+@click.option("--last", "last_n", default=None, type=int, help="Show only the last N rows.")
+def avc_show(decided: bool, undecided: bool, last_n: int | None) -> None:
+    """Prints out the current state of the avc table."""
+    from corefunc.canon.workflow import avc_summary
+    rows = avc_summary(decided_only=decided, undecided_only=undecided, last_n=last_n)
+    if not rows:
+        click.echo("No avc rows found.")
+        return
+    click.echo(f"\nAVC table ({len(rows)} row{'s' if len(rows) != 1 else ''}):\n")
+    click.echo(f"  {'#':>4}  {'Link':<4}  {'Canonical Name':<40}  {'Decided':<10}  {'Variants'}")
+    click.echo(f"  {'─' * 4}  {'─' * 4}  {'─' * 40}  {'─' * 10}  {'─' * 8}")
+    for r in rows:
+        cn = r["canonical_name"][:40]
+        click.echo(f"  {r['idx']:>4}  {r['to_link_display']:<4}  {cn:<40}  {r['stamp']:<10}  {r['artist_variants_text']}")
+
+
+@avc.command("propagate")
+def avc_propagate() -> None:
+    """Applies canonisation results to artist_info."""
+    from corefunc.canon.workflow import propagate_avc
+    click.echo("Propagating AVC decisions to artist_info …")
+    result = propagate_avc()
+    click.echo(f"Done — {result['updated']} row(s) updated, {result['aliases_added']} alias(es) added.")
+
+
+@avc.command("seed")
+@click.argument("sql_path", type=click.Path(exists=True))
+def avc_seed_cmd(sql_path: str) -> None:
+    """Seeds avc.parquet from a MySQL dump file."""
+    from corefunc.avc_seed import seed_avc_from_sql
+    click.echo(f"Seeding avc.parquet from {sql_path} …")
+    n = seed_avc_from_sql(sql_path)
+    click.echo(f"Done — {n} rows written to avc.parquet.")
+
+
+@avc.command("augment")
+@click.option("--pos-limit", default=5000, type=int, help="Max positive (alias→canonical) pairs.")
+@click.option("--neg-limit", default=5000, type=int, help="Max negative pairs.")
+@click.option("--similarity-floor", default=60, type=int, help="WRatio floor for hard negatives (0-100).")
+def avc_augment(pos_limit: int, neg_limit: int, similarity_floor: int) -> None:
+    """Extracts training pairs from the local MusicBrainz mirror into gs_mb.parquet."""
+    from corefunc.canon.augment import augment_gold_standard
+    click.echo(f"Extracting pairs from MBDB (pos={pos_limit}, neg={neg_limit}, floor={similarity_floor}) …")
+    try:
+        n = augment_gold_standard(
+            pos_limit=pos_limit, neg_limit=neg_limit,
+            similarity_floor=similarity_floor,
+        )
+        click.echo(f"Done — {n} rows written to gs_mb.parquet.")
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+
+
+@canon.command("human")
+def canon_human() -> None:
+    """Tackles undecided artist name variants interactively."""
+    from corefunc.canon.workflow import undecided_rows, update_avc_decision
+    pending = undecided_rows()
+    if pending.empty:
+        click.echo("No undecided variant groups — all caught up.")
+        return
+    total = len(pending)
+    click.echo(f"\n{total} undecided variant group(s) to review.\n")
+    for i, (_, row) in enumerate(pending.iterrows(), 1):
+        variants = [v.strip() for v in str(row["artist_variants_text"]).split("{") if v.strip()]
+        if len(variants) < 2:
+            continue
+        click.echo(f"\n── ({i} of {total}) ──")
+        click.echo("These artist names appear to be variants:")
+        choices: dict[str, str] = {}
+        for j, v in enumerate(variants, 1):
+            click.echo(f"  [{j}] {v}")
+            choices[str(j)] = v
+        click.echo("  [c] Custom name")
+        click.echo("  [s] Skip (not the same)")
+        click.echo("  [q] Quit review")
+        choice = click.prompt("Selection", type=str, default="s")
+        if choice.lower() == "q":
+            click.echo("Review stopped.")
+            break
+        if choice.lower() == "s":
+            comment = click.prompt("Optional comment", default="", show_default=False) or ""
+            update_avc_decision(row["artist_variants_hash"], False, "__SKIP__", comment)
+            click.echo("  → skipped.")
+            continue
+        if choice.lower() == "c":
+            canonical = click.prompt("Enter the custom canonical name").strip()
+        elif choice in choices:
+            canonical = choices[choice]
+        else:
+            click.echo("Invalid choice, skipping.")
+            update_avc_decision(row["artist_variants_hash"], False, "__SKIP__", "invalid choice")
+            continue
+        if not canonical:
+            click.echo("No name provided, skipping.")
+            update_avc_decision(row["artist_variants_hash"], False, "__SKIP__", "no name")
+            continue
+        comment = click.prompt("Optional comment", default="", show_default=False) or ""
+        update_avc_decision(row["artist_variants_hash"], True, canonical, comment)
+        click.echo(f"  → linked as '{canonical}'.")
+    click.echo("\nHuman review complete.")
+
+
+@canon.command("machine")
+@click.option("--cutoff", default=75, type=int, help="RapidFuzz WRatio pre-filter cutoff (0-100).")
+@click.option("--threshold", default=0.5, type=float, help="ML model probability threshold.")
+@click.option("--min-plays", default=2, type=int, help="Minimum play count to consider.")
+@click.option("--limit", default=2000, type=int, help="Max artists to scan.")
+def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> None:
+    """Finds new artist name variant candidates using a trained ML model."""
+    from corefunc.canon.workflow import (
+        list_mlflow_runs, load_run_model, discover_candidates, write_new_candidates,
+    )
+    # Listing available models
+    runs = list_mlflow_runs()
+    if not runs:
+        click.echo("No finished MLflow runs found. Train a model first with 'c9r train'.")
+        return
+    click.echo(f"\nAvailable models ({len(runs)}):\n")
+    click.echo(f"  {'#':>3}  {'Run Name':<24}  {'Date':<19}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  {'AUC':>6}")
+    click.echo(f"  {'─' * 3}  {'─' * 24}  {'─' * 19}  {'─' * 6}  {'─' * 6}  {'─' * 6}  {'─' * 6}")
+    for j, run in enumerate(runs, 1):
+        click.echo(
+            f"  {j:>3}  {run['run_name']:<24}  {run['start_time']:<19}"
+            f"  {run['precision']:>6.4f}  {run['recall']:>6.4f}  {run['f1']:>6.4f}  {run['auc']:>6.4f}"
+        )
+    choice = click.prompt("\nSelect model number", type=int, default=1)
+    if choice < 1 or choice > len(runs):
+        click.echo("Invalid selection.")
+        return
+    selected = runs[choice - 1]
+    click.echo(f"\nLoading model from run '{selected['run_name']}' …")
+    model = load_run_model(selected["run_id"])
+    click.echo(f"Scanning for new variant candidates (cutoff={cutoff}, threshold={threshold}) …")
+    candidates = discover_candidates(
+        model, wratio_cutoff=cutoff, proba_threshold=threshold,
+        min_plays=min_plays, limit=limit,
+    )
+    if not candidates:
+        click.echo("No new variant candidates found.")
+        return
+    click.echo(f"\nFound {len(candidates)} new candidate group(s):")
+    for c in candidates[:20]:
+        click.echo(f"  {' ↔ '.join(c['variants'])}")
+    if len(candidates) > 20:
+        click.echo(f"  … and {len(candidates) - 20} more.")
+    if click.confirm("\nAdd these to avc.parquet for human review?", default=True):
+        n = write_new_candidates(candidates)
+        click.echo(f"Written {n} candidate group(s) to avc.parquet.")
+    else:
+        click.echo("Cancelled.")
 
 
 # ── train ──────────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--run-name", default=None, help="MLflow run name for this training session.")
-def train(run_name: str | None) -> None:
+@click.option("--augment/--no-augment", default=False, help="Include MBDB pairs from gs_mb.parquet.")
+def train(run_name: str | None, augment: bool) -> None:
     """Train a canonisation model"""
-    from corefunc.canon import train_model
-    click.echo("Training XGBoost model …")
-    train_model(run_name=run_name)
+    from corefunc.canon.model import train_model
+    label = " (with MBDB augmentation)" if augment else ""
+    click.echo(f"Training XGBoost model{label} …")
+    train_model(run_name=run_name, augment=augment)
     click.echo("Done.")
 
 
@@ -331,7 +492,7 @@ def qa_scrobble(hours: int | None, source: str | None) -> None:
     rec = report["reconciliation"]
     if rec.get("fetched") is not None:
         click.echo(f"  Reconciliation: fetched={rec['fetched']:,}, stored={rec['stored']:,}, diff={rec.get('diff', 0):,}")
-    click.echo("\nReport appended to PQ/qa_report.parquet")
+    _print_qa_history("scrobble")
 
 
 @qa.command("a_i")
@@ -373,7 +534,7 @@ def qa_artist_info_cmd() -> None:
     enc = report["encoding"]
     if not enc["pass"]:
         click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
-    click.echo("\nReport appended to PQ/qa_report.parquet")
+    _print_qa_history("artist_info")
 
 
 @qa.command("avc")
@@ -405,7 +566,7 @@ def qa_avc_cmd() -> None:
     enc = report["encoding"]
     if not enc["pass"]:
         click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
-    click.echo("\nReport appended to PQ/qa_report.parquet")
+    _print_qa_history("artist_variants_canonized")
 
 
 @qa.command("uc")
@@ -419,7 +580,7 @@ def qa_uc_cmd() -> None:
         return
     click.echo(f"\n  Entries: {report['row_count']:,}")
     click.echo(f"  Unique countries: {report['unique_countries']}")
-    click.echo("\nReport appended to PQ/qa_report.parquet")
+    _print_qa_history("user_country")
 
 
 def _format_qa_src(row) -> str:
@@ -441,6 +602,60 @@ def _format_qa_src(row) -> str:
     return "/".join(parts)
 
 
+def _format_qa_row(row) -> str:
+    """Formats a single QA report row as a one-liner string."""
+    status = "PASS" if row["passed"] else "FAIL"
+    ts = str(row["timestamp"])[:19]
+    src = _format_qa_src(row)
+    src_str = f"  src={src}" if src else ""
+    target = str(row.get("target", ""))
+    _hr = row.get("hash_fill_rate", 0)
+    hash_rate = 0 if (_hr is None or (isinstance(_hr, float) and math.isnan(_hr))) else _hr
+    _mr = row.get("mbid_fill_rate", 0)
+    mbid_rate = 0 if (_mr is None or (isinstance(_mr, float) and math.isnan(_mr))) else _mr
+    if target == "user_country":
+        _uc = row.get("unique_countries")
+        countries = int(_uc) if _uc is not None and not (isinstance(_uc, float) and math.isnan(_uc)) else "?"
+        return (f"  {ts}  {status}{src_str}"
+                f"  rows={int(row['row_count']):,}"
+                f"  countries={countries}")
+    if target == "artist_info":
+        _cr = row.get("country_fill_rate", 0)
+        country_rate = 0 if (_cr is None or (isinstance(_cr, float) and math.isnan(_cr))) else _cr
+        _dr = row.get("disambiguation_fill_rate", 0)
+        disambig_rate = 0 if (_dr is None or (isinstance(_dr, float) and math.isnan(_dr))) else _dr
+        _ar = row.get("aliases_fill_rate", 0)
+        aliases_rate = 0 if (_ar is None or (isinstance(_ar, float) and math.isnan(_ar))) else _ar
+        return (f"  {ts}  {status}{src_str}"
+                f"  rows={int(row['row_count']):,}"
+                f"  dupes={row['duplicate_pct']}%"
+                f"  mbid={mbid_rate}%"
+                f"  country={country_rate}%"
+                f"  disambig={disambig_rate}%"
+                f"  aliases={aliases_rate}%"
+                f"  bad_chars={int(row['bad_char_rows'])}")
+    if target == "artist_variants_canonized":
+        fill_str = f"hash_fill={hash_rate}%"
+    else:
+        fill_str = f"mbid_fill={mbid_rate}%"
+    return (f"  {ts}  {status}{src_str}"
+            f"  rows={int(row['row_count']):,}"
+            f"  dupes={row['duplicate_pct']}%"
+            f"  {fill_str}"
+            f"  bad_chars={int(row['bad_char_rows'])}")
+
+
+def _print_qa_history(target: str, last_n: int = 5) -> None:
+    """Prints recent QA one-liners for a given target."""
+    from helpers.query import qa_reports
+    df = qa_reports(last_n=last_n, target=target)
+    if df.empty:
+        return
+    click.echo(f"\nLast {len(df)} {target} QA reports:\n")
+    for _, row in df.iterrows():
+        click.echo(_format_qa_row(row))
+
+
 @qa.command()
 @click.option("--last", "last_n", default=5, type=int, help="Number of recent reports to show.")
 @click.option("--all", "show_all", is_flag=True, help="Show all reports (overrides --last).")
@@ -456,47 +671,7 @@ def show(last_n: int, show_all: bool, fail_only: bool) -> None:
     click.echo(f"{'All' if show_all else f'Last {last_n}'} QA reports"
                f"{' (failures only)' if fail_only else ''}:\n")
     for _, row in df.iterrows():
-        status = "PASS" if row["passed"] else "FAIL"
-        ts = str(row["timestamp"])[:19]
-        src = _format_qa_src(row)
-        src_str = f"  src={src}" if src else ""
-        target = str(row.get("target", ""))
-        _hr = row.get("hash_fill_rate", 0)
-        hash_rate = 0 if (_hr is None or (isinstance(_hr, float) and math.isnan(_hr))) else _hr
-        _mr = row.get("mbid_fill_rate", 0)
-        mbid_rate = 0 if (_mr is None or (isinstance(_mr, float) and math.isnan(_mr))) else _mr
-        if target == "user_country":
-            _uc = row.get("unique_countries")
-            countries = int(_uc) if _uc is not None and not (isinstance(_uc, float) and math.isnan(_uc)) else "?"
-            click.echo(f"  {ts}  {status}{src_str}"
-                       f"  rows={int(row['row_count']):,}"
-                       f"  countries={countries}")
-        elif target == "artist_info":
-            # Showing enrichment fill rates for artist_info reports
-            _cr = row.get("country_fill_rate", 0)
-            country_rate = 0 if (_cr is None or (isinstance(_cr, float) and math.isnan(_cr))) else _cr
-            _dr = row.get("disambiguation_fill_rate", 0)
-            disambig_rate = 0 if (_dr is None or (isinstance(_dr, float) and math.isnan(_dr))) else _dr
-            _ar = row.get("aliases_fill_rate", 0)
-            aliases_rate = 0 if (_ar is None or (isinstance(_ar, float) and math.isnan(_ar))) else _ar
-            click.echo(f"  {ts}  {status}{src_str}"
-                       f"  rows={int(row['row_count']):,}"
-                       f"  dupes={row['duplicate_pct']}%"
-                       f"  mbid={mbid_rate}%"
-                       f"  country={country_rate}%"
-                       f"  disambig={disambig_rate}%"
-                       f"  aliases={aliases_rate}%"
-                       f"  bad_chars={int(row['bad_char_rows'])}")
-        else:
-            if target == "artist_variants_canonized":
-                fill_str = f"hash_fill={hash_rate}%"
-            else:
-                fill_str = f"mbid_fill={mbid_rate}%"
-            click.echo(f"  {ts}  {status}{src_str}"
-                       f"  rows={int(row['row_count']):,}"
-                       f"  dupes={row['duplicate_pct']}%"
-                       f"  {fill_str}"
-                       f"  bad_chars={int(row['bad_char_rows'])}")
+        click.echo(_format_qa_row(row))
 
 
 # ── profile ─────────────────────────────────────────────────────────────────

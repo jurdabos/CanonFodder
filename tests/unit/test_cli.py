@@ -455,7 +455,7 @@ class TestTrainCommand:
     def test_train_runs(self, runner, monkeypatch):
         """Invokes train_model and reports done."""
         mock_train = MagicMock()
-        monkeypatch.setattr("corefunc.canon.train_model", mock_train)
+        monkeypatch.setattr("corefunc.canon.model.train_model", mock_train)
         result = runner.invoke(cli, ["train"])
         assert result.exit_code == 0
         assert "Done" in result.output
