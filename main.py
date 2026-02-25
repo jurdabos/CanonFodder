@@ -119,7 +119,7 @@ def canonise() -> None:
 # ── review ─────────────────────────────────────────────────────────────────
 @cli.command()
 def review() -> None:
-    """Interactively reviews artist-name variant groups."""
+    """Review artist-name variant groups interactively"""
     click.echo("Review command — will be wired in Phase 6.")
 
 
@@ -127,7 +127,7 @@ def review() -> None:
 @cli.command()
 @click.option("--run-name", default=None, help="MLflow run name for this training session.")
 def train(run_name: str | None) -> None:
-    """Trains the XGBoost canonisation model."""
+    """Train a canonisation model"""
     from corefunc.canon import train_model
     click.echo("Training XGBoost model …")
     train_model(run_name=run_name)
@@ -150,7 +150,7 @@ def mlflow_ui(host: str, port: int) -> None:
 @click.option("--host", default="127.0.0.1", help="Bind address.")
 @click.option("--port", "-p", default=8000, type=int, help="Port to listen on.")
 def serve(host: str, port: int) -> None:
-    """Starts the FastAPI model-serving endpoint."""
+    """Start the ASGI model-serving endpoint"""
     import uvicorn
     click.echo(f"Starting model server on {host}:{port} …")
     uvicorn.run("corefunc.model_server:app", host=host, port=port, workers=1)
@@ -232,7 +232,7 @@ def dashboard_recent(n: int) -> None:
 @click.option("--all", "purge_all", is_flag=True, help="Purge all Parquet files.")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (only with --all).")
 def purge(purge_all: bool, yes: bool) -> None:
-    """Removes Parquet data files.
+    """Remove Parquet data files
 
     Without --all, presents each file interactively for selection.
     """
@@ -279,7 +279,7 @@ def fix_encoding_cmd() -> None:
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def qa(ctx: click.Context) -> None:
-    """Runs or queries post-ingestion quality checks."""
+    """Run or query post-ingestion quality checks"""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -503,7 +503,7 @@ def show(last_n: int, show_all: bool, fail_only: bool) -> None:
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def profile(ctx: click.Context) -> None:
-    """Data profiling (cf. subcommands)"""
+    """Data profiling - see subcommands"""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
