@@ -15,15 +15,45 @@ def runner():
 
 
 class TestDashboardCommand:
-    """Tests the 'dashboard' command."""
+    """Tests the 'dashboard' command group."""
 
-    def test_dashboard_output(self, runner, populated_pq):
-        """Prints scrobble stats and top artists."""
-        result = runner.invoke(cli, ["dashboard", "--top", "2"])
+    def test_dashboard_help(self, runner):
+        """Shows help when invoked without a subcommand."""
+        result = runner.invoke(cli, ["dashboard"])
+        assert result.exit_code == 0
+        assert "artist" in result.output
+        assert "album" in result.output
+        assert "track" in result.output
+        assert "recent" in result.output
+
+    def test_dashboard_artist(self, runner, populated_pq):
+        """Shows scrobble stats and top artists."""
+        result = runner.invoke(cli, ["dashboard", "artist", "--top", "2"])
         assert result.exit_code == 0
         assert "Scrobbles:" in result.output
         assert "Unique artists:" in result.output
         assert "Bohren" in result.output
+
+    def test_dashboard_album(self, runner, populated_pq):
+        """Shows top albums with 'artist: album' format."""
+        result = runner.invoke(cli, ["dashboard", "album", "-n", "2"])
+        assert result.exit_code == 0
+        assert "Sunset Mission" in result.output
+        assert "Bohren" in result.output
+
+    def test_dashboard_track(self, runner, populated_pq):
+        """Shows top tracks with 'artist: track (album)' format."""
+        result = runner.invoke(cli, ["dashboard", "track", "-n", "3"])
+        assert result.exit_code == 0
+        assert "Prowler" in result.output
+        assert "Sunset Mission" in result.output
+
+    def test_dashboard_recent(self, runner, populated_pq):
+        """Shows most recent scrobbles with timestamps."""
+        result = runner.invoke(cli, ["dashboard", "recent", "-n", "2"])
+        assert result.exit_code == 0
+        assert "Midnight Walker" in result.output
+        assert "2024-01-15" in result.output
 
 
 class TestPurgeCommand:

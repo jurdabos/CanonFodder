@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "c9r"
-version = "0.6.0"
+version = "0.6.2"
 description = "Reproducible pipeline for music scrobble ingestion, artist-name record linkage, and interactive analytics."
 requires-python = ">=3.12"
 license = "MIT"
@@ -14,6 +14,7 @@ dependencies = [
   "duckdb>=1.2",
   "fastapi>=0.115",
   "matplotlib>=3.9",
+  "mlflow>=3.10.0",
   "musicbrainzngs>=0.7.1",
   "numpy>=2.0",
   "pandas>=2.2",

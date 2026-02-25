@@ -16,12 +16,13 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from xgboost import XGBClassifier
+from importlib.metadata import version as pkg_version
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = PROJECT_ROOT / "ML" / "xgb.json"
 COLUMNS_PATH = PROJECT_ROOT / "ML" / "xgb_columns.json"
-app = FastAPI(title="c9r model server", version="0.6.0")
+app = FastAPI(title="c9r model server", version=pkg_version("c9r"))
 _model: Optional[XGBClassifier] = None
 _columns: Optional[List[str]] = None
 

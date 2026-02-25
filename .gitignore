@@ -52,6 +52,9 @@ logs/
 
 # Project-specific output directories
 ML/
+mlruns/
+mlruns.db
+mlartifacts/
 pics/
 visualizations/
 

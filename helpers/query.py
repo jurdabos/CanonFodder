@@ -65,6 +65,43 @@ def unique_artists() -> int:
     return int(df["cnt"].iloc[0]) if not df.empty else 0
 
 
+def top_albums(n: int = 10) -> pd.DataFrame:
+    """Returns the top *n* albums by scrobble count."""
+    return query(f"""
+        SELECT artist_name, album_title, COUNT(*) AS play_count
+        FROM {_pq(SCROBBLE_PQ)}
+        WHERE artist_name IS NOT NULL AND artist_name != ''
+          AND album_title IS NOT NULL AND album_title != ''
+        GROUP BY artist_name, album_title
+        ORDER BY play_count DESC
+        LIMIT {n}
+    """)
+
+
+def top_tracks(n: int = 10) -> pd.DataFrame:
+    """Returns the top *n* tracks by scrobble count."""
+    return query(f"""
+        SELECT artist_name, track_title, album_title, COUNT(*) AS play_count
+        FROM {_pq(SCROBBLE_PQ)}
+        WHERE artist_name IS NOT NULL AND artist_name != ''
+          AND track_title IS NOT NULL AND track_title != ''
+        GROUP BY artist_name, track_title, album_title
+        ORDER BY play_count DESC
+        LIMIT {n}
+    """)
+
+
+def recent_scrobbles(n: int = 10) -> pd.DataFrame:
+    """Returns the *n* most recent scrobbles."""
+    return query(f"""
+        SELECT artist_name, track_title, album_title, play_time
+        FROM {_pq(SCROBBLE_PQ)}
+        WHERE artist_name IS NOT NULL AND artist_name != ''
+        ORDER BY play_time DESC
+        LIMIT {n}
+    """)
+
+
 def artist_info_df() -> pd.DataFrame:
     """Returns the full artist_info table as a DataFrame."""
     if not ARTIST_INFO_PQ.exists():

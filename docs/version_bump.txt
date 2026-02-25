@@ -1,0 +1,1 @@
+Bump the version in pyproject.toml, then run uv lock to propagate.

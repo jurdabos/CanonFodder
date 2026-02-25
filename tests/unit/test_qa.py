@@ -2,7 +2,6 @@
 Tests for corefunc.qa — post-ingestion scrobble quality checks.
 """
 import pandas as pd
-import pytest
 from corefunc.qa import (
     _check_duplicates,
     _check_encoding,
@@ -10,10 +9,11 @@ from corefunc.qa import (
     _check_nulls,
     _check_schema,
     _check_timestamps,
+    _real_fill,
     _reconcile_rows,
+    qa_artist_info,
     qa_lb_ingest,
 )
-from helpers.io import SCROBBLE_COLS
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -214,7 +214,53 @@ class TestCheckEncoding:
         assert result["pass"] is True
 
 
-# ── Row-count reconciliation ──────────────────────────────────────────────────
+# ── Real fill ───────────────────────────────────────────────────────────────
+class TestRealFill:
+    """Tests for _real_fill."""
+
+    def test_all_real(self):
+        """Counts all values when none are None/empty."""
+        s = pd.Series(["US", "DE", "GB"])
+        result = _real_fill(s, 3)
+        assert result["filled"] == 3
+        assert result["fill_rate"] == 100.0
+
+    def test_none_excluded(self):
+        """Excludes Python None values."""
+        s = pd.Series(["US", None, "GB"])
+        result = _real_fill(s, 3)
+        assert result["filled"] == 2
+        assert result["fill_rate"] == 66.67
+
+    def test_empty_excluded(self):
+        """Excludes empty strings."""
+        s = pd.Series(["US", "", "GB"])
+        result = _real_fill(s, 3)
+        assert result["filled"] == 2
+
+    def test_none_string_excluded(self):
+        """Excludes the literal string 'None' (case-insensitive)."""
+        s = pd.Series(["US", "None", "none", "NONE", "GB"])
+        result = _real_fill(s, 5)
+        assert result["filled"] == 2
+        assert result["fill_rate"] == 40.0
+
+    def test_mixed_junk(self):
+        """Excludes all non-real values at once."""
+        s = pd.Series(["US", None, "", "None", "   ", "DE"])
+        result = _real_fill(s, 6)
+        assert result["filled"] == 2
+        assert result["fill_rate"] == 33.33
+
+    def test_empty_series(self):
+        """Returns 0 filled for an empty series."""
+        s = pd.Series([], dtype=str)
+        result = _real_fill(s, 0)
+        assert result["filled"] == 0
+        assert result["fill_rate"] == 0.0
+
+
+# ── Row-count reconciliation ────────────────────────────────────────────────────
 class TestReconcileRows:
     """Tests for _reconcile_rows."""
 
@@ -266,3 +312,46 @@ class TestQaLbIngest:
         assert len(report_df) == 1
         assert "passed" in report_df.columns
         assert "mbid_fill_rate" in report_df.columns
+
+
+# ── qa_artist_info ─────────────────────────────────────────────────────────
+class TestQaArtistInfo:
+    """Tests for qa_artist_info enrichment reporting."""
+
+    def test_skips_on_empty(self, tmp_pq_dir):
+        """Returns skipped status when artist_info.parquet is missing."""
+        result = qa_artist_info()
+        assert result["status"] == "skipped"
+
+    def test_enrichment_rates(self, tmp_pq_dir):
+        """Reports correct real-fill enrichment rates."""
+        import helpers.io as io_mod
+        df = pd.DataFrame({
+            "artist_name": ["A", "B", "C", "D"],
+            "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", "", ""],
+            "country": ["DE", None, "US", ""],
+            "disambiguation_comment": ["rock", "None", "", None],
+            "aliases": ["a1,a2", "", "None", None],
+        })
+        df.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
+        result = qa_artist_info()
+        enr = result["enrichment"]
+        assert enr["country"]["filled"] == 2      # "DE", "US"
+        assert enr["country"]["fill_rate"] == 50.0
+        assert enr["disambiguation"]["filled"] == 1  # "rock" only
+        assert enr["aliases"]["filled"] == 1        # "a1,a2" only
+
+    def test_enrichment_persisted(self, tmp_pq_dir):
+        """Verifies enrichment fill rates are written to qa_report.parquet."""
+        import helpers.io as io_mod
+        df = pd.DataFrame({
+            "artist_name": ["A"], "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+            "country": ["GB"], "disambiguation_comment": ["punk"], "aliases": ["alias1"],
+        })
+        df.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
+        qa_artist_info()
+        report_df = pd.read_parquet(io_mod.QA_REPORT_PQ)
+        assert "country_fill_rate" in report_df.columns
+        assert "disambiguation_fill_rate" in report_df.columns
+        assert "aliases_fill_rate" in report_df.columns
+        assert report_df.iloc[0]["country_fill_rate"] == 100.0

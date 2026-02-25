@@ -38,8 +38,10 @@ def tmp_pq_dir(monkeypatch, tmp_path):
     for mod_path, attrs in [
         ("corefunc.data_cleaning", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.enrich", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
+        ("corefunc.mb_local", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.canon", ["AVC_PQ"]),
         ("corefunc.qa", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "UC_PQ", "QA_REPORT_PQ"]),
+        ("corefunc.profile", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "C_PQ"]),
         ("helpers.cli", ["PQ_DIR", "AVC_PQ", "UC_PQ"]),
         ("HTTP.lfAPI", ["C_PQ", "UC_PQ", "SCROBBLE_PQ"]),
         ("HTTP.mbAPI", ["ARTIST_INFO_PQ"]),

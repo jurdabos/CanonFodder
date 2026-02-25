@@ -10,7 +10,6 @@ import math
 import os
 import signal
 import sys
-from pathlib import Path
 import click
 from dotenv import load_dotenv
 load_dotenv()
@@ -95,6 +94,20 @@ def enrich(user: str | None, source: str, mbids: bool, country: bool) -> None:
                 click.echo(f"Country sync skipped: {exc}")
 
 
+# ── enrich-local ───────────────────────────────────────────────────────────
+@cli.command("enrich-local")
+@click.option("--rebuild", is_flag=True, help="Rebuild artist_info.parquet from scratch.")
+def enrich_local(rebuild: bool) -> None:
+    """Bulk-enriches artist_info.parquet from the local MusicBrainz mirror."""
+    from corefunc.mb_local import enrich_from_local_mb
+    click.echo("Querying local MusicBrainz mirror …")
+    try:
+        n = enrich_from_local_mb(rebuild=rebuild)
+        click.echo(f"Done — {n:,} artist rows written to artist_info.parquet.")
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+
+
 # ── canonise ───────────────────────────────────────────────────────────────
 @cli.command()
 def canonise() -> None:
@@ -109,14 +122,26 @@ def review() -> None:
     click.echo("Review command — will be wired in Phase 6.")
 
 
-# ── train ──────────────────────────────────────────────────────────────────
+# ── train ──────────────────────────────────────────────────────────────────────
 @cli.command()
-def train() -> None:
+@click.option("--run-name", default=None, help="MLflow run name for this training session.")
+def train(run_name: str | None) -> None:
     """Trains the XGBoost canonisation model."""
     from corefunc.canon import train_model
     click.echo("Training XGBoost model …")
-    train_model()
+    train_model(run_name=run_name)
     click.echo("Done.")
+
+
+# ── mlflow-ui ──────────────────────────────────────────────────────────────────
+@cli.command("mlflow-ui")
+@click.option("--host", default="127.0.0.1", help="Bind address.")
+@click.option("--port", "-p", default=5000, type=int, help="Port to listen on.")
+def mlflow_ui(host: str, port: int) -> None:
+    """Launches the MLflow tracking UI for experiment comparison."""
+    from helpers.experiment import TRACKING_URI
+    click.echo(f"Starting MLflow UI at http://{host}:{port}  (store: {TRACKING_URI})")
+    os.execvp("mlflow", ["mlflow", "ui", "--backend-store-uri", TRACKING_URI, "--host", host, "--port", str(port)])
 
 
 # ── serve ──────────────────────────────────────────────────────────────────
@@ -131,19 +156,74 @@ def serve(host: str, port: int) -> None:
 
 
 # ── dashboard ───────────────────────────────────────────────────────────────
-@cli.command()
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def dashboard(ctx: click.Context) -> None:
+    """Quick text dashboards for scrobble data."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@dashboard.command("artist")
 @click.option("--top", "-n", default=10, type=int, help="Number of top artists to show.")
-def dashboard(top: int) -> None:
-    """Prints a quick text dashboard of scrobble statistics."""
+def dashboard_artist(top: int) -> None:
+    """Shows top artists by play count."""
     from helpers.query import scrobble_count, unique_artists, top_artists
     total = scrobble_count()
     artists = unique_artists()
     click.echo(f"Scrobbles: {total:,}   Unique artists: {artists:,}")
     df = top_artists(top)
     if not df.empty:
-        click.echo(f"\nTop {top} artists:")
-        for _, row in df.iterrows():
-            click.echo(f"  {row['play_count']:>6,}  {row['artist_name']}")
+        click.echo(f"\nTop {top} artists:\n")
+        for i, (_, row) in enumerate(df.iterrows(), 1):
+            click.echo(f"  {i:>3}.  {row['play_count']:>6,}  {row['artist_name']}")
+
+
+@dashboard.command("album")
+@click.option("--top", "-n", default=10, type=int, help="Number of top albums to show.")
+def dashboard_album(top: int) -> None:
+    """Shows top albums by play count."""
+    from helpers.query import top_albums
+    df = top_albums(top)
+    if df.empty:
+        click.echo("No album data found.")
+        return
+    click.echo(f"Top {top} albums:\n")
+    for i, (_, row) in enumerate(df.iterrows(), 1):
+        click.echo(f"  {i:>3}.  {row['play_count']:>6,}  {row['artist_name']}: {row['album_title']}")
+
+
+@dashboard.command("track")
+@click.option("--top", "-n", default=10, type=int, help="Number of top tracks to show.")
+def dashboard_track(top: int) -> None:
+    """Shows top tracks by play count."""
+    from helpers.query import top_tracks
+    df = top_tracks(top)
+    if df.empty:
+        click.echo("No track data found.")
+        return
+    click.echo(f"Top {top} tracks:\n")
+    for i, (_, row) in enumerate(df.iterrows(), 1):
+        album = row["album_title"] or ""
+        album_part = f" ({album})" if album else ""
+        click.echo(f"  {i:>3}.  {row['play_count']:>6,}  {row['artist_name']}: {row['track_title']}{album_part}")
+
+
+@dashboard.command("recent")
+@click.option("-n", default=10, type=int, help="Number of recent scrobbles to show.")
+def dashboard_recent(n: int) -> None:
+    """Shows the most recent scrobbles."""
+    from helpers.query import recent_scrobbles
+    df = recent_scrobbles(n)
+    if df.empty:
+        click.echo("No scrobbles found.")
+        return
+    click.echo(f"Last {len(df)} scrobbles:\n")
+    for _, row in df.iterrows():
+        album = row["album_title"] or ""
+        album_part = f" ({album})" if album else ""
+        ts = str(row["play_time"])[:19]
+        click.echo(f"  {row['artist_name']}: {row['track_title']}{album_part} | {ts}")
 
 
 # ── purge ──────────────────────────────────────────────────────────────────
@@ -276,6 +356,16 @@ def qa_artist_info_cmd() -> None:
         click.echo("  ⚠ Duplicate rate exceeds 5% threshold")
     mb = report["mbids"]
     click.echo(f"  MBID fill: {mb.get('fill_rate', 0)}%, valid: {mb.get('valid_rate', 0)}%")
+    # Enrichment fill rates (real values only, excluding None/empty)
+    enr = report.get("enrichment", {})
+    if enr:
+        total = report["row_count"]
+        click.echo("  Enrichment (real values):")
+        for label, key in [("Country", "country"), ("Disambiguation", "disambiguation"), ("Aliases", "aliases")]:
+            stats = enr.get(key, {})
+            filled = stats.get("filled", 0)
+            rate = stats.get("fill_rate", 0.0)
+            click.echo(f"    {label}: {filled:,} / {total:,} ({rate}%)")
     enc = report["encoding"]
     if not enc["pass"]:
         click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
@@ -377,6 +467,22 @@ def show(last_n: int, show_all: bool, fail_only: bool) -> None:
             click.echo(f"  {ts}  {status}{src_str}"
                        f"  rows={int(row['row_count']):,}"
                        f"  countries={countries}")
+        elif target == "artist_info":
+            # Showing enrichment fill rates for artist_info reports
+            _cr = row.get("country_fill_rate", 0)
+            country_rate = 0 if (_cr is None or (isinstance(_cr, float) and math.isnan(_cr))) else _cr
+            _dr = row.get("disambiguation_fill_rate", 0)
+            disambig_rate = 0 if (_dr is None or (isinstance(_dr, float) and math.isnan(_dr))) else _dr
+            _ar = row.get("aliases_fill_rate", 0)
+            aliases_rate = 0 if (_ar is None or (isinstance(_ar, float) and math.isnan(_ar))) else _ar
+            click.echo(f"  {ts}  {status}{src_str}"
+                       f"  rows={int(row['row_count']):,}"
+                       f"  dupes={row['duplicate_pct']}%"
+                       f"  mbid={mbid_rate}%"
+                       f"  country={country_rate}%"
+                       f"  disambig={disambig_rate}%"
+                       f"  aliases={aliases_rate}%"
+                       f"  bad_chars={int(row['bad_char_rows'])}")
         else:
             if target == "artist_variants_canonized":
                 fill_str = f"hash_fill={hash_rate}%"
@@ -387,6 +493,124 @@ def show(last_n: int, show_all: bool, fail_only: bool) -> None:
                        f"  dupes={row['duplicate_pct']}%"
                        f"  {fill_str}"
                        f"  bad_chars={int(row['bad_char_rows'])}")
+
+
+# ── profile ─────────────────────────────────────────────────────────────────
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def profile(ctx: click.Context) -> None:
+    """Data profiling — explores scrobble patterns and canonisation needs."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@profile.command()
+def overview() -> None:
+    """Prints high-level scrobble and distribution statistics."""
+    from corefunc.profile import overview_stats
+    stats = overview_stats()
+    if "error" in stats:
+        click.echo(f"Error: {stats['error']}")
+        return
+    click.echo(f"Scrobbles: {stats['total_scrobbles']:,}")
+    click.echo(f"Unique artists: {stats['unique_artists']:,}")
+    click.echo(f"Unique tracks:  {stats['unique_tracks']:,}")
+    click.echo(f"Unique albums:  {stats['unique_albums']:,}")
+    click.echo(f"Date range: {stats['earliest']}  →  {stats['latest']}")
+    click.echo("\nYearly scrobbles:")
+    for year, plays in stats["yearly"]:
+        bar = "█" * max(1, int(plays / max(p for _, p in stats["yearly"]) * 40))
+        click.echo(f"  {int(year)}  {plays:>6,}  {bar}")
+    d = stats["distribution"]
+    click.echo("\nPlay-count distribution per artist:")
+    click.echo(f"  min={d['min']}  Q1={d['q25']}  median={d['median']}  Q3={d['q75']}  max={d['max']:,}  mean={d['mean']:.1f}")
+    click.echo(f"  Singletons (1 play): {d['singletons']:,} / {d['total_artists']:,}"
+               f" ({100 * d['singletons'] / d['total_artists']:.1f}%)")
+    click.echo(f"  ≤5 plays:           {d['lte5']:,} / {d['total_artists']:,}"
+               f" ({100 * d['lte5'] / d['total_artists']:.1f}%)")
+
+
+@profile.command()
+@click.option("--threshold", "-t", default=85, type=int, help="Minimum fuzzy similarity score (0-100).")
+@click.option("--min-plays", "-m", default=3, type=int, help="Minimum play count to consider.")
+@click.option("--limit", "-l", default=500, type=int, help="Max artists to compare.")
+@click.option("--top", "-n", default=20, type=int, help="Number of results to show.")
+def variants(threshold: int, min_plays: int, limit: int, top: int) -> None:
+    """Finds fuzzy-similar artist names that split scrobble counts (the Bohren problem)."""
+    from corefunc.profile import variant_candidates
+    click.echo(f"Scanning top {limit} artists (≥{min_plays} plays) for near-duplicates (threshold={threshold}) …")
+    clusters = variant_candidates(threshold=threshold, min_plays=min_plays, limit=limit)
+    if not clusters:
+        click.echo("No near-duplicate pairs found.")
+        return
+    click.echo(f"\nFound {len(clusters)} candidate pair(s).  Top {min(top, len(clusters))} by combined count:\n")
+    for i, c in enumerate(clusters[:top], 1):
+        names = "  ↔  ".join(f"{v['name']} ({v['plays']:,})" for v in c["variants"])
+        click.echo(f"  {i:>3}.  {names}")
+        click.echo(f"        combined={c['combined_count']:,}  similarity={c['similarity']}%")
+    if len(clusters) > top:
+        click.echo(f"\n  … and {len(clusters) - top} more pair(s).  Use --top to show more.")
+
+
+@profile.command("top")
+@click.option("-n", default=20, type=int, help="Number of top artists.")
+@click.option("--canonized", is_flag=True, help="Apply AVC canonisation before ranking.")
+def profile_top(n: int, canonized: bool) -> None:
+    """Shows top artists by play count, optionally after canonisation."""
+    from corefunc.profile import top_artists_profile
+    result = top_artists_profile(n, canonize=canonized)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo(f"Top {n} artists (raw):\n")
+    for entry in result["raw_top"]:
+        click.echo(f"  {entry['rank']:>3}.  {entry['plays']:>6,}  {entry['name']}")
+    if canonized and "canon_top" in result:
+        click.echo(f"\nTop {n} artists (after AVC canonisation — {result['mapping_size']} mappings):\n")
+        for entry in result["canon_top"]:
+            click.echo(f"  {entry['rank']:>3}.  {entry['plays']:>6,}  {entry['name']}")
+    elif canonized:
+        click.echo("\navc.parquet not found — canonised ranking unavailable.")
+
+
+@profile.command()
+@click.option("--start", default=2006, type=int, help="Start year (inclusive).")
+@click.option("--end", default=2025, type=int, help="End year (inclusive).")
+@click.option("-n", default=10, type=int, help="Number of companions to show.")
+def companions(start: int, end: int, n: int) -> None:
+    """Finds artists listened to in every year of the range (trusted companions)."""
+    from corefunc.profile import trusted_companions
+    result = trusted_companions(start_year=start, end_year=end)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    total = len(result["companions"])
+    if total == 0:
+        click.echo(f"No artists appear in every year between {start}–{end}.")
+        return
+    years = result["years"]
+    click.echo(f"Found {total} artist(s) present in all {result['year_count']} years ({years[0]}–{years[-1]}).")
+    click.echo(f"\nMost consistent (lowest σ of yearly plays), top {min(n, total)}:\n")
+    click.echo(f"  {'Artist':<40} {'Total':>7} {'Mean/yr':>8} {'σ':>7}")
+    click.echo(f"  {'─' * 40} {'─' * 7} {'─' * 8} {'─' * 7}")
+    for c in result["companions"][:n]:
+        click.echo(f"  {c['name']:<40} {c['total_plays']:>7,} {c['mean_per_year']:>8.1f} {c['std_dev']:>7.1f}")
+
+
+@profile.command()
+@click.option("-n", default=15, type=int, help="Number of top countries to show.")
+def countries(n: int) -> None:
+    """Shows top countries by scrobble count from artist_info enrichment."""
+    from corefunc.profile import country_breakdown
+    rows = country_breakdown(top_n=n)
+    if not rows:
+        click.echo("No enriched country data available.")
+        return
+    click.echo(f"Top {len(rows)} countries by scrobble count:\n")
+    click.echo(f"  {'#':>4}  {'CC':<4} {'Plays':>8} {'Artists':>8} {'Share':>7}  {'Name'}")
+    click.echo(f"  {'─' * 4}  {'──':<4} {'─' * 8} {'─' * 8} {'─' * 7}  {'─' * 4}")
+    for i, r in enumerate(rows, 1):
+        click.echo(f"  {i:>3}.  {r['country']:<4} {r['play_count']:>8,} {r['artist_count']:>8,} {r['pct']:>6.1f}%  {r['name']}")
 
 
 # ── flow ───────────────────────────────────────────────────────────────────

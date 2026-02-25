@@ -8,7 +8,6 @@ and character-encoding sanity.
 from __future__ import annotations
 import logging
 import re
-import unicodedata
 from datetime import datetime, UTC
 from typing import Any
 import pandas as pd
@@ -246,6 +245,7 @@ def qa_lb_ingest(
 def _persist_report(report: dict[str, Any]) -> None:
     """Appends a single summary row to PQ/qa_report.parquet."""
     nulls = report.get("nulls", {})
+    enrichment = report.get("enrichment", {})
     row = pd.DataFrame([{
         "timestamp": report["timestamp"],
         "source": report.get("source"),
@@ -267,9 +267,27 @@ def _persist_report(report: dict[str, Any]) -> None:
         "bad_char_rows": report.get("encoding", {}).get("bad_char_rows", 0),
         "fetched": report.get("reconciliation", {}).get("fetched"),
         "stored": report.get("reconciliation", {}).get("stored"),
+        "country_fill_rate": enrichment.get("country", {}).get("fill_rate"),
+        "disambiguation_fill_rate": enrichment.get("disambiguation", {}).get("fill_rate"),
+        "aliases_fill_rate": enrichment.get("aliases", {}).get("fill_rate"),
     }])
     append_to_parquet(row, QA_REPORT_PQ)
     log.info("QA report appended to %s", QA_REPORT_PQ)
+
+
+# ── Real-fill helpers ─────────────────────────────────────────────────────────
+def _real_fill(series: pd.Series, total: int) -> dict[str, Any]:
+    """
+    Counts values that are genuinely filled — not None, NaN, empty, or
+    the literal string ``"None"``.
+    """
+    s = series.fillna("").astype(str).str.strip()
+    mask = (s != "") & (s.str.lower() != "none")
+    filled = int(mask.sum())
+    return {
+        "filled": filled,
+        "fill_rate": round(filled / total * 100, 2) if total else 0.0,
+    }
 
 
 # ── artist_info QA ────────────────────────────────────────────────────────────
@@ -278,7 +296,8 @@ def qa_artist_info(*, source: str | None = None) -> dict[str, Any]:
     Runs QA checks on artist_info.parquet.
 
     Checks schema, null/empty rates, MBID validity, duplicates,
-    and encoding on text columns.
+    encoding on text columns, and real-fill enrichment rates for
+    country, disambiguation_comment, and aliases.
     """
     df = read_parquet(ARTIST_INFO_PQ)
     if df is None or df.empty:
@@ -299,6 +318,12 @@ def qa_artist_info(*, source: str | None = None) -> dict[str, Any]:
         "pass": (dup_pct / 100) <= DUPLICATE_RATE_THRESHOLD,
     }
     encoding = _check_encoding(df, ["artist_name", "disambiguation_comment", "aliases"])
+    # Computing real-fill enrichment rates
+    enrichment = {
+        "country": _real_fill(df["country"], total) if "country" in df.columns else {"filled": 0, "fill_rate": 0.0},
+        "disambiguation": _real_fill(df["disambiguation_comment"], total) if "disambiguation_comment" in df.columns else {"filled": 0, "fill_rate": 0.0},
+        "aliases": _real_fill(df["aliases"], total) if "aliases" in df.columns else {"filled": 0, "fill_rate": 0.0},
+    }
     report: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
         "source": source,
@@ -309,6 +334,7 @@ def qa_artist_info(*, source: str | None = None) -> dict[str, Any]:
         "duplicates": duplicates,
         "mbids": mbids,
         "encoding": encoding,
+        "enrichment": enrichment,
     }
     report["passed"] = all([
         schema["pass"],
