@@ -12,8 +12,8 @@ from datetime import datetime, UTC
 from typing import Any
 import pandas as pd
 from helpers.io import (
-    SCROBBLE_COLS, ARTIST_INFO_COLS, AVC_COLS,
-    SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, UC_PQ, QA_REPORT_PQ,
+    SCROBBLE_COLS, ARTIST_INFO_COLS, AVC_COLS, GS_MB_COLS,
+    SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, UC_PQ, GS_MB_PQ, QA_REPORT_PQ,
     UUID_RE, read_parquet, append_to_parquet,
 )
 
@@ -410,6 +410,72 @@ def qa_avc(*, source: str | None = None) -> dict[str, Any]:
         duplicates["pass"],
         timestamps["pass"],
         encoding["pass"],
+    ])
+    _persist_report(report)
+    return report
+
+
+# ── gs_mb QA ──────────────────────────────────────────────────────────────────
+def qa_gs_mb(*, source: str | None = None) -> dict[str, Any]:
+    """
+    Runs QA checks on gs_mb.parquet (MusicBrainz gold-standard pairs).
+
+    Checks schema, null/empty rates, duplicate pairs, encoding on
+    text columns, and to_link / source distribution.
+    """
+    df = read_parquet(GS_MB_PQ)
+    if df is None or df.empty:
+        log.warning("gs_mb.parquet is empty or missing — QA skipped.")
+        return {"status": "skipped", "reason": "no data"}
+    total = len(df)
+    schema = _check_schema(df, GS_MB_COLS, strict=False)
+    nulls = _check_nulls(df, GS_MB_COLS)
+    # Duplicating on (variant_a, variant_b)
+    dup_cols = ["variant_a", "variant_b"]
+    present = [c for c in dup_cols if c in df.columns]
+    if present:
+        dup_mask = df.duplicated(subset=present, keep="first")
+        dup_count = int(dup_mask.sum())
+        dup_pct = round(dup_count / total * 100, 2) if total else 0.0
+    else:
+        dup_count, dup_pct = 0, 0.0
+    duplicates = {
+        "duplicate_count": dup_count,
+        "duplicate_pct": dup_pct,
+        "pass": (dup_pct / 100) <= DUPLICATE_RATE_THRESHOLD,
+    }
+    encoding = _check_encoding(df, ["variant_a", "variant_b"])
+    # Computing to_link distribution
+    if "to_link" in df.columns:
+        pos = int((df["to_link"] == True).sum())   # noqa: E712
+        neg = int((df["to_link"] == False).sum())   # noqa: E712
+        null_link = int(df["to_link"].isna().sum())
+    else:
+        pos, neg, null_link = 0, 0, 0
+    label_dist = {"positive": pos, "negative": neg, "null": null_link}
+    # Computing source breakdown
+    if "source" in df.columns:
+        source_counts = df["source"].value_counts().to_dict()
+    else:
+        source_counts = {}
+    report: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "source": source,
+        "target": "gs_mb",
+        "row_count": total,
+        "schema": schema,
+        "nulls": nulls,
+        "duplicates": duplicates,
+        "encoding": encoding,
+        "label_distribution": label_dist,
+        "source_breakdown": source_counts,
+    }
+    report["passed"] = all([
+        schema["pass"],
+        duplicates["pass"],
+        encoding["pass"],
+        nulls.get("variant_a", {}).get("null_pct", 0) == 0,
+        nulls.get("variant_b", {}).get("null_pct", 0) == 0,
     ])
     _persist_report(report)
     return report

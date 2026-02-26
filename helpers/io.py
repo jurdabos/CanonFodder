@@ -34,6 +34,7 @@ C_PQ = PQ_DIR / "c.parquet"
 UC_PQ = PQ_DIR / "uc.parquet"
 QA_REPORT_PQ = PQ_DIR / "qa_report.parquet"
 GS_MB_PQ = PQ_DIR / "gs_mb.parquet"
+ALIAS_SEP = "{"
 
 # ── PyArrow schemas ───────────────────────────────────────────────────────────
 SCROBBLE_SCHEMA = pa.schema([
@@ -71,6 +72,7 @@ SCROBBLE_COLS = ["artist_name", "album_title", "track_title", "artist_mbid", "pl
 ARTIST_INFO_COLS = ["artist_name", "mbid", "country", "disambiguation_comment", "aliases"]
 AVC_COLS = ["artist_variants_hash", "artist_variants_text", "canonical_name", "to_link", "comment", "stamp"]
 UC_COLS = ["country_code", "start_date", "end_date"]
+GS_MB_COLS = ["variant_a", "variant_b", "to_link", "source"]
 
 # Operator tokens for sanitising column names
 OP_TOKENS = {

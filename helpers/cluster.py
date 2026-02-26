@@ -113,12 +113,16 @@ def dbscan_with_anchors(artist_names, dist_matrix, anchor_idx_sets,
 
 
 def expand_pairs(row):
-    if 'artist_variants' in row:
-        variants = row['artist_variants'].split('{')
+    """Expands a variant row into all pairwise combinations."""
+    if "artist_variants_text" in row:
+        key = "artist_variants_text"
+    elif "artist_variants" in row:
+        key = "artist_variants"
     else:
         raise KeyError("Neither 'artist_variants_text' nor 'artist_variants' found in dataframe row.")
+    variants = row[key].split("{")
     pairs = list(itertools.combinations(sorted(set(variants)), 2))
-    return [(row['artist_variants'], pair[0], pair[1], row['to_link']) for pair in pairs]
+    return [(row[key], pair[0], pair[1], row["to_link"]) for pair in pairs]
 
 
 def fuzzy_scores(a: str, b: str) -> dict:

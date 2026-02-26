@@ -95,6 +95,15 @@ uv run python main.py flow
 
 # Purging all Parquet data files
 uv run python main.py purge --all
+
+# Log and view results
+uv run c9r mlflow-ui
+
+# Run the full experiment (all 8 models)
+uv run c9r canon experiment --augment
+
+# Run specific models only
+uv run c9r canon experiment --models "XGBoost,LightGBM,RandomForest"
 ```
 
 Pass `--verbose` / `-v` before any subcommand for debug logging.

@@ -267,7 +267,7 @@ class TestBuildExclusionSet:
             "canonical_name": "The Beatles", "to_link": True, "comment": "", "stamp": "2025-05-02T16:00:00+00:00",
         }]
         ai_rows = [
-            {"artist_name": "Björk", "mbid": "", "country": "", "disambiguation_comment": "", "aliases": "Bjork,Byork"},
+            {"artist_name": "Björk", "mbid": "", "country": "", "disambiguation_comment": "", "aliases": "Bjork{Byork"},
         ]
         _make_avc_df(avc_rows).to_parquet(tmp_pq["avc"], index=False)
         _make_ai_df(ai_rows).to_parquet(tmp_pq["ai"], index=False)

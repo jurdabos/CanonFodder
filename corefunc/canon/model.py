@@ -20,6 +20,8 @@ from sklearn.preprocessing import RobustScaler
 from xgboost import XGBClassifier
 from helpers.io import AVC_PQ, GS_MB_PQ, read_parquet
 from helpers import cluster, experiment, stats
+from helpers.device import get_device
+from helpers.features import compute_pair_features
 
 log = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -50,6 +52,7 @@ def _build_gold_standard(augment: bool = False) -> pd.DataFrame:
         mb = read_parquet(GS_MB_PQ)
         if mb is not None and not mb.empty:
             mb = mb[["variant_a", "variant_b", "to_link"]].copy()
+            mb = mb.dropna(subset=["variant_a", "variant_b"])
             # Synthesising a variants column for length_stats compatibility
             mb["variants"] = mb["variant_a"] + "{" + mb["variant_b"]
             n_mb_pairs = len(mb)
@@ -57,16 +60,16 @@ def _build_gold_standard(augment: bool = False) -> pd.DataFrame:
             log.info("Merged %d MBDB pairs into gold standard (total: %d).", n_mb_pairs, len(gs))
         else:
             log.warning("augment=True but gs_mb.parquet not found — run 'c9r canon avc augment'.")
-    # Computing fuzzy-score features
-    score_cols = {"ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio", "WRatio", "QRatio"}
-    if score_cols.difference(gs.columns):
-        scores = gs.apply(
-            lambda r: pd.Series(cluster.fuzzy_scores(r["variant_a"], r["variant_b"])),
+    # Computing three-tier pairwise features
+    feature_cols = set(compute_pair_features("a", "b").keys())
+    if feature_cols.difference(gs.columns):
+        feat_df = gs.apply(
+            lambda r: pd.Series(compute_pair_features(r["variant_a"], r["variant_b"])),
             axis=1,
         )
-        for col in score_cols:
+        for col in feat_df.columns:
             if col not in gs.columns:
-                gs[col] = scores[col]
+                gs[col] = feat_df[col]
     # Adding engineered length features
     gs = pd.concat([gs, gs["variants"].apply(stats.length_stats)], axis=1)
     return gs
@@ -96,7 +99,8 @@ def train_model(
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y,
     )
-    # Defining XGBoost hyperparameters
+    # Defining XGBoost hyperparameters with GPU-aware device selection
+    device = get_device()
     spw = float(np.sum(y_train == 0) / np.sum(y_train == 1))
     xgb_params = {
         "n_estimators": 400,
@@ -107,6 +111,7 @@ def train_model(
         "scale_pos_weight": spw,
         "eval_metric": "logloss",
         "random_state": 49,
+        "device": device,
         "n_jobs": -1,
     }
     # Building pipeline: RobustScaler -> XGBoost
@@ -125,7 +130,8 @@ def train_model(
             "n_test": len(X_test),
             "pos_train": int(y_train.sum()),
             "neg_train": int((y_train == 0).sum()),
-            **{k: v for k, v in xgb_params.items() if k != "n_jobs"},
+            "device_used": device,
+            **{k: v for k, v in xgb_params.items() if k not in ("n_jobs", "device")},
         })
         model.fit(X_train, y_train)
         # Evaluating on the held-out set

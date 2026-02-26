@@ -46,7 +46,7 @@ def log_artifact(path: str | Path) -> None:
 
 def log_model(model: Any, artifact_path: str = "model") -> None:
     """Logs an sklearn-compatible model to the active run."""
-    mlflow.sklearn.log_model(model, artifact_path=artifact_path)
+    mlflow.sklearn.log_model(model, name=artifact_path)
 
 
 def log_cv_fold(
@@ -58,3 +58,100 @@ def log_cv_fold(
     with mlflow.start_run(run_name=f"{run_name_prefix}_{fold_idx}", nested=True):
         mlflow.log_param("fold", fold_idx)
         mlflow.log_metrics(metrics)
+
+
+def log_confusion_matrix(y_true, y_pred, labels: list[str] | None = None) -> None:
+    """Saves a confusion matrix heatmap as an MLflow artefact."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+    cm = confusion_matrix(y_true, y_pred)
+    disp = ConfusionMatrixDisplay(cm, display_labels=labels or ["no link", "link"])
+    fig, ax = plt.subplots(figsize=(5, 4))
+    disp.plot(ax=ax, cmap="Blues")
+    ax.set_title("Confusion Matrix")
+    fig.tight_layout()
+    path = PROJECT_ROOT / "ML" / "confusion_matrix.png"
+    path.parent.mkdir(exist_ok=True)
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    mlflow.log_artifact(str(path))
+    log.debug("Logged confusion matrix to MLflow.")
+
+
+def log_feature_importance(model, feature_names: list[str], top_n: int = 20) -> None:
+    """Saves a horizontal bar chart of feature importances as an MLflow artefact."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    # Extracting importances from tree-based models
+    if hasattr(model, "feature_importances_"):
+        importances = model.feature_importances_
+    elif hasattr(model, "named_steps"):
+        # sklearn Pipeline — digging into the last step
+        last = list(model.named_steps.values())[-1]
+        if hasattr(last, "feature_importances_"):
+            importances = last.feature_importances_
+        else:
+            log.warning("Model has no feature_importances_; skipping plot.")
+            return
+    else:
+        log.warning("Model has no feature_importances_; skipping plot.")
+        return
+    indices = np.argsort(importances)[-top_n:]
+    fig, ax = plt.subplots(figsize=(7, max(4, len(indices) * 0.3)))
+    ax.barh([feature_names[i] for i in indices], importances[indices])
+    ax.set_xlabel("Importance")
+    ax.set_title(f"Top {min(top_n, len(indices))} Feature Importances")
+    fig.tight_layout()
+    path = PROJECT_ROOT / "ML" / "feature_importance.png"
+    path.parent.mkdir(exist_ok=True)
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    mlflow.log_artifact(str(path))
+    log.debug("Logged feature importance plot to MLflow.")
+
+
+def log_shap_summary(model, X_sample, feature_names: list[str]) -> None:
+    """Computes SHAP values and saves the summary plot as an MLflow artefact."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    try:
+        import shap
+    except ImportError:
+        log.warning("shap not installed; skipping SHAP summary.")
+        return
+    # Extracting the underlying estimator from a Pipeline if needed
+    estimator = model
+    if hasattr(model, "named_steps"):
+        estimator = list(model.named_steps.values())[-1]
+    # Ensuring X_sample is a DataFrame for SHAP compatibility
+    if not isinstance(X_sample, pd.DataFrame):
+        X_sample = pd.DataFrame(X_sample, columns=feature_names)
+    try:
+        explainer = shap.TreeExplainer(estimator)
+        shap_values = explainer.shap_values(X_sample)
+        # Handling list output from binary classifiers (e.g. LightGBM)
+        if isinstance(shap_values, list):
+            shap_values = shap_values[1]
+    except Exception:
+        # Falling back to generic Explainer (handles XGBoost param parsing issues)
+        try:
+            explainer = shap.Explainer(estimator, X_sample)
+            shap_values = explainer(X_sample).values
+        except Exception as exc:
+            log.warning("SHAP computation failed (%s); skipping.", exc)
+            return
+    fig = plt.figure(figsize=(8, max(4, len(feature_names) * 0.3)))
+    shap.summary_plot(shap_values, X_sample, feature_names=feature_names, show=False)
+    fig.tight_layout()
+    path = PROJECT_ROOT / "ML" / "shap_summary.png"
+    path.parent.mkdir(exist_ok=True)
+    fig.savefig(path, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+    mlflow.log_artifact(str(path))
+    log.debug("Logged SHAP summary plot to MLflow.")

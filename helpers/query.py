@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 import duckdb
 import pandas as pd
-from helpers.io import PQ_DIR, SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, QA_REPORT_PQ
+from helpers.io import SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, QA_REPORT_PQ, UC_PQ, ALIAS_SEP
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,56 @@ def _pq(path: Path) -> str:
     return f"'{path.as_posix()}'"
 
 
+# ── Canonical name resolution ─────────────────────────────────────────────────
+def _canonical_cte() -> str:
+    """
+    Returns a DuckDB CTE that maps variant artist names to their canonical form.
+
+    Uses artist_info.aliases to build the mapping.  When artist_info is absent,
+    returns an empty-result CTE so COALESCE falls through to the raw name.
+    Intended for cross-module use (imported by corefunc.profile).
+    """
+    if not ARTIST_INFO_PQ.exists():
+        return ("canonical_map AS ("
+                "SELECT NULL::VARCHAR AS canonical_name, "
+                "NULL::VARCHAR AS variant_name WHERE false)")
+    return f"""canonical_map AS (
+        SELECT canonical_name, variant_name
+        FROM (
+            SELECT artist_name AS canonical_name,
+                   artist_name AS variant_name,
+                   1 AS priority
+            FROM {_pq(ARTIST_INFO_PQ)}
+            WHERE artist_name IS NOT NULL AND artist_name != ''
+            UNION ALL
+            SELECT ai.artist_name AS canonical_name,
+                   TRIM(v.alias) AS variant_name,
+                   2 AS priority
+            FROM {_pq(ARTIST_INFO_PQ)} ai,
+            LATERAL UNNEST(string_split(ai.aliases, '{ALIAS_SEP}')) AS v(alias)
+            WHERE ai.aliases IS NOT NULL
+              AND ai.aliases != ''
+              AND LOWER(ai.aliases) != 'none'
+              AND TRIM(v.alias) != ''
+              AND TRIM(v.alias) != ai.artist_name
+        )
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY variant_name ORDER BY priority
+        ) = 1
+    )"""
+
+
 # ── Common analytics queries ──────────────────────────────────────────────────
 def top_artists(n: int = 10) -> pd.DataFrame:
-    """Returns the top *n* artists by scrobble count."""
+    """Returns the top *n* artists by scrobble count, resolving canonical names."""
     return query(f"""
-        SELECT artist_name, COUNT(*) AS play_count
-        FROM {_pq(SCROBBLE_PQ)}
-        WHERE artist_name IS NOT NULL AND artist_name != ''
-        GROUP BY artist_name
+        WITH {_canonical_cte()}
+        SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+               COUNT(*) AS play_count
+        FROM {_pq(SCROBBLE_PQ)} s
+        LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+        WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
+        GROUP BY COALESCE(cm.canonical_name, s.artist_name)
         ORDER BY play_count DESC
         LIMIT {n}
     """)
@@ -57,47 +99,59 @@ def scrobble_count() -> int:
 
 
 def unique_artists() -> int:
-    """Returns the number of distinct artist names."""
+    """Returns the number of distinct canonical artist names."""
     df = query(f"""
-        SELECT COUNT(DISTINCT artist_name) AS cnt FROM {_pq(SCROBBLE_PQ)}
-        WHERE artist_name IS NOT NULL AND artist_name != ''
+        WITH {_canonical_cte()}
+        SELECT COUNT(DISTINCT COALESCE(cm.canonical_name, s.artist_name)) AS cnt
+        FROM {_pq(SCROBBLE_PQ)} s
+        LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+        WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
     """)
     return int(df["cnt"].iloc[0]) if not df.empty else 0
 
 
 def top_albums(n: int = 10) -> pd.DataFrame:
-    """Returns the top *n* albums by scrobble count."""
+    """Returns the top *n* albums by scrobble count, resolving canonical names."""
     return query(f"""
-        SELECT artist_name, album_title, COUNT(*) AS play_count
-        FROM {_pq(SCROBBLE_PQ)}
-        WHERE artist_name IS NOT NULL AND artist_name != ''
-          AND album_title IS NOT NULL AND album_title != ''
-        GROUP BY artist_name, album_title
+        WITH {_canonical_cte()}
+        SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+               s.album_title, COUNT(*) AS play_count
+        FROM {_pq(SCROBBLE_PQ)} s
+        LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+        WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
+          AND s.album_title IS NOT NULL AND s.album_title != ''
+        GROUP BY COALESCE(cm.canonical_name, s.artist_name), s.album_title
         ORDER BY play_count DESC
         LIMIT {n}
     """)
 
 
 def top_tracks(n: int = 10) -> pd.DataFrame:
-    """Returns the top *n* tracks by scrobble count."""
+    """Returns the top *n* tracks by scrobble count, resolving canonical names."""
     return query(f"""
-        SELECT artist_name, track_title, album_title, COUNT(*) AS play_count
-        FROM {_pq(SCROBBLE_PQ)}
-        WHERE artist_name IS NOT NULL AND artist_name != ''
-          AND track_title IS NOT NULL AND track_title != ''
-        GROUP BY artist_name, track_title, album_title
+        WITH {_canonical_cte()}
+        SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+               s.track_title, s.album_title, COUNT(*) AS play_count
+        FROM {_pq(SCROBBLE_PQ)} s
+        LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+        WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
+          AND s.track_title IS NOT NULL AND s.track_title != ''
+        GROUP BY COALESCE(cm.canonical_name, s.artist_name), s.track_title, s.album_title
         ORDER BY play_count DESC
         LIMIT {n}
     """)
 
 
 def recent_scrobbles(n: int = 10) -> pd.DataFrame:
-    """Returns the *n* most recent scrobbles."""
+    """Returns the *n* most recent scrobbles, resolving canonical names."""
     return query(f"""
-        SELECT artist_name, track_title, album_title, play_time
-        FROM {_pq(SCROBBLE_PQ)}
-        WHERE artist_name IS NOT NULL AND artist_name != ''
-        ORDER BY play_time DESC
+        WITH {_canonical_cte()}
+        SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+               s.track_title, s.album_title, s.play_time
+        FROM {_pq(SCROBBLE_PQ)} s
+        LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+        WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
+        ORDER BY s.play_time DESC
         LIMIT {n}
     """)
 
@@ -164,22 +218,260 @@ def qa_reports(
     """)
 
 
+# ── Temporal / time-series queries ─────────────────────────────────────────────
+def monthly_scrobble_counts() -> pd.DataFrame:
+    """
+    Returns monthly scrobble counts across the entire history.
+
+    Result columns: year (int), month (int), scrobble_count (int).
+    Ordered by year, month ascending.
+    """
+    if not SCROBBLE_PQ.exists():
+        return pd.DataFrame(columns=["year", "month", "scrobble_count"])
+    return query(f"""
+        SELECT
+            EXTRACT(YEAR  FROM play_time)::INT AS year,
+            EXTRACT(MONTH FROM play_time)::INT AS month,
+            COUNT(*) AS scrobble_count
+        FROM {_pq(SCROBBLE_PQ)}
+        WHERE artist_name IS NOT NULL AND artist_name != ''
+          AND play_time IS NOT NULL
+        GROUP BY year, month
+        ORDER BY year, month
+    """)
+
+
+def yearly_top_n_artists(top_n: int = 3) -> pd.DataFrame:
+    """
+    Returns the top *top_n* artists per year, resolving canonical names.
+
+    Result columns: year (int), rank (int), artist_name (str),
+    play_count (int).
+    """
+    if not SCROBBLE_PQ.exists():
+        return pd.DataFrame(columns=["year", "rank", "artist_name", "play_count"])
+    cte = _canonical_cte()
+    return query(f"""
+        WITH {cte},
+        yearly_artists AS (
+            SELECT
+                EXTRACT(YEAR FROM s.play_time)::INT AS year,
+                COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+                COUNT(*) AS play_count
+            FROM {_pq(SCROBBLE_PQ)} s
+            LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+            WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
+              AND s.play_time IS NOT NULL
+            GROUP BY year, COALESCE(cm.canonical_name, s.artist_name)
+        ),
+        ranked AS (
+            SELECT *,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY year ORDER BY play_count DESC
+                   ) AS rank
+            FROM yearly_artists
+        )
+        SELECT year, rank::INT AS rank, artist_name, play_count
+        FROM ranked
+        WHERE rank <= {top_n}
+        ORDER BY year, rank
+    """)
+
+
+def listening_clock(granularity: str = "hour") -> pd.DataFrame:
+    """
+    Returns scrobble counts bucketed by hour-of-day or day-of-week.
+
+    Parameters
+    ----------
+    granularity : str
+        ``"hour"`` → columns ``hour`` (0–23), ``scrobble_count``.
+        ``"weekday"`` → columns ``weekday`` (0=Mon … 6=Sun), ``scrobble_count``.
+    """
+    if not SCROBBLE_PQ.exists():
+        col = "hour" if granularity == "hour" else "weekday"
+        return pd.DataFrame(columns=[col, "scrobble_count"])
+    if granularity == "weekday":
+        # DuckDB DAYOFWEEK: 0=Sun … 6=Sat → remap to ISO 0=Mon … 6=Sun
+        return query(f"""
+            SELECT
+                (DAYOFWEEK(play_time) + 6) % 7 AS weekday,
+                COUNT(*) AS scrobble_count
+            FROM {_pq(SCROBBLE_PQ)}
+            WHERE artist_name IS NOT NULL AND artist_name != ''
+              AND play_time IS NOT NULL
+            GROUP BY weekday
+            ORDER BY weekday
+        """)
+    return query(f"""
+        SELECT
+            EXTRACT(HOUR FROM play_time)::INT AS hour,
+            COUNT(*) AS scrobble_count
+        FROM {_pq(SCROBBLE_PQ)}
+        WHERE artist_name IS NOT NULL AND artist_name != ''
+          AND play_time IS NOT NULL
+        GROUP BY hour
+        ORDER BY hour
+    """)
+
+
+def daily_scrobble_dates() -> pd.DataFrame:
+    """
+    Returns distinct dates with at least one scrobble.
+
+    Result columns: play_date (date).  Used by streak analysis.
+    """
+    if not SCROBBLE_PQ.exists():
+        return pd.DataFrame(columns=["play_date"])
+    return query(f"""
+        SELECT DISTINCT play_time::DATE AS play_date
+        FROM {_pq(SCROBBLE_PQ)}
+        WHERE artist_name IS NOT NULL AND artist_name != ''
+          AND play_time IS NOT NULL
+        ORDER BY play_date
+    """)
+
+
+def user_country_scrobble_counts() -> pd.DataFrame:
+    """
+    Joins scrobbles with user-country timeline via interval matching.
+
+    For each scrobble, assigns the user's country at play_time by finding
+    the uc.parquet row whose [start_date, end_date] contains play_time.
+    Returns columns: country_code (str), scrobble_count (int).
+    """
+    if not SCROBBLE_PQ.exists() or not UC_PQ.exists():
+        return pd.DataFrame(columns=["country_code", "scrobble_count"])
+    return query(f"""
+        SELECT uc.country_code,
+               COUNT(*) AS scrobble_count
+        FROM {_pq(SCROBBLE_PQ)} s
+        JOIN {_pq(UC_PQ)} uc
+          ON s.play_time::DATE >= uc.start_date::DATE
+         AND (uc.end_date IS NULL OR s.play_time::DATE <= uc.end_date::DATE)
+        WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
+          AND s.play_time IS NOT NULL
+        GROUP BY uc.country_code
+        ORDER BY scrobble_count DESC
+    """)
+
+
+def user_country_top_entities(top_n: int = 3) -> dict[str, pd.DataFrame]:
+    """
+    Returns top-N artists, albums, and tracks per user-country.
+
+    Joins scrobbles with uc.parquet via interval matching, resolves
+    canonical artist names, and ranks within each country.
+    Returns a dict with keys "artists", "albums", "tracks", each a
+    DataFrame with columns: country_code, rank, entity columns, play_count.
+    """
+    empty = {
+        "artists": pd.DataFrame(columns=["country_code", "rank", "artist_name", "play_count"]),
+        "albums": pd.DataFrame(columns=["country_code", "rank", "artist_name", "album_title", "play_count"]),
+        "tracks": pd.DataFrame(columns=["country_code", "rank", "artist_name", "track_title", "album_title", "play_count"]),
+    }
+    if not SCROBBLE_PQ.exists() or not UC_PQ.exists():
+        return empty
+    cte = _canonical_cte()
+    uc_join = (
+        f"{_pq(SCROBBLE_PQ)} s"
+        f" JOIN {_pq(UC_PQ)} uc"
+        f"   ON s.play_time::DATE >= uc.start_date::DATE"
+        f"  AND (uc.end_date IS NULL OR s.play_time::DATE <= uc.end_date::DATE)"
+    )
+    base_where = ("WHERE s.artist_name IS NOT NULL AND s.artist_name != ''"
+                  " AND s.play_time IS NOT NULL")
+    # Ranking artists per country
+    artists = query(f"""
+        WITH {cte},
+        agg AS (
+            SELECT uc.country_code,
+                   COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+                   COUNT(*) AS play_count
+            FROM {uc_join}
+            LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+            {base_where}
+            GROUP BY uc.country_code, COALESCE(cm.canonical_name, s.artist_name)
+        ),
+        ranked AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY country_code ORDER BY play_count DESC
+            ) AS rank FROM agg
+        )
+        SELECT country_code, rank::INT AS rank, artist_name, play_count
+        FROM ranked WHERE rank <= {top_n}
+        ORDER BY country_code, rank
+    """)
+    # Ranking albums per country
+    albums = query(f"""
+        WITH {cte},
+        agg AS (
+            SELECT uc.country_code,
+                   COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+                   s.album_title,
+                   COUNT(*) AS play_count
+            FROM {uc_join}
+            LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+            {base_where}
+              AND s.album_title IS NOT NULL AND s.album_title != ''
+            GROUP BY uc.country_code, COALESCE(cm.canonical_name, s.artist_name), s.album_title
+        ),
+        ranked AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY country_code ORDER BY play_count DESC
+            ) AS rank FROM agg
+        )
+        SELECT country_code, rank::INT AS rank, artist_name, album_title, play_count
+        FROM ranked WHERE rank <= {top_n}
+        ORDER BY country_code, rank
+    """)
+    # Ranking tracks per country
+    tracks = query(f"""
+        WITH {cte},
+        agg AS (
+            SELECT uc.country_code,
+                   COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
+                   s.track_title,
+                   s.album_title,
+                   COUNT(*) AS play_count
+            FROM {uc_join}
+            LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
+            {base_where}
+              AND s.track_title IS NOT NULL AND s.track_title != ''
+            GROUP BY uc.country_code, COALESCE(cm.canonical_name, s.artist_name),
+                     s.track_title, s.album_title
+        ),
+        ranked AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY country_code ORDER BY play_count DESC
+            ) AS rank FROM agg
+        )
+        SELECT country_code, rank::INT AS rank, artist_name, track_title, album_title, play_count
+        FROM ranked WHERE rank <= {top_n}
+        ORDER BY country_code, rank
+    """)
+    return {"artists": artists, "albums": albums, "tracks": tracks}
+
+
 def artist_country_stats() -> pd.DataFrame:
     """
     Joins scrobbles with artist_info to produce play counts per country.
 
+    Resolves variant names through artist_info aliases before joining.
     Returns a DataFrame with columns: country, play_count, artist_count.
     """
     if not ARTIST_INFO_PQ.exists():
         return pd.DataFrame(columns=["country", "play_count", "artist_count"])
     return query(f"""
+        WITH {_canonical_cte()}
         SELECT
             ai.country,
             COUNT(*) AS play_count,
-            COUNT(DISTINCT s.artist_name) AS artist_count
+            COUNT(DISTINCT COALESCE(cm.canonical_name, s.artist_name)) AS artist_count
         FROM {_pq(SCROBBLE_PQ)} s
+        LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
         JOIN {_pq(ARTIST_INFO_PQ)} ai
-            ON s.artist_name = ai.artist_name
+            ON COALESCE(cm.canonical_name, s.artist_name) = ai.artist_name
         WHERE ai.country IS NOT NULL AND ai.country != ''
         GROUP BY ai.country
         ORDER BY play_count DESC

@@ -26,13 +26,14 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         "C_PQ": pq / "c.parquet",
         "UC_PQ": pq / "uc.parquet",
         "QA_REPORT_PQ": pq / "qa_report.parquet",
+        "GS_MB_PQ": pq / "gs_mb.parquet",
     }
     # Patching helpers.io (canonical source)
     for name, path in paths.items():
         monkeypatch.setattr(io_mod, name, path)
     # Patching every module that copies these constants at import time
     import_map = {
-        q_mod: ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "QA_REPORT_PQ"],
+        q_mod: ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "QA_REPORT_PQ", "UC_PQ"],
     }
     # Lazily importing optional consumer modules
     for mod_path, attrs in [
@@ -40,7 +41,7 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         ("corefunc.enrich", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.mb_local", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.canon", ["AVC_PQ"]),
-        ("corefunc.qa", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "UC_PQ", "QA_REPORT_PQ"]),
+        ("corefunc.qa", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "UC_PQ", "GS_MB_PQ", "QA_REPORT_PQ"]),
         ("corefunc.profile", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "C_PQ"]),
         ("helpers.cli", ["PQ_DIR", "AVC_PQ", "UC_PQ"]),
         ("HTTP.lfAPI", ["C_PQ", "UC_PQ", "SCROBBLE_PQ"]),
@@ -98,5 +99,44 @@ def populated_pq(tmp_pq_dir, sample_scrobble_df, sample_artist_info_df):
     """Writes sample data into the temp PQ directory and returns the path."""
     sample_scrobble_df.to_parquet(tmp_pq_dir / "scrobble.parquet", index=False)
     sample_artist_info_df.to_parquet(tmp_pq_dir / "artist_info.parquet", index=False)
+    return tmp_pq_dir
+
+
+@pytest.fixture()
+def temporal_scrobble_df():
+    """
+    Provides a multi-year, multi-month, multi-hour scrobble DataFrame.
+
+    Spans 2023-01 through 2025-02 with varied hours and weekdays so that
+    monthly_summary, yearly_top_artists, streak_analysis, and listening_clock
+    all have meaningful data to exercise.
+    """
+    rows = []
+    # 2023: Jan (3 scrobbles), Jul (2), Dec (4)
+    for day, hour in [(1, 9), (2, 14), (3, 22)]:
+        rows.append(("Alpha", "AlbumA", "TrackA", None, f"2023-01-{day:02d} {hour:02d}:00:00"))
+    for day, hour in [(10, 11), (11, 15)]:
+        rows.append(("Beta", "AlbumB", "TrackB", None, f"2023-07-{day:02d} {hour:02d}:00:00"))
+    for day, hour in [(1, 20), (2, 21), (3, 23), (4, 8)]:
+        rows.append(("Alpha", "AlbumA", "TrackC", None, f"2023-12-{day:02d} {hour:02d}:00:00"))
+    # 2024: Jan (5), Jul (1), Dec (3)
+    for day, hour in [(1, 10), (2, 10), (3, 11), (4, 12), (5, 13)]:
+        rows.append(("Alpha", "AlbumA", "TrackA", None, f"2024-01-{day:02d} {hour:02d}:00:00"))
+    rows.append(("Gamma", "AlbumG", "TrackG", None, "2024-07-15 16:00:00"))
+    for day, hour in [(10, 19), (11, 20), (12, 21)]:
+        rows.append(("Beta", "AlbumB", "TrackB", None, f"2024-12-{day:02d} {hour:02d}:00:00"))
+    # 2025: Jan (2), Feb (1)
+    for day, hour in [(1, 9), (2, 10)]:
+        rows.append(("Alpha", "AlbumA", "TrackA", None, f"2025-01-{day:02d} {hour:02d}:00:00"))
+    rows.append(("Beta", "AlbumB", "TrackD", None, "2025-02-01 14:00:00"))
+    df = pd.DataFrame(rows, columns=["artist_name", "album_title", "track_title", "artist_mbid", "play_time"])
+    df["play_time"] = pd.to_datetime(df["play_time"], utc=True)
+    return df
+
+
+@pytest.fixture()
+def temporal_pq(tmp_pq_dir, temporal_scrobble_df):
+    """Writes temporal scrobble data into the temp PQ directory."""
+    temporal_scrobble_df.to_parquet(tmp_pq_dir / "scrobble.parquet", index=False)
     return tmp_pq_dir
 

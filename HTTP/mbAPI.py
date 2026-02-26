@@ -181,7 +181,7 @@ def _cache_artist(data: Dict[str, Any]) -> None:
     elif "alias-list" in data and isinstance(data["alias-list"], list):
         aliases = [a.get("alias") if isinstance(a, dict) else a for a in data["alias-list"]]
     aliases = [str(a) for a in aliases if a]
-    aliases_str = ",".join(aliases)
+    aliases_str = "{".join(aliases)
     row = pd.DataFrame([{
         "artist_name": artist_name,
         "mbid": data.get("id") or "",
@@ -471,7 +471,7 @@ def get_complete_artist_info(artist_identifier: str = None, **kwargs) -> dict[st
                         "id": row["mbid"] or None,
                         "name": row["artist_name"],
                         "country": row["country"] or None,
-                        "aliases": str(row["aliases"]).split(",") if row["aliases"] else [],
+                    "aliases": str(row["aliases"]).split("{") if row["aliases"] else [],
                         "disambiguation": row["disambiguation_comment"] or None,
                     }
         # ── Remote calls ──────────────────────────────────────────────────

@@ -449,6 +449,165 @@ class TestQaGroup:
         assert "500" not in result.output
 
 
+class TestParseRankRanges:
+    """Tests for _parse_rank_ranges helper."""
+
+    def test_single_range(self):
+        """Parses a single (start, end) tuple."""
+        from main import _parse_rank_ranges
+        assert _parse_rank_ranges("(1, 5)") == [(1, 5)]
+
+    def test_multiple_ranges(self):
+        """Parses multiple ranges and sorts them."""
+        from main import _parse_rank_ranges
+        assert _parse_rank_ranges("(27, 29), (1, 5)") == [(1, 5), (27, 29)]
+
+    def test_no_spaces(self):
+        """Handles input without spaces."""
+        from main import _parse_rank_ranges
+        assert _parse_rank_ranges("(1,5),(27,29)") == [(1, 5), (27, 29)]
+
+    def test_invalid_string_raises(self):
+        """Raises BadParameter for unparseable input."""
+        import click
+        from main import _parse_rank_ranges
+        with pytest.raises(click.BadParameter, match="Cannot parse"):
+            _parse_rank_ranges("nonsense")
+
+    def test_zero_start_raises(self):
+        """Raises BadParameter when start is 0."""
+        import click
+        from main import _parse_rank_ranges
+        with pytest.raises(click.BadParameter, match="Invalid range"):
+            _parse_rank_ranges("(0, 5)")
+
+    def test_inverted_range_raises(self):
+        """Raises BadParameter when start > end."""
+        import click
+        from main import _parse_rank_ranges
+        with pytest.raises(click.BadParameter, match="Invalid range"):
+            _parse_rank_ranges("(10, 3)")
+
+
+class TestProfileTopCustom:
+    """Tests the --custom flag on profile top."""
+
+    def test_custom_single_range(self, runner, tmp_pq_dir):
+        """Displays only the requested rank range."""
+        from tests.unit.test_profile import _write_fixtures
+        _write_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "top", "--custom", "(1, 2)"])
+        assert result.exit_code == 0
+        assert "custom ranges" in result.output
+        assert "  1." in result.output
+        assert "  2." in result.output
+
+    def test_custom_multi_range_has_ellipsis(self, runner, tmp_pq_dir):
+        """Prints '...' between discontinuous ranges."""
+        from tests.unit.test_profile import _write_fixtures
+        _write_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "top", "--custom", "(1, 2), (4, 5)"])
+        assert result.exit_code == 0
+        assert "..." in result.output
+
+    def test_custom_invalid_range(self, runner, tmp_pq_dir):
+        """Reports error for an unparseable range string."""
+        result = runner.invoke(cli, ["profile", "top", "--custom", "garbage"])
+        assert result.exit_code != 0
+
+
+class TestProfilePopulation:
+    """Tests the 'profile population' CLI command."""
+
+    def test_population_error_no_data(self, runner, tmp_pq_dir):
+        """Reports error when no enriched country data exists."""
+        result = runner.invoke(cli, ["profile", "population"])
+        assert result.exit_code == 0
+        assert "Error" in result.output
+
+    def test_population_with_data(self, runner, tmp_pq_dir):
+        """Displays absolute and per-capita rankings."""
+        from tests.unit.test_profile import _write_fixtures
+        _write_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "population", "-n", "5"])
+        assert result.exit_code == 0
+        assert "By absolute scrobble count" in result.output
+        assert "By scrobbles per million population" in result.output
+        assert "Countries matched" in result.output
+
+    def test_population_shows_country_codes(self, runner, tmp_pq_dir):
+        """Output includes country codes from the data."""
+        from tests.unit.test_profile import _write_fixtures
+        _write_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "population", "-n", "10"])
+        assert result.exit_code == 0
+        # Fixture countries: DE, GB, US
+        assert any(cc in result.output for cc in ["DE", "GB", "US"])
+
+
+class TestProfileWhere:
+    """Tests the 'profile where' CLI command."""
+
+    def test_where_error_no_uc(self, runner, tmp_pq_dir):
+        """Reports error when uc.parquet is missing."""
+        result = runner.invoke(cli, ["profile", "where"])
+        assert result.exit_code == 0
+        assert "Error" in result.output
+
+    def test_where_with_data(self, runner, tmp_pq_dir):
+        """Displays user-country scrobble breakdown."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "where", "-n", "5"])
+        assert result.exit_code == 0
+        assert "Scrobbles matched" in result.output
+        assert "Unique countries" in result.output
+
+    def test_where_shows_percentages(self, runner, tmp_pq_dir):
+        """Output includes percentage values."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "where", "-n", "5"])
+        assert result.exit_code == 0
+        assert "%" in result.output
+
+
+class TestProfileUc:
+    """Tests the 'profile uc' CLI command."""
+
+    def test_uc_error_no_data(self, runner, tmp_pq_dir):
+        """Reports error when uc.parquet is missing."""
+        result = runner.invoke(cli, ["profile", "uc"])
+        assert result.exit_code == 0
+        assert "Error" in result.output
+
+    def test_uc_with_data(self, runner, tmp_pq_dir):
+        """Displays medal tables with Artists, Albums, Tracks headers."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "-n", "2", "--ucn", "2"])
+        assert result.exit_code == 0
+        assert "Artists" in result.output
+        assert "Albums" in result.output
+        assert "Tracks" in result.output
+
+    def test_uc_shows_medals(self, runner, tmp_pq_dir):
+        """Output includes medal labels like GOLD, SILVER."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "-n", "3", "--ucn", "1"])
+        assert result.exit_code == 0
+        assert "GOLD" in result.output
+
+    def test_uc_respects_ucn(self, runner, tmp_pq_dir):
+        """With --ucn 1, only one country section appears."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "--ucn", "1"])
+        assert result.exit_code == 0
+        assert "1 country" in result.output
+
+
 class TestTrainCommand:
     """Tests the 'train' command."""
 

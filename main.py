@@ -131,7 +131,7 @@ def avc(ctx: click.Context) -> None:
 @click.option("--undecided", is_flag=True, help="Show only undecided rows (to_link NULL).")
 @click.option("--last", "last_n", default=None, type=int, help="Show only the last N rows.")
 def avc_show(decided: bool, undecided: bool, last_n: int | None) -> None:
-    """Prints out the current state of the avc table."""
+    """Print out the current state of the avc table"""
     from corefunc.canon.workflow import avc_summary
     rows = avc_summary(decided_only=decided, undecided_only=undecided, last_n=last_n)
     if not rows:
@@ -147,7 +147,7 @@ def avc_show(decided: bool, undecided: bool, last_n: int | None) -> None:
 
 @avc.command("propagate")
 def avc_propagate() -> None:
-    """Applies canonisation results to artist_info."""
+    """Apply canonisation results to artist_info"""
     from corefunc.canon.workflow import propagate_avc
     click.echo("Propagating AVC decisions to artist_info …")
     result = propagate_avc()
@@ -157,7 +157,7 @@ def avc_propagate() -> None:
 @avc.command("seed")
 @click.argument("sql_path", type=click.Path(exists=True))
 def avc_seed_cmd(sql_path: str) -> None:
-    """Seeds avc.parquet from a MySQL dump file."""
+    """Seed avc.parquet from a MySQL dump file"""
     from corefunc.avc_seed import seed_avc_from_sql
     click.echo(f"Seeding avc.parquet from {sql_path} …")
     n = seed_avc_from_sql(sql_path)
@@ -169,7 +169,7 @@ def avc_seed_cmd(sql_path: str) -> None:
 @click.option("--neg-limit", default=5000, type=int, help="Max negative pairs.")
 @click.option("--similarity-floor", default=60, type=int, help="WRatio floor for hard negatives (0-100).")
 def avc_augment(pos_limit: int, neg_limit: int, similarity_floor: int) -> None:
-    """Extracts training pairs from the local MusicBrainz mirror into gs_mb.parquet."""
+    """Extract training pairs from local MB mirror into gs_mb"""
     from corefunc.canon.augment import augment_gold_standard
     click.echo(f"Extracting pairs from MBDB (pos={pos_limit}, neg={neg_limit}, floor={similarity_floor}) …")
     try:
@@ -184,7 +184,7 @@ def avc_augment(pos_limit: int, neg_limit: int, similarity_floor: int) -> None:
 
 @canon.command("human")
 def canon_human() -> None:
-    """Tackles undecided artist name variants interactively."""
+    """Tackle undecided artist name variants interactively"""
     from corefunc.canon.workflow import undecided_rows, update_avc_decision
     pending = undecided_rows()
     if pending.empty:
@@ -232,13 +232,35 @@ def canon_human() -> None:
     click.echo("\nHuman review complete.")
 
 
+@canon.command("experiment")
+@click.option("--run-name", default=None, help="MLflow parent run name.")
+@click.option("--augment/--no-augment", default=True, help="Include MBDB pairs from gs_mb.parquet.")
+@click.option("--folds", default=5, type=int, help="Number of CV folds.")
+@click.option("--models", default=None, help="Comma-separated model names to run (default: all).")
+def canon_experiment(run_name: str | None, augment: bool, folds: int, models: str | None) -> None:
+    """Run multi-model experiment with CV and MLflow logging"""
+    from corefunc.canon.experiment_runner import run_experiment
+    model_list = [m.strip() for m in models.split(",")] if models else None
+    label = " (with MBDB augmentation)" if augment else ""
+    click.echo(f"Running multi-model experiment{label}, {folds}-fold CV …")
+    if model_list:
+        click.echo(f"Models: {', '.join(model_list)}")
+    run_experiment(
+        augment=augment,
+        n_folds=folds,
+        run_name=run_name,
+        models=model_list,
+    )
+    click.echo("\nExperiment complete. View results with 'c9r mlflow-ui'.")
+
+
 @canon.command("machine")
 @click.option("--cutoff", default=75, type=int, help="RapidFuzz WRatio pre-filter cutoff (0-100).")
 @click.option("--threshold", default=0.5, type=float, help="ML model probability threshold.")
 @click.option("--min-plays", default=2, type=int, help="Minimum play count to consider.")
 @click.option("--limit", default=2000, type=int, help="Max artists to scan.")
 def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> None:
-    """Finds new artist name variant candidates using a trained ML model."""
+    """Finds new artist name variant candidates using ML"""
     from corefunc.canon.workflow import (
         list_mlflow_runs, load_run_model, discover_candidates, write_new_candidates,
     )
@@ -303,7 +325,10 @@ def mlflow_ui(host: str, port: int) -> None:
     """Launches the MLflow tracking UI for experiment comparison"""
     from helpers.experiment import TRACKING_URI
     click.echo(f"Starting MLflow UI at http://{host}:{port}  (store: {TRACKING_URI})")
-    os.execvp("mlflow", ["mlflow", "ui", "--backend-store-uri", TRACKING_URI, "--host", host, "--port", str(port)])
+    os.execvp(
+        "mlflow",
+        ["mlflow", "ui", "--backend-store-uri", TRACKING_URI, "--host", host, "--port", str(port), "--workers", "1"],
+    )
 
 
 # ── serve ──────────────────────────────────────────────────────────────────
@@ -329,7 +354,7 @@ def dashboard(ctx: click.Context) -> None:
 @dashboard.command("artist")
 @click.option("--top", "-n", default=10, type=int, help="Number of top artists to show.")
 def dashboard_artist(top: int) -> None:
-    """Shows top artists by play count."""
+    """Show top artists by play count"""
     from helpers.query import scrobble_count, unique_artists, top_artists
     total = scrobble_count()
     artists = unique_artists()
@@ -344,7 +369,7 @@ def dashboard_artist(top: int) -> None:
 @dashboard.command("album")
 @click.option("--top", "-n", default=10, type=int, help="Number of top albums to show.")
 def dashboard_album(top: int) -> None:
-    """Shows top albums by play count."""
+    """Show top albums by play count"""
     from helpers.query import top_albums
     df = top_albums(top)
     if df.empty:
@@ -358,7 +383,7 @@ def dashboard_album(top: int) -> None:
 @dashboard.command("track")
 @click.option("--top", "-n", default=10, type=int, help="Number of top tracks to show.")
 def dashboard_track(top: int) -> None:
-    """Shows top tracks by play count."""
+    """Show top tracks"""
     from helpers.query import top_tracks
     df = top_tracks(top)
     if df.empty:
@@ -374,7 +399,7 @@ def dashboard_track(top: int) -> None:
 @dashboard.command("recent")
 @click.option("-n", default=10, type=int, help="Number of recent scrobbles to show.")
 def dashboard_recent(n: int) -> None:
-    """Shows the most recent scrobbles."""
+    """Show most recent scrobbles"""
     from helpers.query import recent_scrobbles
     df = recent_scrobbles(n)
     if df.empty:
@@ -388,7 +413,27 @@ def dashboard_recent(n: int) -> None:
         click.echo(f"  {row['artist_name']}: {row['track_title']}{album_part} | {ts}")
 
 
-# ── purge ──────────────────────────────────────────────────────────────────
+_MEDAL = {1: "GOLD", 2: "SILVER", 3: "BRONZE"}
+
+
+@dashboard.command("yearly")
+@click.option("--top", "-n", default=3, type=int, help="Number of top artists per year.")
+def dashboard_yearly(top: int) -> None:
+    """Show top artists per year (gold / silver / bronze)"""
+    from corefunc.profile import yearly_top_artists_profile
+    result = yearly_top_artists_profile(top_n=top)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo(f"Top {result['top_n']} artists by year:\n")
+    for yr in result["years"]:
+        click.echo(f"  {yr['year']}")
+        for a in yr["artists"]:
+            medal = _MEDAL.get(a["rank"], f"#{a['rank']}")
+            click.echo(f"    [{medal}] {a['name']}  ({a['plays']:,} plays)")
+
+
+# ── purge
 @cli.command()
 @click.option("--all", "purge_all", is_flag=True, help="Purge all Parquet files.")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (only with --all).")
@@ -449,7 +494,7 @@ def qa(ctx: click.Context) -> None:
 @click.option("--hours", "-h", default=None, type=int, help="Only check scrobbles from the last N hours.")
 @click.option("--source", "-s", type=_SOURCE_CHOICES, default=None, envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
 def qa_scrobble(hours: int | None, source: str | None) -> None:
-    """Runs QA checks on scrobble.parquet."""
+    """Run QA checks on scrobble.parquet"""
     from corefunc.qa import qa_lb_ingest
     source = _normalise_source(source) if source else None
     click.echo("Running scrobble QA checks …")
@@ -497,7 +542,7 @@ def qa_scrobble(hours: int | None, source: str | None) -> None:
 
 @qa.command("a_i")
 def qa_artist_info_cmd() -> None:
-    """Runs QA checks on artist_info.parquet."""
+    """Run QA checks on artist_info"""
     from corefunc.qa import qa_artist_info
     click.echo("Running artist_info QA checks …")
     report = qa_artist_info()
@@ -539,7 +584,7 @@ def qa_artist_info_cmd() -> None:
 
 @qa.command("avc")
 def qa_avc_cmd() -> None:
-    """Runs QA checks on avc.parquet."""
+    """Run QA checks on avc"""
     from corefunc.qa import qa_avc
     click.echo("Running avc QA checks …")
     report = qa_avc()
@@ -569,9 +614,46 @@ def qa_avc_cmd() -> None:
     _print_qa_history("artist_variants_canonized")
 
 
+@qa.command("gs_mb")
+def qa_gs_mb_cmd() -> None:
+    """Run QA checks on the MB gold-standard pairs"""
+    from corefunc.qa import qa_gs_mb
+    click.echo("Running gs_mb QA checks …")
+    report = qa_gs_mb()
+    if report.get("status") == "skipped":
+        click.echo(f"Skipped: {report['reason']}")
+        return
+    passed = report["passed"]
+    click.echo(f"\nRows checked: {report['row_count']:,}")
+    click.echo(f"Overall: {'PASS' if passed else 'FAIL'}")
+    sch = report["schema"]
+    if not sch["pass"]:
+        click.echo(f"  Schema FAIL — missing: {sch['missing']}, unexpected: {sch['unexpected']}")
+    for col, stats in report["nulls"].items():
+        if stats["null_pct"] > 0 or stats["empty_pct"] > 0:
+            click.echo(f"  {col}: {stats['null_pct']}% null, {stats['empty_pct']}% empty")
+        else:
+            click.echo(f"  {col}: clean")
+    dup = report["duplicates"]
+    click.echo(f"  Duplicates: {dup['duplicate_count']:,} ({dup['duplicate_pct']}%)")
+    if not dup["pass"]:
+        click.echo("  ⚠ Duplicate rate exceeds 5% threshold")
+    enc = report["encoding"]
+    if not enc["pass"]:
+        click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
+    # Printing label distribution and source breakdown
+    dist = report.get("label_distribution", {})
+    click.echo(f"  Labels: {dist.get('positive', 0):,} positive, {dist.get('negative', 0):,} negative, {dist.get('null', 0):,} null")
+    src_bk = report.get("source_breakdown", {})
+    if src_bk:
+        parts = ", ".join(f"{k}={v:,}" for k, v in src_bk.items())
+        click.echo(f"  Sources: {parts}")
+    _print_qa_history("gs_mb")
+
+
 @qa.command("uc")
 def qa_uc_cmd() -> None:
-    """Shows summary stats for uc.parquet (user-country history)."""
+    """Show summary stats for user country history"""
     from corefunc.qa import qa_uc
     click.echo("Running uc summary …")
     report = qa_uc()
@@ -634,6 +716,11 @@ def _format_qa_row(row) -> str:
                 f"  disambig={disambig_rate}%"
                 f"  aliases={aliases_rate}%"
                 f"  bad_chars={int(row['bad_char_rows'])}")
+    if target == "gs_mb":
+        return (f"  {ts}  {status}{src_str}"
+                f"  rows={int(row['row_count']):,}"
+                f"  dupes={row['duplicate_pct']}%"
+                f"  bad_chars={int(row['bad_char_rows'])}")
     if target == "artist_variants_canonized":
         fill_str = f"hash_fill={hash_rate}%"
     else:
@@ -661,7 +748,7 @@ def _print_qa_history(target: str, last_n: int = 5) -> None:
 @click.option("--all", "show_all", is_flag=True, help="Show all reports (overrides --last).")
 @click.option("--fail-only", is_flag=True, help="Only show failed reports.")
 def show(last_n: int, show_all: bool, fail_only: bool) -> None:
-    """Displays past QA reports from qa_report.parquet."""
+    """Display past QA reports from qa_report.parquet"""
     from helpers.query import qa_reports
     limit = None if show_all else last_n
     df = qa_reports(last_n=limit, fail_only=fail_only)
@@ -685,7 +772,7 @@ def profile(ctx: click.Context) -> None:
 
 @profile.command()
 def overview() -> None:
-    """Prints high-level scrobble and distribution statistics."""
+    """Print eagle-level scrobble stats"""
     from corefunc.profile import overview_stats
     stats = overview_stats()
     if "error" in stats:
@@ -715,7 +802,7 @@ def overview() -> None:
 @click.option("--limit", "-l", default=500, type=int, help="Max artists to compare.")
 @click.option("--top", "-n", default=20, type=int, help="Number of results to show.")
 def variants(threshold: int, min_plays: int, limit: int, top: int) -> None:
-    """Finds fuzzy-similar artist names that split scrobble counts (the Bohren problem)."""
+    """Show examples for the Bohren problem"""
     from corefunc.profile import variant_candidates
     click.echo(f"Scanning top {limit} artists (≥{min_plays} plays) for near-duplicates (threshold={threshold}) …")
     clusters = variant_candidates(threshold=threshold, min_plays=min_plays, limit=limit)
@@ -731,25 +818,73 @@ def variants(threshold: int, min_plays: int, limit: int, top: int) -> None:
         click.echo(f"\n  … and {len(clusters) - top} more pair(s).  Use --top to show more.")
 
 
+def _parse_rank_ranges(raw: str) -> list[tuple[int, int]]:
+    """
+    Parses a custom rank-range string like '(1,5),(27,29)' into sorted,
+    validated (start, end) tuples.
+    """
+    import re
+    pairs = re.findall(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)", raw)
+    if not pairs:
+        raise click.BadParameter(f"Cannot parse rank ranges from: {raw}")
+    ranges: list[tuple[int, int]] = []
+    for a, b in pairs:
+        lo, hi = int(a), int(b)
+        if lo < 1 or hi < lo:
+            raise click.BadParameter(f"Invalid range ({lo}, {hi}) — must be 1 ≤ start ≤ end.")
+        ranges.append((lo, hi))
+    ranges.sort()
+    return ranges
+
+
+def _echo_ranged_entries(entries: list[dict], ranges: list[tuple[int, int]]) -> None:
+    """Prints entries filtered by rank ranges with '...' between gaps."""
+    for idx, (lo, hi) in enumerate(ranges):
+        if idx > 0:
+            click.echo("  ...")
+        for entry in entries:
+            if lo <= entry["rank"] <= hi:
+                click.echo(f"  {entry['rank']:>3}.  {entry['plays']:>6,}  {entry['name']}")
+
+
 @profile.command("top")
 @click.option("-n", default=20, type=int, help="Number of top artists.")
-@click.option("--canonized", is_flag=True, help="Apply AVC canonisation before ranking.")
-def profile_top(n: int, canonized: bool) -> None:
-    """Shows top artists by play count, optionally after canonisation."""
+@click.option("--canonized", is_flag=True, help="Apply alias-based canonisation before ranking.")
+@click.option("--custom", "custom_ranges", default=None, type=str,
+              help="Custom rank ranges, e.g. '(1,5),(27,29)'.")
+def profile_top(n: int, canonized: bool, custom_ranges: str | None) -> None:
+    """Show top by scrobble optionally after canonisation"""
     from corefunc.profile import top_artists_profile
-    result = top_artists_profile(n, canonize=canonized)
+    # Determining how many rows to fetch
+    ranges: list[tuple[int, int]] | None = None
+    if custom_ranges:
+        ranges = _parse_rank_ranges(custom_ranges)
+        fetch_n = max(hi for _, hi in ranges)
+    else:
+        fetch_n = n
+    result = top_artists_profile(fetch_n, canonize=canonized)
     if "error" in result:
         click.echo(f"Error: {result['error']}")
         return
-    click.echo(f"Top {n} artists (raw):\n")
-    for entry in result["raw_top"]:
-        click.echo(f"  {entry['rank']:>3}.  {entry['plays']:>6,}  {entry['name']}")
-    if canonized and "canon_top" in result:
-        click.echo(f"\nTop {n} artists (after AVC canonisation — {result['mapping_size']} mappings):\n")
-        for entry in result["canon_top"]:
+    # Displaying raw top
+    if ranges:
+        click.echo("Top artists (raw), custom ranges:\n")
+        _echo_ranged_entries(result["raw_top"], ranges)
+    else:
+        click.echo(f"Top {n} artists (raw):\n")
+        for entry in result["raw_top"]:
             click.echo(f"  {entry['rank']:>3}.  {entry['plays']:>6,}  {entry['name']}")
+    # Displaying canonised top
+    if canonized and "canon_top" in result:
+        if ranges:
+            click.echo("\nTop artists (canonised), custom ranges:\n")
+            _echo_ranged_entries(result["canon_top"], ranges)
+        else:
+            click.echo(f"\nTop {n} artists (canonised):\n")
+            for entry in result["canon_top"]:
+                click.echo(f"  {entry['rank']:>3}.  {entry['plays']:>6,}  {entry['name']}")
     elif canonized:
-        click.echo("\navc.parquet not found — canonised ranking unavailable.")
+        click.echo("\nartist_info.parquet not found — canonised ranking unavailable.")
 
 
 @profile.command()
@@ -757,7 +892,7 @@ def profile_top(n: int, canonized: bool) -> None:
 @click.option("--end", default=2025, type=int, help="End year (inclusive).")
 @click.option("-n", default=10, type=int, help="Number of companions to show.")
 def companions(start: int, end: int, n: int) -> None:
-    """Finds artists listened to in every year of the range (trusted companions)."""
+    """Find trusted companions"""
     from corefunc.profile import trusted_companions
     result = trusted_companions(start_year=start, end_year=end)
     if "error" in result:
@@ -779,7 +914,7 @@ def companions(start: int, end: int, n: int) -> None:
 @profile.command()
 @click.option("-n", default=15, type=int, help="Number of top countries to show.")
 def countries(n: int) -> None:
-    """Shows top countries by scrobble count from artist_info enrichment."""
+    """Show top countries by scrobble count"""
     from corefunc.profile import country_breakdown
     rows = country_breakdown(top_n=n)
     if not rows:
@@ -790,6 +925,157 @@ def countries(n: int) -> None:
     click.echo(f"  {'─' * 4}  {'──':<4} {'─' * 8} {'─' * 8} {'─' * 7}  {'─' * 4}")
     for i, r in enumerate(rows, 1):
         click.echo(f"  {i:>3}.  {r['country']:<4} {r['play_count']:>8,} {r['artist_count']:>8,} {r['pct']:>6.1f}%  {r['name']}")
+
+
+@profile.command()
+def timeline() -> None:
+    """Show monthly scrobble summary across all years"""
+    from corefunc.profile import monthly_summary
+    result = monthly_summary()
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo("Monthly scrobble summary (averaged across all years):\n")
+    click.echo(f"  {'Month':<12} {'Mean':>7} {'Min':>7} {'Max':>7} {'Total':>8} {'Years':>5}")
+    click.echo(f"  {'─' * 12} {'─' * 7} {'─' * 7} {'─' * 7} {'─' * 8} {'─' * 5}")
+    for m in result["months"]:
+        click.echo(
+            f"  {m['name']:<12} {m['mean']:>7.1f} {m['min']:>7,} {m['max']:>7,}"
+            f" {m['total']:>8,} {m['year_count']:>5}"
+        )
+    s = result["strongest"]
+    w = result["weakest"]
+    if s and w:
+        click.echo(f"\n  Strongest month: {s['name']} (mean {s['mean']:.1f})")
+        click.echo(f"  Weakest month:  {w['name']} (mean {w['mean']:.1f})")
+
+
+@profile.command()
+def streaks() -> None:
+    """Show listening streak and gap statistics"""
+    from corefunc.profile import streak_analysis
+    result = streak_analysis()
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo("Listening streaks & gaps:\n")
+    click.echo(f"  Active days: {result['total_active_days']:,}  ({result['first_day']} → {result['last_day']})")
+    click.echo(
+        f"  Longest streak: {result['longest_streak']} day(s)"
+        f"  ({result['longest_streak_start']} → {result['longest_streak_end']})"
+    )
+    click.echo(f"  Current streak: {result['current_streak']} day(s)")
+    if result["longest_gap_days"] > 0:
+        click.echo(
+            f"  Longest gap: {result['longest_gap_days']} day(s)"
+            f"  ({result['longest_gap_start']} → {result['longest_gap_end']})"
+        )
+
+
+@profile.command()
+def clock() -> None:
+    """Show when you listen — hour-of-day and day-of-week patterns"""
+    from corefunc.profile import listening_clock_profile
+    result = listening_clock_profile()
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    # Hourly breakdown
+    if result["hours"]:
+        click.echo("Hour of day:\n")
+        max_cnt = max(h["count"] for h in result["hours"])
+        for h in result["hours"]:
+            bar_len = int(h["count"] / max_cnt * 30) if max_cnt else 0
+            bar = "█" * max(1, bar_len)
+            click.echo(f"  {h['label']}  {h['count']:>7,}  {h['pct']:>5.1f}%  {bar}")
+        pk = result["peak_hour"]
+        qt = result["quiet_hour"]
+        if pk and qt:
+            click.echo(f"\n  Peak: {pk['label']} ({pk['count']:,})   Quiet: {qt['label']} ({qt['count']:,})")
+    # Weekly breakdown
+    if result["weekdays"]:
+        click.echo("\nDay of week:\n")
+        max_cnt = max(d["count"] for d in result["weekdays"])
+        for d in result["weekdays"]:
+            bar_len = int(d["count"] / max_cnt * 30) if max_cnt else 0
+            bar = "█" * max(1, bar_len)
+            click.echo(f"  {d['name']:<4} {d['count']:>7,}  {d['pct']:>5.1f}%  {bar}")
+        pk = result["peak_day"]
+        qt = result["quiet_day"]
+        if pk and qt:
+            click.echo(f"\n  Peak: {pk['name']} ({pk['count']:,})   Quiet: {qt['name']} ({qt['count']:,})")
+
+
+@profile.command()
+@click.option("-n", default=20, type=int, help="Number of top countries to show per ranking.")
+def population(n: int) -> None:
+    """Correlate artist-origin country population with scrobble counts"""
+    from corefunc.profile import population_vs_scrobbles
+    result = population_vs_scrobbles(top_n=n)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo(f"Countries matched: {result['total_countries']}\n")
+    click.echo("By absolute scrobble count:\n")
+    click.echo(f"  {'#':>4}  {'CC':<4} {'Plays':>8} {'Artists':>8} {'Population':>14} {'Per 1M':>10}  {'Name'}")
+    click.echo(f"  {'─' * 4}  {'──':<4} {'─' * 8} {'─' * 8} {'─' * 14} {'─' * 10}  {'─' * 4}")
+    for i, r in enumerate(result["by_absolute"], 1):
+        click.echo(
+            f"  {i:>3}.  {r['country']:<4} {r['play_count']:>8,} {r['artist_count']:>8,}"
+            f" {r['population']:>14,} {r['per_million']:>10.2f}  {r['name']}"
+        )
+    click.echo("\nBy scrobbles per million population:\n")
+    click.echo(f"  {'#':>4}  {'CC':<4} {'Per 1M':>10} {'Plays':>8} {'Population':>14}  {'Name'}")
+    click.echo(f"  {'─' * 4}  {'──':<4} {'─' * 10} {'─' * 8} {'─' * 14}  {'─' * 4}")
+    for i, r in enumerate(result["by_per_capita"], 1):
+        click.echo(
+            f"  {i:>3}.  {r['country']:<4} {r['per_million']:>10.2f} {r['play_count']:>8,}"
+            f" {r['population']:>14,}  {r['name']}"
+        )
+
+
+@profile.command("where")
+@click.option("-n", default=10, type=int, help="Number of top countries to show.")
+def profile_where(n: int) -> None:
+    """Show where you were when you scrobbled"""
+    from corefunc.profile import user_country_profile
+    result = user_country_profile(top_n=n)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo(
+        f"Scrobbles matched: {result['total_scrobbles_matched']:,}"
+        f"   Unique countries: {result['unique_countries']}"
+    )
+    click.echo(f"\n  {'#':>4}  {'CC':<4} {'Scrobbles':>10} {'Share':>7}  {'Name'}")
+    click.echo(f"  {'─' * 4}  {'──':<4} {'─' * 10} {'─' * 7}  {'─' * 4}")
+    for i, r in enumerate(result["countries"], 1):
+        click.echo(f"  {i:>3}.  {r['country']:<4} {r['scrobble_count']:>10,} {r['pct']:>6.1f}%  {r['name']}")
+
+
+@profile.command("uc")
+@click.option("-n", default=3, type=int, help="Number of entries per category (medal count).")
+@click.option("--ucn", default=5, type=int, help="Number of top user-countries to include.")
+def profile_uc(n: int, ucn: int) -> None:
+    """Show medal tables per user-country (artists, albums, tracks)"""
+    from corefunc.profile import user_country_medal_profile
+    result = user_country_medal_profile(top_n=n, ucn=ucn)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo(f"Top {result['top_n']} per category across {result['ucn']} countr{'y' if result['ucn'] == 1 else 'ies'}:\n")
+    for c in result["countries"]:
+        click.echo(f"  {c['country']} ({c['name']}) — {c['scrobble_count']:,} scrobbles")
+        for label, key in [("Artists", "artists"), ("Albums", "albums"), ("Tracks", "tracks")]:
+            click.echo(f"    {label}")
+            entries = c[key]
+            if not entries:
+                click.echo("      (no data)")
+                continue
+            for e in entries:
+                medal = _MEDAL.get(e["rank"], f"#{e['rank']}")
+                click.echo(f"      [{medal}] {e['name']}  ({e['plays']:,} plays)")
+        click.echo()
 
 
 # ── flow ───────────────────────────────────────────────────────────────────

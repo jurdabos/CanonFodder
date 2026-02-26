@@ -83,6 +83,8 @@ def iterative_correlation_dropper(
 
 def length_stats(input_text: str) -> pd.Series:
     """Computes length-based features from a '{'-delimited variant string."""
+    if not isinstance(input_text, str):
+        return pd.Series({"sig_len": 0, "n_variants": 0, "avg_name_len": 0.0, "max_name_len": 0, "var_len": 0.0})
     parts = re.split(r"{", input_text)
     lens = [len(p.strip()) for p in parts if p.strip()]
     return pd.Series({

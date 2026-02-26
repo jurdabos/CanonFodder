@@ -4,6 +4,75 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-02-25 – Startup of ML capabilities
+### Added files:
+- helpers/device.py — GPU probe that tries XGBoost CUDA, caches result, falls back to CPU. Every model constructor calls get_device().
+- helpers/features.py — Three-tier compute_pair_features(a, b) returning 23 features: 10 whole-string (6 existing RapidFuzz + Levenshtein, Jaro-Winkler, length ratio, abs length diff), 5 token-level (count diff, Jaccard, shared ratio, LCS, Kendall τ displacement), 8 character-level (bigram/trigram Jaccard, edit op breakdown, shared prefix/suffix, script mismatch flag).
+- corefunc/canon/experiment_runner.py — Multi-model orchestrator that trains 8 models (XGBoost GPU, Random Forest, Extra Trees, LightGBM, GradientBoosting, VotingClassifier, StackingClassifier, BaggingXGB) in a single MLflow parent run with nested child runs, 5-fold stratified CV with per-fold logging, GPU fallback safety, SHAP/confusion matrix/feature importance artifacts.
+### Modified files:
+- corefunc/canon/model.py — Now uses 23-feature compute_pair_features instead of the old 6-score path, and device=get_device() for GPU-accelerated XGBoost.
+- helpers/experiment.py — Added log_confusion_matrix(), log_feature_importance(), and log_shap_summary() artifact helpers.
+- main.py — Added c9r canon experiment CLI command; fixed c9r mlflow-ui to pass --workers 1 (critical for WSL2 stability).
+- pyproject.toml / uv.lock — Added lightgbm, shap, optuna dependencies.
+
+---
+
+## 2026-02-25 – User country to entities tables
+- helpers/query.py — user_country_top_entities(top_n): runs 3 DuckDB queries (artists, albums, tracks) each with the uc interval join + canonical name resolution + ROW_NUMBER() OVER (PARTITION BY country_code). Returns a dict of 3 DataFrames, ranked per country.
+- corefunc/profile.py — user_country_medal_profile(top_n, ucn): gets the top-ucn countries from user_country_scrobble_counts(), fetches medal data from the query function, resolves country names from c.parquet, and assembles a structured dict with per-country artist/album/track medal lists. Also extracted _country_name_map() helper.
+- main.py — profile uc CLI command with -n (medal count, default 3) and --ucn (user-country count, default 5). Output mirrors dashboard yearly style — each country gets a section header with scrobble count, then Artists/Albums/Tracks sub-sections with GOLD/SILVER/BRONZE labels.
+- Tests — 7 query tests (TestUserCountryTopEntities), 6 profile tests (TestUserCountryMedalProfile), 4 CLI tests (TestProfileUc).
+
+---
+
+## 2026-02-25 – Population-weighted country ranking and user country rankings
+- conftest.py — added UC_PQ to q_mod patch list so the new query function's path constant gets redirected to the temp directory during tests
+- main.py — added two CLI commands:
+  - profile population — displays artist-origin countries ranked by absolute scrobble count and by per-capita (scrobbles per million population)
+  - profile where — displays the user's physical country at scrobble time, ranked by scrobble count with share percentages
+- test_query.py — added TestUserCountryScrobbleCounts (5 tests) covering interval-join logic, correct DE/HU counts, and empty-data edge cases
+- test_profile.py — added TestPopulationVsScrobbles (5 tests) and TestUserCountryProfile (5 tests) covering rankings, sorting, percentages, country names, and missing-data paths
+- test_cli.py — added TestProfilePopulation (3 tests) and TestProfileWhere (3 tests) covering error states, formatted output, and data display
+- Fixed pre-existing lint issues: removed unused imports (PQ_DIR, C_PQ, UC_PQ, pytest) and extraneous f-prefixes
+
+---
+
+## 2026-02-25 – Time series backbone and temporal analysis integration
+- Query backbone (helpers/query.py) — 4 new DuckDB functions:
+  - monthly_scrobble_counts() — year/month aggregation for the temporal backbone
+  - yearly_top_n_artists(top_n) — per-year ranked artists with canonical name resolution
+  - listening_clock(granularity) — hour-of-day and day-of-week bucketing
+  - daily_scrobble_dates() — distinct scrobble dates for streak computation
+- Profile analytics (corefunc/profile.py) — 4 new functions:
+  - monthly_summary() — per-calendar-month stats (min/max/mean/total) with strongest/weakest identification, mirroring the ridgeline insight
+  - yearly_top_artists_profile(top_n) — gold/silver/bronze per year, mirroring the stacked bar chart from pics/
+  - streak_analysis() — longest streak, current streak, longest gap, total active days
+  - listening_clock_profile() — hourly and weekday distributions with peak/quiet identification
+- CLI commands (main.py):
+  - c9r profile timeline — monthly summary table
+  - c9r profile streaks — streak/gap stats
+  - c9r profile clock — when-do-you-listen with bar visualisation
+  - c9r dashboard yearly — year-by-year top artists in GOLD/SILVER/BRONZE format
+
+---
+
+## 2026-02-25 – DuckDB CTE for joining scrobble with artist_info for analytics purposes
+- Core change: _canonical_cte() in helpers/query.py — a DuckDB CTE that builds a variant→canonical mapping from artist_info.aliases. When artist_info is absent, returns an empty CTE so queries degrade gracefully.
+- Updated queries in helpers/query.py — top_artists, unique_artists, top_albums, top_tracks, recent_scrobbles, artist_country_stats all now LEFT JOIN through canonical_map and use COALESCE(cm.canonical_name, s.artist_name). scrobble_count and scrobbles_between stay raw (they don't aggregate by artist).
+- Updated queries in corefunc/profile.py — overview_stats, trusted_companions, country_breakdown all resolve through canonical names. top_artists_profile now uses artist_info aliases instead of AVC for its canonize=True path. variant_candidates intentionally stays raw (its job is to find unresolved variants).
+- Updated main.py — profile top --canonized label and fallback message updated.
+- Tests — 4 new canonization tests in test_query.py, 2 updated tests in test_profile.py (alias-based instead of AVC-based).
+
+---
+
+## 2026-02-25 – c9r profile top --custom addition
+- _parse_rank_ranges() — parses a string like "(1, 5), (27, 29)" into sorted (start, end) tuples with validation (start ≥ 1, start ≤ end).
+- _echo_ranged_entries() — prints filtered entries for the given ranges, inserting ... between discontinuous ranges.
+- --custom flag on profile top — when provided, fetches enough rows to cover the max rank and displays only the selected ranges. Works with --canonized too.
+- 9 new tests covering the parser (valid/invalid inputs) and the CLI integration (single range, multi-range with ellipsis, invalid input).
+
+---
+
 ## 2026-02-25 – c9r canon sketched out
 
 ### Added
@@ -14,7 +83,8 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 - corefunc/canon.py — business logic for all four subcommands: avc_summary(), propagate_avc(), undecided_rows() / update_avc_decision(), list_mlflow_runs() / load_run_model() / discover_candidates() / write_new_candidates()
 - main.py — replaced the placeholder canonise and review commands with the canon group housing:
 - c9r canon avc show (with --decided / --undecided / --last N filters, tabular output with variants column last)
-- c9r canon avc propagate (renames artist_info rows, appends to aliases without overwriting)
+- c9r canon avc propagate (renames artist_info rows based on avc.parquet (NOT the training file gs_mb.parquet, appends to aliases)
+  - It only touches artist_info, the dimension table, as canonisation belongs on the dimension — scrobble rows then resolve through artist_info at query time.
 - c9r canon avc seed <sql_path> (one-time migration command)
 - c9r canon human (interactive review of NULL-to_link rows with progress counter and [q]uit)
 - c9r canon machine (lists MLflow runs with metrics, user picks a model, RapidFuzz pre-filter → ML classification → union-find grouping → writes new candidates with to_link=NULL)

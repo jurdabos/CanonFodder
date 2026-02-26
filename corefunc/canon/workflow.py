@@ -18,7 +18,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 from helpers.io import (
-    AVC_PQ, SCROBBLE_PQ, ARTIST_INFO_PQ,
+    ALIAS_SEP, AVC_PQ, SCROBBLE_PQ, ARTIST_INFO_PQ,
     read_parquet, dump_parquet, append_to_parquet,
 )
 
@@ -131,7 +131,7 @@ def propagate_avc() -> dict:
             continue
         canon_idx = canon_mask.idxmax()
         existing_aliases_raw = ai.at[canon_idx, "aliases"] or ""
-        existing_aliases = {a.strip() for a in str(existing_aliases_raw).split(",") if a.strip() and a.strip() != "None"}
+        existing_aliases = {a.strip() for a in str(existing_aliases_raw).split(ALIAS_SEP) if a.strip() and a.strip() != "None"}
         new_aliases = set()
         for v in non_canonical:
             if v not in existing_aliases and v != canonical:
@@ -143,7 +143,7 @@ def propagate_avc() -> dict:
                 updated += 1
         if new_aliases:
             merged = existing_aliases | new_aliases
-            ai.at[canon_idx, "aliases"] = ",".join(sorted(merged))
+            ai.at[canon_idx, "aliases"] = ALIAS_SEP.join(sorted(merged))
             aliases_added += len(new_aliases)
     # Deduplicating on artist_name (keep first)
     ai = ai.drop_duplicates(subset=["artist_name"], keep="first")
@@ -272,7 +272,7 @@ def _build_exclusion_set() -> set[str]:
                 covered.add(name)
             aliases_raw = row.get("aliases", "")
             if aliases_raw and str(aliases_raw) not in ("None", "nan", ""):
-                for a in str(aliases_raw).split(","):
+                for a in str(aliases_raw).split(ALIAS_SEP):
                     a = a.strip()
                     if a:
                         covered.add(a)

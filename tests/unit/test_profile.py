@@ -5,8 +5,11 @@ import pandas as pd
 from corefunc.profile import (
     country_breakdown,
     overview_stats,
+    population_vs_scrobbles,
     top_artists_profile,
     trusted_companions,
+    user_country_medal_profile,
+    user_country_profile,
     variant_candidates,
 )
 
@@ -180,32 +183,44 @@ class TestTopArtistsProfile:
         assert raw[0]["rank"] == 1
         assert raw[0]["plays"] >= raw[1]["plays"]
 
-    def test_canonize_without_avc(self, tmp_pq_dir):
-        """When canonize=True but no avc.parquet, only raw_top is returned."""
+    def test_canonize_with_empty_aliases(self, tmp_pq_dir):
+        """With empty aliases in artist_info, canon_top matches raw_top."""
         _write_fixtures(tmp_pq_dir)
-        result = top_artists_profile(n=3, canonize=True)
+        result = top_artists_profile(n=5, canonize=True)
         assert "raw_top" in result
-        assert "canon_top" not in result
+        assert "canon_top" in result
+        raw_names = {e["name"] for e in result["raw_top"]}
+        canon_names = {e["name"] for e in result["canon_top"]}
+        assert raw_names == canon_names
 
-    def test_canonize_with_avc(self, tmp_pq_dir):
-        """Applies AVC mapping and re-ranks artists."""
+    def test_canonize_with_aliases(self, tmp_pq_dir):
+        """Applies artist_info alias mapping and re-ranks artists."""
         _write_fixtures(tmp_pq_dir)
-        # Writing a minimal AVC parquet that merges Bohren variants
-        avc = pd.DataFrame({
-            "artist_variants_hash": ["abc123"],
-            "artist_variants_text": ["Bohren & der Club of Gore{Bohren und der Club of Gore"],
-            "canonical_name": ["Bohren & der Club of Gore"],
-            "to_link": [True],
-            "comment": [""],
-            "stamp": pd.to_datetime(["2024-01-01"], utc=True),
+        # Overwriting artist_info to simulate post-propagation state
+        import helpers.io as io_mod
+        ai = pd.DataFrame({
+            "artist_name": [
+                "Bohren & der Club of Gore",
+                "Autechre", "Radiohead", "Secret Chiefs 3",
+            ],
+            "mbid": [
+                "a4074512-87e0-4820-b609-0c4a18142a70",
+                "410c9baf-5469-44f6-9852-826524b80c61",
+                "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+                "b5f3a039-10fa-44d6-99f2-27aeb5e5bfd0",
+            ],
+            "country": ["DE", "GB", "GB", "US"],
+            "disambiguation_comment": ["", "", "", ""],
+            "aliases": ["Bohren und der Club of Gore", "", "", ""],
         })
-        avc.to_parquet(tmp_pq_dir / "avc.parquet", index=False)
+        ai.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         result = top_artists_profile(n=5, canonize=True)
         assert "canon_top" in result
         canon_names = [e["name"] for e in result["canon_top"]]
-        # Merged artist should appear, individual variant should not
         assert "Bohren & der Club of Gore" in canon_names
         assert "Bohren und der Club of Gore" not in canon_names
+        ranks = [e["rank"] for e in result["canon_top"]]
+        assert ranks == list(range(1, len(ranks) + 1))
 
 
 # ── Trusted companions ────────────────────────────────────────────────────────
@@ -288,3 +303,147 @@ class TestCountryBreakdown:
         _write_fixtures(tmp_pq_dir)
         result = country_breakdown(top_n=2)
         assert len(result) == 2
+
+
+# ── Population vs. scrobbles ──────────────────────────────────────────────────
+def _write_uc_fixtures(pq_dir, years=(2023, 2024, 2025)):
+    """Writes scrobble + artist_info + c + uc parquets for user-country tests."""
+    _scrobble_df(years).to_parquet(pq_dir / "scrobble.parquet", index=False)
+    _artist_info_df().to_parquet(pq_dir / "artist_info.parquet", index=False)
+    _country_codes_df().to_parquet(pq_dir / "c.parquet", index=False)
+    uc = pd.DataFrame({
+        "country_code": ["DE", "HU"],
+        "start_date": pd.to_datetime(["2022-01-01", "2024-01-01"]).date,
+        "end_date": [pd.Timestamp("2023-12-31").date(), None],
+    })
+    uc.to_parquet(pq_dir / "uc.parquet", index=False)
+    return pq_dir
+
+
+class TestPopulationVsScrobbles:
+    """Tests for population_vs_scrobbles."""
+
+    def test_missing_data(self, tmp_pq_dir):
+        """Returns error dict when artist_info is absent."""
+        result = population_vs_scrobbles()
+        assert "error" in result
+
+    def test_returns_rankings(self, tmp_pq_dir):
+        """Returns both absolute and per-capita rankings."""
+        _write_fixtures(tmp_pq_dir)
+        result = population_vs_scrobbles(top_n=5)
+        assert "by_absolute" in result
+        assert "by_per_capita" in result
+        assert result["total_countries"] > 0
+
+    def test_absolute_sorted_descending(self, tmp_pq_dir):
+        """Absolute ranking is sorted by play_count descending."""
+        _write_fixtures(tmp_pq_dir)
+        result = population_vs_scrobbles(top_n=10)
+        counts = [r["play_count"] for r in result["by_absolute"]]
+        assert counts == sorted(counts, reverse=True)
+
+    def test_per_capita_sorted_descending(self, tmp_pq_dir):
+        """Per-capita ranking is sorted by per_million descending."""
+        _write_fixtures(tmp_pq_dir)
+        result = population_vs_scrobbles(top_n=10)
+        rates = [r["per_million"] for r in result["by_per_capita"]]
+        assert rates == sorted(rates, reverse=True)
+
+    def test_entries_have_population(self, tmp_pq_dir):
+        """Each entry includes a positive population value."""
+        _write_fixtures(tmp_pq_dir)
+        result = population_vs_scrobbles(top_n=10)
+        for r in result["by_absolute"]:
+            assert r["population"] > 0
+
+
+# ── User country profile ──────────────────────────────────────────────────────
+class TestUserCountryProfile:
+    """Tests for user_country_profile."""
+
+    def test_missing_uc(self, tmp_pq_dir):
+        """Returns error dict when uc.parquet is absent."""
+        result = user_country_profile()
+        assert "error" in result
+
+    def test_returns_countries(self, tmp_pq_dir):
+        """Returns country entries with counts and percentages."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_profile(top_n=10)
+        assert "countries" in result
+        assert len(result["countries"]) > 0
+        assert result["total_scrobbles_matched"] > 0
+
+    def test_pct_within_bounds(self, tmp_pq_dir):
+        """Percentages are between 0 and 100."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_profile(top_n=10)
+        for r in result["countries"]:
+            assert 0.0 <= r["pct"] <= 100.0
+
+    def test_includes_country_names(self, tmp_pq_dir):
+        """Country entries include English names from c.parquet."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_profile(top_n=10)
+        names = [r["name"] for r in result["countries"]]
+        # At least one known name from the fixture should be present
+        assert any(n in names for n in ["Germany", "Hungary"])
+
+    def test_unique_countries_count(self, tmp_pq_dir):
+        """Reports the correct number of unique countries."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_profile(top_n=10)
+        assert result["unique_countries"] == 2
+
+
+# ── User-country medal profile ────────────────────────────────────────────────
+class TestUserCountryMedalProfile:
+    """Tests for user_country_medal_profile."""
+
+    def test_missing_uc(self, tmp_pq_dir):
+        """Returns error dict when uc.parquet is absent."""
+        result = user_country_medal_profile()
+        assert "error" in result
+
+    def test_returns_countries_with_medals(self, tmp_pq_dir):
+        """Returns per-country medal entries for all 3 categories."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=3, ucn=2)
+        assert "countries" in result
+        assert len(result["countries"]) == 2
+        for c in result["countries"]:
+            assert "artists" in c
+            assert "albums" in c
+            assert "tracks" in c
+
+    def test_medal_entries_have_rank_and_name(self, tmp_pq_dir):
+        """Each medal entry has rank, name, and plays keys."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=2, ucn=1)
+        c = result["countries"][0]
+        for key in ("artists", "albums", "tracks"):
+            for e in c[key]:
+                assert "rank" in e
+                assert "name" in e
+                assert "plays" in e
+
+    def test_ucn_limits_countries(self, tmp_pq_dir):
+        """The ucn parameter limits the number of countries in the output."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=3, ucn=1)
+        assert len(result["countries"]) == 1
+
+    def test_includes_country_names(self, tmp_pq_dir):
+        """Country entries include English names from c.parquet."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=3, ucn=2)
+        names = [c["name"] for c in result["countries"]]
+        assert any(n for n in names if n)  # to verify at least one name resolved
+
+    def test_scrobble_count_per_country(self, tmp_pq_dir):
+        """Each country entry reports its scrobble count."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=3, ucn=2)
+        for c in result["countries"]:
+            assert c["scrobble_count"] > 0

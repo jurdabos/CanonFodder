@@ -12,6 +12,7 @@ from corefunc.qa import (
     _real_fill,
     _reconcile_rows,
     qa_artist_info,
+    qa_gs_mb,
     qa_lb_ingest,
 )
 
@@ -355,3 +356,87 @@ class TestQaArtistInfo:
         assert "disambiguation_fill_rate" in report_df.columns
         assert "aliases_fill_rate" in report_df.columns
         assert report_df.iloc[0]["country_fill_rate"] == 100.0
+
+
+# ── qa_gs_mb ─────────────────────────────────────────────────────────────────
+class TestQaGsMb:
+    """Tests for qa_gs_mb gold-standard pairs QA."""
+
+    def test_skips_on_empty(self, tmp_pq_dir):
+        """Returns skipped status when gs_mb.parquet is missing."""
+        result = qa_gs_mb()
+        assert result["status"] == "skipped"
+
+    def test_pass_on_good_data(self, tmp_pq_dir):
+        """Returns a passing report for clean sample data."""
+        import helpers.io as io_mod
+        df = pd.DataFrame({
+            "variant_a": ["Björk", "The Beatles", "Radiohead"],
+            "variant_b": ["Bjork", "Beatles, The", "Radio Head"],
+            "to_link": [True, True, False],
+            "source": ["mb_alias", "mb_alias", "mb_neg_fuzzy"],
+        })
+        df.to_parquet(io_mod.GS_MB_PQ, index=False)
+        result = qa_gs_mb()
+        assert result["passed"] is True
+        assert result["row_count"] == 3
+        assert result["target"] == "gs_mb"
+
+    def test_label_distribution(self, tmp_pq_dir):
+        """Reports correct positive/negative/null counts."""
+        import helpers.io as io_mod
+        df = pd.DataFrame({
+            "variant_a": ["A", "B", "C", "D"],
+            "variant_b": ["A2", "B2", "C2", "D2"],
+            "to_link": [True, True, False, None],
+            "source": ["mb_alias", "mb_alias", "mb_neg_exact", "mb_neg_fuzzy"],
+        })
+        df.to_parquet(io_mod.GS_MB_PQ, index=False)
+        result = qa_gs_mb()
+        dist = result["label_distribution"]
+        assert dist["positive"] == 2
+        assert dist["negative"] == 1
+        assert dist["null"] == 1
+
+    def test_source_breakdown(self, tmp_pq_dir):
+        """Reports correct per-source row counts."""
+        import helpers.io as io_mod
+        df = pd.DataFrame({
+            "variant_a": ["A", "B", "C"],
+            "variant_b": ["A2", "B2", "C2"],
+            "to_link": [True, False, False],
+            "source": ["mb_alias", "mb_neg_exact", "mb_neg_exact"],
+        })
+        df.to_parquet(io_mod.GS_MB_PQ, index=False)
+        result = qa_gs_mb()
+        assert result["source_breakdown"]["mb_alias"] == 1
+        assert result["source_breakdown"]["mb_neg_exact"] == 2
+
+    def test_duplicates_detected(self, tmp_pq_dir):
+        """Detects duplicate (variant_a, variant_b) pairs."""
+        import helpers.io as io_mod
+        df = pd.DataFrame({
+            "variant_a": ["A", "A", "B"],
+            "variant_b": ["A2", "A2", "B2"],
+            "to_link": [True, True, False],
+            "source": ["mb_alias", "mb_alias", "mb_neg_fuzzy"],
+        })
+        df.to_parquet(io_mod.GS_MB_PQ, index=False)
+        result = qa_gs_mb()
+        assert result["duplicates"]["duplicate_count"] == 1
+
+    def test_report_persisted(self, tmp_pq_dir):
+        """Verifies that a row was appended to qa_report.parquet."""
+        import helpers.io as io_mod
+        df = pd.DataFrame({
+            "variant_a": ["A"],
+            "variant_b": ["A2"],
+            "to_link": [True],
+            "source": ["mb_alias"],
+        })
+        df.to_parquet(io_mod.GS_MB_PQ, index=False)
+        qa_gs_mb()
+        report_df = pd.read_parquet(io_mod.QA_REPORT_PQ)
+        assert len(report_df) == 1
+        assert "passed" in report_df.columns
+        assert report_df.iloc[0]["target"] == "gs_mb"
