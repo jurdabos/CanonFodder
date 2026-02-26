@@ -447,3 +447,26 @@ class TestUserCountryMedalProfile:
         result = user_country_medal_profile(top_n=3, ucn=2)
         for c in result["countries"]:
             assert c["scrobble_count"] > 0
+
+    def test_country_codes_filters_to_specified(self, tmp_pq_dir):
+        """Passing country_codes returns only those countries."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=3, country_codes=["HU"])
+        codes = [c["country"] for c in result["countries"]]
+        assert codes == ["HU"]
+        assert result["ucn"] == 1
+
+    def test_country_codes_ignores_unknown(self, tmp_pq_dir):
+        """Unknown codes are silently dropped from the output."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=3, country_codes=["XX", "DE"])
+        codes = [c["country"] for c in result["countries"]]
+        assert "XX" not in codes
+        assert "DE" in codes
+
+    def test_country_codes_case_insensitive(self, tmp_pq_dir):
+        """Lowercase codes are normalised to uppercase."""
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_medal_profile(top_n=3, country_codes=["de"])
+        codes = [c["country"] for c in result["countries"]]
+        assert "DE" in codes

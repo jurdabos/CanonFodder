@@ -723,12 +723,18 @@ def _df_to_medal_entries(df: pd.DataFrame, cc: str, category: str) -> list[dict]
     return entries
 
 
-def user_country_medal_profile(top_n: int = 3, ucn: int = 5) -> dict:
+def user_country_medal_profile(
+    top_n: int = 3,
+    ucn: int = 5,
+    country_codes: list[str] | None = None,
+) -> dict:
     """
     Builds a per-country medal table of top artists, albums, and tracks.
 
     Uses uc.parquet to assign scrobbles to user-countries, then ranks
     entities within each of the top *ucn* countries (by scrobble volume).
+    When *country_codes* is given, only those countries are included
+    (sorted by scrobble volume), and *ucn* is ignored.
 
     Parameters
     ----------
@@ -736,16 +742,24 @@ def user_country_medal_profile(top_n: int = 3, ucn: int = 5) -> dict:
         Number of entries per category per country.
     ucn : int
         Number of top user-countries to include.
+    country_codes : list[str] | None
+        Optional whitelist of ISO-2 country codes to restrict the output to.
     """
     counts_df = user_country_scrobble_counts()
     if counts_df.empty:
         return {"error": "No user-country data available (uc.parquet missing or empty)."}
-    # Selecting top-ucn countries by scrobble volume
-    top_codes = counts_df.head(ucn)["country_code"].tolist()
-    top_counts = dict(zip(
-        counts_df.head(ucn)["country_code"],
-        counts_df.head(ucn)["scrobble_count"].astype(int),
-    ))
+    # Selecting countries: explicit whitelist or top-ucn by scrobble volume
+    if country_codes:
+        upper = [c.upper() for c in country_codes]
+        filtered = counts_df[counts_df["country_code"].isin(upper)]
+        top_codes = filtered["country_code"].tolist()
+        top_counts = dict(zip(filtered["country_code"], filtered["scrobble_count"].astype(int)))
+    else:
+        top_codes = counts_df.head(ucn)["country_code"].tolist()
+        top_counts = dict(zip(
+            counts_df.head(ucn)["country_code"],
+            counts_df.head(ucn)["scrobble_count"].astype(int),
+        ))
     name_map = _country_name_map()
     entities = user_country_top_entities(top_n=top_n)
     countries: list[dict] = []

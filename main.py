@@ -1053,20 +1053,64 @@ def profile_where(n: int) -> None:
         click.echo(f"  {i:>3}.  {r['country']:<4} {r['scrobble_count']:>10,} {r['pct']:>6.1f}%  {r['name']}")
 
 
+def _parse_country_codes(raw: str) -> list[str]:
+    """
+    Parses a country-code list like '(HU, ES, DK)' or 'HU,ES,DK' into
+    upper-cased ISO-2 codes.
+    """
+    import re
+    stripped = raw.strip().strip("()")
+    codes = re.split(r"[,\s]+", stripped)
+    return [c.upper() for c in codes if c]
+
+
+_CATEGORY_ALIASES: dict[str, str] = {
+    "artist": "artists", "artists": "artists",
+    "album": "albums", "albums": "albums",
+    "track": "tracks", "tracks": "tracks",
+}
+
+
+def _parse_categories(raw: str) -> list[str]:
+    """
+    Parses a category filter like '(artist, album)' or 'track' into
+    a list of internal keys ('artists', 'albums', 'tracks').
+    """
+    import re
+    stripped = raw.strip().strip("()")
+    tokens = re.split(r"[,\s]+", stripped)
+    result: list[str] = []
+    for t in tokens:
+        key = _CATEGORY_ALIASES.get(t.lower())
+        if key and key not in result:
+            result.append(key)
+    if not result:
+        raise click.BadParameter(f"Unknown categories in: {raw}. Use artist, album, track.")
+    return result
+
+
 @profile.command("uc")
 @click.option("-n", default=3, type=int, help="Number of entries per category (medal count).")
 @click.option("--ucn", default=5, type=int, help="Number of top user-countries to include.")
-def profile_uc(n: int, ucn: int) -> None:
+@click.option("-c", "countries_raw", default=None, type=str,
+              help="Comma-separated country codes to filter, e.g. '(HU, ES, DK)'.")
+@click.option("-s", "--show", "show_raw", default=None, type=str,
+              help="Categories to display: artist, album, track, e.g. '(artist, track)'.")
+def profile_uc(n: int, ucn: int, countries_raw: str | None, show_raw: str | None) -> None:
     """Show medal tables per user-country (artists, albums, tracks)"""
     from corefunc.profile import user_country_medal_profile
-    result = user_country_medal_profile(top_n=n, ucn=ucn)
+    country_codes = _parse_country_codes(countries_raw) if countries_raw else None
+    categories = _parse_categories(show_raw) if show_raw else ["artists", "albums", "tracks"]
+    all_labels = [("Artists", "artists"), ("Albums", "albums"), ("Tracks", "tracks")]
+    visible = [(label, key) for label, key in all_labels if key in categories]
+    result = user_country_medal_profile(top_n=n, ucn=ucn, country_codes=country_codes)
     if "error" in result:
         click.echo(f"Error: {result['error']}")
         return
     click.echo(f"Top {result['top_n']} per category across {result['ucn']} countr{'y' if result['ucn'] == 1 else 'ies'}:\n")
     for c in result["countries"]:
         click.echo(f"  {c['country']} ({c['name']}) — {c['scrobble_count']:,} scrobbles")
-        for label, key in [("Artists", "artists"), ("Albums", "albums"), ("Tracks", "tracks")]:
+        for label, key in visible:
             click.echo(f"    {label}")
             entries = c[key]
             if not entries:

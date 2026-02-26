@@ -2,6 +2,16 @@
 
 All notable changes to c9r (CanonFodder) in reverse chronological order.
 
+## 2026-02-25 – Adding country_code filter list to profile uc
+- corefunc/profile.py — user_country_medal_profile now accepts an optional country_codes: list[str] | None. When provided, it filters the scrobble counts to only those ISO-2 codes (case-insensitive) instead of using the top-ucn by volume.
+- main.py — Added -c option to profile uc plus a _parse_country_codes helper that accepts both HU,ES,DK and (HU, ES, DK) formats.
+- tests — 3 new unit tests (filter-to-specified, unknown-code drop, case-insensitivity) and 2 new CLI tests (single code, parenthesised multi-code).
+- Usage:
+uv run c9r profile uc -n 3 -c "(HU, ES, DK, TH, VN, CN, NZ, CO, IE)"
+uv run c9r profile uc -n 3 -s artist                     # artists only
+uv run c9r profile uc -n 3 -s "(artist, track)"          # artists + tracks
+uv run c9r profile uc -n 3 -c "(HU, ES)" -s album        # albums only, filtered countries
+
 ---
 
 ## 2026-02-25 – Startup of ML capabilities

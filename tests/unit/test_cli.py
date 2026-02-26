@@ -607,6 +607,55 @@ class TestProfileUc:
         assert result.exit_code == 0
         assert "1 country" in result.output
 
+    def test_uc_filter_by_country_codes(self, runner, tmp_pq_dir):
+        """The -c flag restricts output to the given countries."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "-n", "2", "-c", "HU"])
+        assert result.exit_code == 0
+        assert "HU" in result.output
+        assert "1 country" in result.output
+
+    def test_uc_filter_parenthesised(self, runner, tmp_pq_dir):
+        """The -c flag accepts parenthesised, comma-separated codes."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "-c", "(DE, HU)"])
+        assert result.exit_code == 0
+        assert "DE" in result.output
+        assert "HU" in result.output
+        assert "2 countries" in result.output
+
+    def test_uc_show_single_category(self, runner, tmp_pq_dir):
+        """The -s flag limits output to one category."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "--ucn", "1", "-s", "artist"])
+        assert result.exit_code == 0
+        assert "Artists" in result.output
+        assert "Albums" not in result.output
+        assert "Tracks" not in result.output
+
+    def test_uc_show_two_categories(self, runner, tmp_pq_dir):
+        """The -s flag accepts a pair of categories."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "--ucn", "1", "-s", "(album, track)"])
+        assert result.exit_code == 0
+        assert "Artists" not in result.output
+        assert "Albums" in result.output
+        assert "Tracks" in result.output
+
+    def test_uc_show_default_all(self, runner, tmp_pq_dir):
+        """Without -s, all three categories are shown."""
+        from tests.unit.test_profile import _write_uc_fixtures
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "--ucn", "1"])
+        assert result.exit_code == 0
+        assert "Artists" in result.output
+        assert "Albums" in result.output
+        assert "Tracks" in result.output
+
 
 class TestTrainCommand:
     """Tests the 'train' command."""

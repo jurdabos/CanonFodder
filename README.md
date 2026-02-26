@@ -15,7 +15,7 @@ For demonstration purposes the default instance uses Last.fm scrobbles from http
 - **Storage**: Apache Parquet files + DuckDB for ad-hoc analytical queries
 - **APIs**: Last.fm for scrobble retrieval, MusicBrainz for metadata enrichment
 - **ML**: XGBoost + scikit-learn for artist-name record linkage
-- **CLI**: Click command group with composable subcommands
+- **CLI**: Click command groups exposed as `c9r` entry point via `uv run c9r`
 - **Model server**: FastAPI + Uvicorn for serving predictions over HTTP
 - **Orchestration**: Prefect (optional) for scheduled/automated flows
 - **Packaging**: uv for dependency management and virtualenvs
@@ -69,44 +69,181 @@ uv sync --extra all          # everything
 
 ## CLI Usage
 
-All commands are available via `uv run python main.py <command>`:
+All commands are available through the `c9r` entry point:
 
 ```shell
-# Fetching scrobbles (incremental by default)
-uv run python main.py ingest --user jurda
+uv run c9r <command> [options]
+```
+
+Pass `--verbose` / `-v` before any subcommand for debug logging.
+
+### Ingesting scrobbles
+
+```shell
+# Incremental fetch (default — resumes from the last stored timestamp)
+uv run c9r ingest --user jurda
 
 # Full history fetch
-uv run python main.py ingest --user jurda --full
+uv run c9r ingest --user jurda --full
 
-# Enriching artist MBIDs and user country
-uv run python main.py enrich --user jurda
+# ListenBrainz instead of Last.fm
+uv run c9r ingest --user jurda --source listenbrainz
+```
 
-# Training the XGBoost canonisation model
-uv run python main.py train
+### Enriching metadata
 
-# Starting the FastAPI model server
-uv run python main.py serve --port 8000
+```shell
+# Default: local MusicBrainz mirror
+uv run c9r enrich
 
-# Quick text dashboard
-uv run python main.py dashboard --top 20
+# Remote MusicBrainz API
+uv run c9r enrich --mbapi
 
-# Running the full Prefect flow
-uv run python main.py flow
+# Last.fm API for MBIDs + remote MB for metadata
+uv run c9r enrich --lastfmapi
 
-# Purging all Parquet data files
-uv run python main.py purge --all
+# Also sync user country
+uv run c9r enrich --country --user jurda
 
-# Log and view results
-uv run c9r mlflow-ui
+# Rebuild artist_info from scratch
+uv run c9r enrich --rebuild
+```
 
-# Run the full experiment (all 8 models)
+### Canonisation (`canon`)
+
+Artist-name record linkage lives under `c9r canon`.
+
+#### AVC table operations (`canon avc`)
+
+```shell
+# Show the full AVC (Artist Variants Canonized) table
+uv run c9r canon avc show
+
+# Only decided or undecided rows
+uv run c9r canon avc show --decided
+uv run c9r canon avc show --undecided
+
+# Apply canonisation decisions to artist_info
+uv run c9r canon avc propagate
+
+# Seed AVC from a legacy MySQL dump (one-time migration)
+uv run c9r canon avc seed path/to/dump.sql
+
+# Extract training pairs from the local MB mirror
+uv run c9r canon avc augment --pos-limit 5000 --neg-limit 5000
+```
+
+#### Interactive and ML-driven review
+
+```shell
+# Human review of undecided variant groups
+uv run c9r canon human
+
+# ML-assisted variant discovery (picks a trained model interactively)
+uv run c9r canon machine --cutoff 75 --threshold 0.5
+```
+
+#### Multi-model experiment
+
+```shell
+# Run the full experiment (all 8 models, 5-fold CV, logged to MLflow)
 uv run c9r canon experiment --augment
 
 # Run specific models only
 uv run c9r canon experiment --models "XGBoost,LightGBM,RandomForest"
+
+# Custom fold count and run name
+uv run c9r canon experiment --folds 10 --run-name "baseline-v2"
 ```
 
-Pass `--verbose` / `-v` before any subcommand for debug logging.
+### Training a single model
+
+```shell
+uv run c9r train
+uv run c9r train --run-name "xgb-baseline" --augment
+```
+
+### MLflow UI
+
+The MLflow tracking UI is a **viewer** — it is not required before training.
+Launch it after `train` or `canon experiment` to compare runs:
+
+```shell
+uv run c9r mlflow-ui                    # http://127.0.0.1:5000
+uv run c9r mlflow-ui --port 5050        # custom port
+```
+
+### Model server
+
+```shell
+uv run c9r serve                        # http://127.0.0.1:8000
+uv run c9r serve --port 9000
+```
+
+### Dashboard
+
+```shell
+uv run c9r dashboard artist --top 20    # top artists by play count
+uv run c9r dashboard album --top 10     # top albums
+uv run c9r dashboard track --top 10     # top tracks
+uv run c9r dashboard recent -n 15       # most recent scrobbles
+uv run c9r dashboard yearly --top 3     # gold/silver/bronze per year
+```
+
+### Profiling
+
+```shell
+uv run c9r profile overview             # high-level stats and yearly bar chart
+uv run c9r profile top -n 20            # top 20 artists (raw)
+uv run c9r profile top --canonized      # re-ranked after alias resolution
+uv run c9r profile top --custom "(1,5),(27,29)"  # custom rank ranges
+uv run c9r profile variants             # fuzzy near-duplicate artist names
+uv run c9r profile companions           # artists present every year
+uv run c9r profile countries             # scrobbles by artist-origin country
+uv run c9r profile population           # per-capita country ranking
+uv run c9r profile where                # user country at scrobble time
+uv run c9r profile uc                   # medal tables per user country
+uv run c9r profile timeline             # monthly summary across all years
+uv run c9r profile streaks              # listening streaks and gaps
+uv run c9r profile clock                # hour-of-day and day-of-week patterns
+```
+
+### Quality assurance
+
+```shell
+uv run c9r qa scrobble                  # QA checks on scrobble.parquet
+uv run c9r qa scrobble --hours 24       # only last 24 h
+uv run c9r qa a_i                       # artist_info checks
+uv run c9r qa avc                       # AVC table checks
+uv run c9r qa gs_mb                     # gold-standard pair checks
+uv run c9r qa uc                        # user country summary
+uv run c9r qa show --last 10            # recent QA reports
+uv run c9r qa show --fail-only          # failures only
+```
+
+### Maintenance
+
+```shell
+# Repair encoding-corrupted strings
+uv run c9r fix-encoding
+
+# Interactive Parquet file purge
+uv run c9r purge
+
+# Delete all Parquet files (with confirmation)
+uv run c9r purge --all
+
+# Skip confirmation
+uv run c9r purge --all --yes
+```
+
+### Orchestration
+
+```shell
+# Run the full Prefect ingest → enrich → clean flow
+uv run c9r flow
+uv run c9r flow --full --source listenbrainz
+```
 
 ## Docker
 
