@@ -3,14 +3,14 @@ import hashlib
 import logging
 import os
 import time
-from datetime import date, datetime, UTC
+from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
-from HTTP.client import make_request, USER_AGENT
-from helpers.io import C_PQ, UC_PQ, SCROBBLE_PQ, read_parquet, dump_parquet
+from HTTP.client import make_request, USER_AGENT  # noqa: E402
+from helpers.io import C_PQ, UC_PQ, read_parquet, dump_parquet, read_scrobble_df, dump_scrobble_df  # noqa: E402
 log = logging.getLogger("lfAPI")
 LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/"
 HERE = Path(__file__).resolve().parent
@@ -205,7 +205,7 @@ def enrich_artist_mbids(progress_callback: Optional[Callable] = None) -> dict:
     try:
         if progress_callback:
             progress_callback("Initializing", 0, "Starting artist MBID enrichment")
-        df = read_parquet(SCROBBLE_PQ)
+        df = read_scrobble_df()
         if df is None or df.empty:
             return {"status": "success", "message": "No scrobbles found", "enriched": 0}
         # Finding artists without MBIDs
@@ -239,7 +239,7 @@ def enrich_artist_mbids(progress_callback: Optional[Callable] = None) -> dict:
             for name, mbid in artist_mbid_map.items():
                 mask = (df["artist_name"] == name) & (df["artist_mbid"].isna() | (df["artist_mbid"] == ""))
                 df.loc[mask, "artist_mbid"] = mbid
-            dump_parquet(df, SCROBBLE_PQ)
+            dump_scrobble_df(df)
         if progress_callback:
             progress_callback("Complete", 100, f"Enriched {len(artist_mbid_map)} artists with MBIDs")
         return {
@@ -473,7 +473,7 @@ def lastfm_request(
         page: Optional[int] = None,
         limit: Optional[int] = None,
         from_ts: Optional[int] = None,  # Added parameter to handle 'from' timestamp
-        timeout: int = 10,  # noqa: Unused parameter kept for API consistency
+        timeout: int = 10,  # Unused parameter kept for API consistency  # noqa: ARG001
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         **kwargs  # Additional parameters
 ) -> Dict[str, Any]:

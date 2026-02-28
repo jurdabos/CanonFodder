@@ -1,5 +1,5 @@
 """
-Provides the XGBoost-based canonisation model pipeline.
+Provides the LightGBM-based canonisation model pipeline.
 
 Functions
 ---------
@@ -9,25 +9,24 @@ evaluate()      – computes classification report + AUC on a held-out set.
 from __future__ import annotations
 import json
 import logging
+import pickle
 from pathlib import Path
-import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import classification_report, precision_score, recall_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
-from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
 from helpers.io import AVC_PQ, GS_MB_PQ, read_parquet
 from helpers import cluster, experiment, stats
-from helpers.device import get_device
 from helpers.features import compute_pair_features
 
 log = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 MODEL_DIR = PROJECT_ROOT / "ML"
-MODEL_PATH = MODEL_DIR / "xgb.json"
-COLUMNS_PATH = MODEL_DIR / "xgb_columns.json"
+MODEL_PATH = MODEL_DIR / "lgbm_legacy.pkl"
+COLUMNS_PATH = MODEL_DIR / "lgbm_columns.json"
 
 
 def _build_gold_standard(augment: bool = False) -> pd.DataFrame:
@@ -83,10 +82,10 @@ def train_model(
     augment: bool = False,
 ) -> Pipeline:
     """
-    Trains an XGBoost classifier on the gold-standard pairs in avc.parquet.
+    Trains a LightGBM classifier on the gold-standard pairs in avc.parquet.
 
     When augment is True, also includes pairs from gs_mb.parquet.
-    Saves the model to ML/xgb.json and columns to ML/xgb_columns.json.
+    Saves the model to ML/lgbm_legacy.pkl and columns to ML/lgbm_columns.json.
     Logs parameters, metrics, and artefacts to MLflow.
     Returns the fitted sklearn Pipeline.
     """
@@ -99,25 +98,20 @@ def train_model(
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y,
     )
-    # Defining XGBoost hyperparameters with GPU-aware device selection
-    device = get_device()
-    spw = float(np.sum(y_train == 0) / np.sum(y_train == 1))
-    xgb_params = {
+    # Defining LightGBM hyperparameters
+    lgbm_params = {
         "n_estimators": 400,
         "learning_rate": 0.05,
         "max_depth": 4,
-        "subsample": 0.9,
-        "colsample_bytree": 0.75,
-        "scale_pos_weight": spw,
-        "eval_metric": "logloss",
+        "is_unbalance": True,
         "random_state": 49,
-        "device": device,
         "n_jobs": -1,
+        "verbosity": -1,
     }
-    # Building pipeline: RobustScaler -> XGBoost
+    # Building pipeline: RobustScaler -> LightGBM
     pre = ColumnTransformer([("num", Pipeline([("scaler", RobustScaler())]), num_cols)], remainder="drop")
-    xgb = XGBClassifier(**xgb_params)
-    model = Pipeline([("prep", pre), ("xgb", xgb)])
+    clf = LGBMClassifier(**lgbm_params)
+    model = Pipeline([("prep", pre), ("clf", clf)])
     with experiment.start_run(run_name=run_name):
         # Logging training parameters
         experiment.log_params({
@@ -130,8 +124,7 @@ def train_model(
             "n_test": len(X_test),
             "pos_train": int(y_train.sum()),
             "neg_train": int((y_train == 0).sum()),
-            "device_used": device,
-            **{k: v for k, v in xgb_params.items() if k not in ("n_jobs", "device")},
+            **{k: v for k, v in lgbm_params.items() if k != "n_jobs"},
         })
         model.fit(X_train, y_train)
         # Evaluating on the held-out set
@@ -139,7 +132,8 @@ def train_model(
         experiment.log_metrics(metrics)
         # Saving model artefacts to disk
         MODEL_DIR.mkdir(exist_ok=True)
-        model.named_steps["xgb"].save_model(MODEL_PATH)
+        with open(MODEL_PATH, "wb") as fh:
+            pickle.dump(model, fh, protocol=pickle.HIGHEST_PROTOCOL)
         COLUMNS_PATH.write_text(json.dumps(num_cols, indent=2))
         # Logging artefacts and model to MLflow
         experiment.log_artifact(MODEL_PATH)
@@ -165,7 +159,7 @@ def evaluate(model: Pipeline, X_test: pd.DataFrame, y_test: pd.Series) -> dict[s
         "f1": f1_score(y_test, y_pred),
         "auc": auc,
     }
-    print("\n=== XGBoost report (held-out) ===")
+    print("\n=== LightGBM report (held-out) ===")
     print(classification_report(y_test, y_pred, target_names=["no link", "link"]))
     print(f"AUC: {auc:.3f}")
     return metrics

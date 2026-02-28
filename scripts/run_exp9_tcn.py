@@ -13,7 +13,6 @@ Test data: AVC holdout (same 1,172 pairs as Exps 5–8).
 from __future__ import annotations
 import logging
 import sys
-import warnings
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -35,8 +34,8 @@ from sklearn.model_selection import train_test_split
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet
-from helpers import cluster
+from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet # noqa: E402
+from helpers import cluster # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -242,7 +241,7 @@ class NamePairDataset(Dataset):
 def assemble_training_data() -> pd.DataFrame:
     """Builds balanced training set: gs_mb positives + dbscan negatives in [60, 100)."""
     gs = read_parquet(GS_MB_PQ)
-    positives = gs[gs["to_link"] == True].copy()
+    positives = gs[gs["to_link"].eq(True)].copy()
     # Filtering positives to WRatio [60, 100)
     positives["_wr"] = positives.apply(
         lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
@@ -253,7 +252,7 @@ def assemble_training_data() -> pd.DataFrame:
     log.info("Positives in [60,100): %d", n_pos)
     # Sampling matching number of negatives from dbscan
     dbscan = read_parquet(GS_DBSCAN_PQ)
-    neg_pool = dbscan[dbscan["to_link"] == False]
+    neg_pool = dbscan[dbscan["to_link"].eq(False)]
     negatives = neg_pool.sample(n=min(n_pos, len(neg_pool)), random_state=RANDOM_STATE)
     log.info("Negatives sampled: %d (from %d pool)", len(negatives), len(neg_pool))
     train = pd.concat([

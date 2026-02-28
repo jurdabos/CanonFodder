@@ -12,17 +12,16 @@ import os
 import re
 import subprocess
 from collections import Counter, defaultdict
-from pathlib import Path
 from typing import Sequence
 import pandas as pd
 from helpers.io import (
     ARTIST_INFO_COLS,
     ARTIST_INFO_PQ,
     PQ_DIR,
-    SCROBBLE_PQ,
     append_to_parquet,
     dump_parquet,
     read_parquet,
+    read_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
@@ -284,7 +283,7 @@ def enrich_from_local_mb(*, rebuild: bool = False) -> int:
             f"Cannot reach local MB mirror (container: {MB_CONTAINER}). "
             "Is musicbrainz-docker running?"
         )
-    scrobbles = read_parquet(SCROBBLE_PQ)
+    scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         log.warning("No scrobbles found — nothing to enrich.")
         return 0

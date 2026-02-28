@@ -21,6 +21,7 @@ def tmp_pq_dir(monkeypatch, tmp_path):
     paths = {
         "PQ_DIR": pq,
         "SCROBBLE_PQ": pq / "scrobble.parquet",
+        "SCROBBLE_PQ_DIR": pq / "scrobble",
         "ARTIST_INFO_PQ": pq / "artist_info.parquet",
         "AVC_PQ": pq / "avc.parquet",
         "C_PQ": pq / "c.parquet",
@@ -41,11 +42,13 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         ("corefunc.enrich", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.mb_local", ["ARTIST_INFO_PQ", "SCROBBLE_PQ"]),
         ("corefunc.canon", ["AVC_PQ"]),
+        ("corefunc.canon.workflow", ["AVC_PQ", "ARTIST_INFO_PQ", "PQ_DIR", "PREDICTIONS_LOG_PQ"]),
         ("corefunc.qa", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "UC_PQ", "GS_MB_PQ", "QA_REPORT_PQ"]),
         ("corefunc.profile", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "C_PQ"]),
         ("helpers.cli", ["PQ_DIR", "AVC_PQ", "UC_PQ"]),
         ("HTTP.lfAPI", ["C_PQ", "UC_PQ", "SCROBBLE_PQ"]),
         ("HTTP.mbAPI", ["ARTIST_INFO_PQ"]),
+        ("helpers.inference", ["PQ_DIR", "SCROBBLE_PQ"]),
     ]:
         try:
             mod = __import__(mod_path, fromlist=["_"])
@@ -56,6 +59,15 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         for attr in attrs:
             if attr in paths and hasattr(mod, attr):
                 monkeypatch.setattr(mod, attr, paths[attr])
+    # Patching derived paths not in helpers.io
+    pred_log_path = pq / "predictions_log.parquet"
+    for mod_path in ("corefunc.canon.workflow", "corefunc.qa"):
+        try:
+            mod = __import__(mod_path, fromlist=["_"])
+            if hasattr(mod, "PREDICTIONS_LOG_PQ"):
+                monkeypatch.setattr(mod, "PREDICTIONS_LOG_PQ", pred_log_path)
+        except ImportError:
+            pass
     return pq
 
 

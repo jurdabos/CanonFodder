@@ -1,79 +1,108 @@
-%% c9r v0.6 – BI Reference Architecture (post‑migration)
+%% c9r v0.8 – BI Reference Architecture
 flowchart TB
 
 %% ───── Source layer ─────
 subgraph Source_Systems["Source systems"]
     direction LR
-    lfAPI["HTTP/lfAPI  ⤵️\n• Last.fm scrobble JSON\n• Artist, Album, Song, uts, artist_mbid"]
-    lblink["HTTP/lblink  ⤵️\n• ListenBrainz listen JSON\n• artist, track, release, listened_at, artist_mbid"]
-    mbAPI["HTTP/mbAPI  ⤵️\n• MusicBrainz artist JSON\n• alias, primary_alias, comment, country"]
-    userCLI["Click CLI  ⤵️\n• c9r canonise / review\n• user‑country timeline"]
+    lblink["HTTP/lblink\n• ListenBrainz listen JSON\n• artist, track, release,\n  listened_at, artist_mbid"]
+    lfAPI["HTTP/lfAPI\n• Last.fm scrobble JSON\n• Artist, Album, Song,\n  uts, artist_mbid"]
+    mbAPI["HTTP/mbAPI\n• MusicBrainz artist JSON\n• alias, comment, country"]
+    mbDocker["Local MB mirror\n• Docker PostgreSQL\n• Unlimited query throughput"]
+    userCLI["Click CLI\n• c9r canon human\n• c9r enrich --country"]
 end
 
 %% ───── Integration / Staging layer ─────
-subgraph Staging["Integration layer  ➜  Python ETL (Click CLI + helpers)"]
+subgraph Staging["Integration layer  ➜  Python ELT (Click CLI + helpers)"]
     direction LR
-    extract["Extract"] --- transform["Transform\n(normalise_scrobble_df)"] --- load["Load\n(append_to_parquet)"]
+    extract["Extract"] --- transform["Transform\n(normalise_scrobble_df)\n(fix_encoding)"] --- load["Load\n(append_to_parquet)\n(year‑partitioned)"]
 end
 
 %% ───── Data‑storage layer ─────
 subgraph DWH["Data‑storage layer  ➜  Parquet store (zstd) + DuckDB query layer"]
     direction LR
-    pqstore["PQ/ Parquet files\n───────────────\n• scrobble.parquet\n• artist_info.parquet\n• avc.parquet\n• uc.parquet\n• c.parquet"]
-    duckdb["helpers/query.py\n───────────────\nDuckDB‑over‑Parquet\n• top_artists\n• scrobble_count\n• unique_artists\n• ascii_freq"]
+    pqstore["PQ/ Parquet files\n─────────────────────\n• scrobble/year=YYYY/  (fact, partitioned)\n• artist_info.parquet  (dim)\n• avc.parquet          (dim, canonisation)\n• gs_mb.parquet        (gold standard)\n• predictions_log.parquet (drift monitoring)\n• qa_report.parquet    (QA history)\n• uc.parquet           (user country)\n• c.parquet            (country codes)"]
+    duckdb["helpers/query.py\n──────────────────\nDuckDB‑over‑Parquet\n• top_artists / albums / tracks\n• monthly_scrobble_counts\n• yearly_top_n_artists\n• listening_clock\n• artist_country_stats\n• canonical_name CTE"]
     pqstore --- duckdb
 end
 
 %% ───── ML layer ─────
 subgraph MLPipeline["ML pipeline"]
-    direction LR
-    xgb["XGBoost model\nML/xgb.json\nML/xgb_columns.json"]
-    fastapi["FastAPI model server\ncorefunc/model_server.py\n/predict  /health"]
-    xgb --- fastapi
+    direction TB
+    features["Feature engineering\nhelpers/features.py + inference.py\n• 3‑tier: whole‑string / token / char\n• interaction terms\n• catalogue (disco + melo)\n→ ~63 raw, pruned to 41"]
+    training["Training + tuning\ncorefunc/canon/trainer.py\ncorefunc/canon/tuner.py\n• k‑fold CV, MLflow tracking\n• Optuna precision‑biased search"]
+    lgbm["LightGBM pipeline\nML/lightgbm_best.pkl\n(RobustScaler → LGBMClassifier)"]
+    fastapi["FastAPI model server\ncorefunc/model_server.py\n/predict  /predict_batch  /health"]
+    drift["Drift detection\ncorefunc/qa.py → qa_predictions()\n• mean probability shift\n• ambiguous‑band proportion\n• feature quantile drift"]
+    features --> training --> lgbm
+    lgbm --- fastapi
+    lgbm --> drift
 end
 
-%% ───── Output / star schema layer ─────
-subgraph Output["Output layer  ➜  Star schema (Parquet)"]
-    star["Star schema views\n• fact_scrobble (Y/M/D expanded)\n• dim_artist_info\n• dim_avc\n• dim_uc\n• dim_country_code"]
+%% ───── Schema management ─────
+subgraph SchemaLayer["Schema management"]
+    schema["helpers/schema.py\n• Versioned SCHEMA_REGISTRY\n• Auto‑stamp on write\n• Validate on read\n• c9r schema show / migrate"]
+end
+
+%% ───── QA layer ─────
+subgraph QALayer["Quality assurance"]
+    qa["corefunc/qa.py\n• Schema / null / timestamp / dup checks\n• MBID validation\n• Encoding sanity\n• Prediction drift monitoring\n• Reports → qa_report.parquet"]
+end
+
+%% ───── Output / analytics layer ─────
+subgraph Output["Output layer  ➜  Analytical views (DuckDB)"]
+    star["Dimensional views\n• fact: scrobble (partitioned by year)\n• dim: artist_info (MBID, country, aliases)\n• dim: avc (variant → canonical mapping)\n• dim: uc (user country periods)\n• dim: c (country codes)"]
 end
 
 %% ───── Front‑end / analytics layer ─────
-subgraph Frontend["Frontend"]
-    viz["Python dashboards\nPlotly Express / Matplotlib / seaborn"]
+subgraph Frontend["Frontend  ➜  Click CLI"]
+    dashboard["c9r dashboard\n• artist / album / track / recent / yearly"]
+    profile["c9r profile\n• overview / top / timeline / streaks\n• clock / companions / countries\n• population / where / uc / variants"]
+    canonUI["c9r canon\n• human (interactive review)\n• machine (ML‑assisted discovery)"]
 end
 
 %% ───── Metadata side‑rail ─────
 subgraph Metadata["Metadata management"]
-    mapping["Mapping\n Artist → artist_name\n Album  → album_title\n Song   → track_title\n uts    → pd.Timestamp"]
+    mapping["Column mapping\n Artist → artist_name\n Album  → album_title\n Song   → track_title\n uts    → play_time (UTC)"]
 end
 
 %% ───── Orchestration ─────
-Prefect["Prefect 3.x\nflows/cf_ingest.py\nweekly_ingest_flow"]:::orch
+Prefect["Prefect 3.x\nflows/cf_ingest.py\n8 tasks: fetch → fix‑encoding →\nenrich → clean → canonise →\npropagate → augment → retrain"]:::orch
 classDef orch fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px,color:#1A237E
 
-%% ───── Configure layout directions ─────
-Source_Systems --> Staging --> DWH --> Output --> Frontend
-DWH --> MLPipeline --> Frontend
+%% ───── Layout flow ─────
+Source_Systems --> Staging --> DWH
+DWH --> Output --> Frontend
+DWH --> MLPipeline
+MLPipeline --> DWH
 
 %% ───── Data flow arrows ─────
-lfAPI --> extract
 lblink --> extract
+lfAPI --> extract
 mbAPI --> extract
+mbDocker --> extract
 userCLI --> extract
 
 extract --> transform --> load --> pqstore
-duckdb --> star --> viz
-duckdb --> xgb
-fastapi --> viz
+duckdb --> star
+star --> dashboard
+star --> profile
+lgbm --> canonUI
 
-%% metadata dotted links
-Metadata --- Source_Systems
+%% ───── Schema governs storage ─────
+SchemaLayer -. governs .-> pqstore
+
+%% ───── QA checks ─────
+QALayer -. validates .-> pqstore
+drift -. feeds .-> QALayer
+
+%% ───── Metadata links ─────
 mapping -. manages .-> extract
 mapping -. manages .-> transform
 mapping -. governs .-> pqstore
 mapping -. documents .-> star
 
-%% orchestration
+%% ───── Orchestration ─────
 Prefect -.-> Staging
 Prefect -.-> DWH
 Prefect -.-> MLPipeline
+Prefect -.-> QALayer

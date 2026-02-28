@@ -1,9 +1,8 @@
 """
 Integration tests for corefunc.model_server (FastAPI).
 """
-import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 import numpy as np
 from fastapi.testclient import TestClient
 from corefunc.model_server import app

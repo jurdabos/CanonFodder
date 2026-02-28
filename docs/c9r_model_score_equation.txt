@@ -1,0 +1,11 @@
+score = 0.4 × HiP_P + 0.3 × HiP_F1 + 0.3 × AUC
+
+HiP P (High-Precision Precision)
+This directly measures what we care about most — when the model says "merge," how often is it right? The high-precision threshold is already tuned for this, so it's the most aligned single metric.
+
+But HiP P alone is insufficient — a model that predicts "merge" once and gets it right has 100% precision but is useless. We need a composite that rewards precision while penalizing models that achieve it by being overly conservative.
+
+We shall use a weighted score with:
+HiP P (weight ~0.4) — core business objective
+HiP F1 (weight ~0.3) — guards against degenerate precision-only solutions by factoring in recall at that threshold
+AUC (weight ~0.3) — threshold-independent discriminative quality; a model with better AUC gives you more room to tune thresholds in production

@@ -41,6 +41,7 @@ def cli(verbose: bool) -> None:
     """c9r — scrobble ingestion, enrichment, and canonisation toolkit."""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    logging.getLogger("mlflow").setLevel(logging.ERROR)
 
 
 # ── ingest ─────────────────────────────────────────────────────────────────
@@ -303,8 +304,10 @@ def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> 
 
 # ── train (command group) ──────────────────────────────────────────────────────────
 _DATA_SOURCE_CHOICES = click.Choice(
-    ["avc", "mbdb", "mbdb-max", "dbscan", "mixed"], case_sensitive=False,
+    ["avc", "mbdb", "mbdb-max", "dbscan", "dbscan-capped", "mixed"], case_sensitive=False,
 )
+_FEATURE_STRATEGY_CHOICES = click.Choice(["standard", "separated"], case_sensitive=False)
+_NEG_MATCHING_CHOICES = click.Choice(["none", "distribution"], case_sensitive=False)
 _SPLIT_CHOICES = click.Choice(["pair", "group"], case_sensitive=False)
 _TEST_SOURCE_CHOICES = click.Choice(["holdout", "avc-full"], case_sensitive=False)
 _FEATURE_CHOICES = click.Choice(["base", "interaction", "full"], case_sensitive=False)
@@ -326,19 +329,24 @@ def train(ctx: click.Context) -> None:
 @click.option("--run-name", default=None, help="MLflow parent run name (auto-generated if omitted).")
 @click.option("--folds", default=5, type=int, help="Number of CV folds.")
 @click.option("--test-size", default=0.20, type=float, help="Held-out test fraction.")
-@click.option("--models", default=None, help="Comma-separated model names (default: all 5 tree-based).")
+@click.option("--models", default=None, help="Comma-separated model names (default: LightGBM).")
 @click.option("--catalogue/--no-catalogue", default=True, help="Include catalogue features.")
 @click.option("--data-source", type=_DATA_SOURCE_CHOICES, default="avc", help="Training data origin.")
 @click.option("--split", "split_strategy", type=_SPLIT_CHOICES, default="pair", help="Split strategy (pair or group level).")
 @click.option("--test-source", type=_TEST_SOURCE_CHOICES, default="holdout", help="Test data origin (holdout from split, or full AVC).")
 @click.option("--features", type=_FEATURE_CHOICES, default="full", help="Feature tiers: base (23), interaction (53), full (71).")
 @click.option("--catalogue-source", type=_CAT_SOURCE_CHOICES, default="unified", help="Catalogue data origin.")
-@click.option("--catalogue-design", type=_CAT_DESIGN_CHOICES, default="presence", help="Catalogue feature style.")
+@click.option("--catalogue-design", type=_CAT_DESIGN_CHOICES, default="proportional", help="Catalogue feature style.")
 @click.option("--group-features/--no-group-features", default=False, help="Include group-level length_stats features.")
 @click.option("--wratio-lower", default=60, type=int, help="WRatio band lower bound.")
 @click.option("--wratio-upper", default=100, type=int, help="WRatio band upper bound.")
 @click.option("--experiment", "experiment_num", default=None, type=int, help="Experiment number for backfill labelling.")
 @click.option("--include-composites", is_flag=True, help="Include composite models (Voting, Stacking, Bagging).")
+@click.option("--cluster-cap", default=0, type=int, help="Max cluster size for dbscan-capped (Exp 7, default 30 when used).")
+@click.option("--neg-ratio", default=0, type=int, help="Target neg:pos ratio for dbscan-capped (Exp 7, default 10 when used).")
+@click.option("--feature-strategy", type=_FEATURE_STRATEGY_CHOICES, default="standard", help="Feature strategy: standard or separated (Exp 8).")
+@click.option("--neg-matching", type=_NEG_MATCHING_CHOICES, default="none", help="Negative matching: none or distribution (Exp 8).")
+@click.option("--neg-count", default=5000, type=int, help="Target count for distribution-matched negatives (Exp 8).")
 def train_run(
     run_name: str | None,
     folds: int,
@@ -356,14 +364,20 @@ def train_run(
     wratio_upper: int,
     experiment_num: int | None,
     include_composites: bool,
+    cluster_cap: int,
+    neg_ratio: int,
+    feature_strategy: str,
+    neg_matching: str,
+    neg_count: int,
 ) -> None:
     """Train canonisation models (unified pipeline with MLflow tracking)"""
     from corefunc.canon.trainer import run_training
     model_list = [m.strip() for m in models.split(",")] if models else None
     cat_label = " +catalogue" if catalogue and features == "full" else " (no catalogue)"
+    strategy_label = f", strategy={feature_strategy}" if feature_strategy != "standard" else ""
     click.echo(
         f"Training pipeline — data={data_source}, split={split_strategy}, "
-        f"features={features}{cat_label}, {folds}-fold CV …"
+        f"features={features}{cat_label}{strategy_label}, {folds}-fold CV …"
     )
     if model_list:
         click.echo(f"Models: {', '.join(model_list)}")
@@ -384,14 +398,57 @@ def train_run(
         wratio_upper=wratio_upper,
         experiment_num=experiment_num,
         include_composites=include_composites,
+        cluster_cap=cluster_cap,
+        neg_ratio=neg_ratio,
+        feature_strategy=feature_strategy,
+        neg_matching=neg_matching,
+        neg_count=neg_count,
     )
     click.echo("\nTraining complete. View results with 'c9r mlflow-ui'.")
 
 
-# ── tune ───────────────────────────────────────────────────────────────────────
+_TCN_MODEL_CHOICES = click.Choice(["siamese", "hybrid"], case_sensitive=False)
+
+
+@train.command("tcn")
+@click.option("--model", "model_type", type=_TCN_MODEL_CHOICES, default="siamese", help="TCN architecture: siamese (Exp 9) or hybrid (Exp 10).")
+@click.option("--epochs", default=80, type=int, help="Max training epochs.")
+@click.option("--batch-size", default=None, type=int, help="Mini-batch size (default: 256 siamese, 512 hybrid).")
+@click.option("--lr", default=None, type=float, help="Learning rate (default: 1e-3 siamese, 3e-4 hybrid).")
+@click.option("--patience", default=12, type=int, help="Early stopping patience.")
+@click.option("--experiment", "experiment_num", default=None, type=int, help="Experiment number for MLflow labelling.")
+@click.option("--run-name", default=None, help="MLflow run name.")
+def train_tcn(
+    model_type: str,
+    epochs: int,
+    batch_size: int | None,
+    lr: float | None,
+    patience: int,
+    experiment_num: int | None,
+    run_name: str | None,
+) -> None:
+    """Train TCN-based canonisation models (Siamese or Hybrid architecture)"""
+    from corefunc.canon.tcn_trainer import run_tcn_training
+    click.echo(
+        f"TCN training — model={model_type}, epochs={epochs}, "
+        f"patience={patience} …"
+    )
+    run_tcn_training(
+        model_type=model_type,
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        patience=patience,
+        experiment_num=experiment_num,
+        run_name=run_name,
+    )
+    click.echo("\nTCN training complete. View results with 'c9r mlflow-ui'.")
+
+
+# ── tune ───────────────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--run-name", default=None, help="MLflow parent run name (auto-generated if omitted).")
-@click.option("--models", default=None, help="Comma-separated model names (default: LightGBM,XGBoost,ExtraTrees).")
+@click.option("--models", default=None, help="Comma-separated model names (default: LightGBM).")
 @click.option("--trials", default=60, type=int, help="Optuna trials per model.")
 @click.option("--folds", default=3, type=int, help="CV folds for tuning inner loop.")
 @click.option("--test-size", default=0.20, type=float, help="Held-out test fraction.")
@@ -589,6 +646,98 @@ def fix_encoding_cmd() -> None:
             any_fixed = True
     if not any_fixed:
         click.echo("No encoding issues found.")
+
+
+# ── migrate-scrobbles ─────────────────────────────────────────────────────────
+@cli.command("migrate-scrobbles")
+@click.option("--remove-legacy", is_flag=True, help="Delete legacy scrobble.parquet after migration.")
+def migrate_scrobbles_cmd(remove_legacy: bool) -> None:
+    """Convert legacy scrobble.parquet to year-partitioned layout"""
+    from helpers.io import migrate_scrobble_to_partitioned, SCROBBLE_PQ
+    n = migrate_scrobble_to_partitioned()
+    if n == 0:
+        click.echo("Nothing to migrate — legacy scrobble.parquet not found or empty.")
+        return
+    click.echo(f"Migrated {n:,} scrobbles to partitioned layout.")
+    if remove_legacy:
+        SCROBBLE_PQ.unlink(missing_ok=True)
+        click.echo("Removed legacy scrobble.parquet.")
+    else:
+        click.echo("Legacy file kept. Use --remove-legacy to delete it.")
+
+
+# ── schema ─────────────────────────────────────────────────────────────────────
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def schema(ctx: click.Context) -> None:
+    """Inspect or migrate Parquet schema versions"""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@schema.command("show")
+def schema_show() -> None:
+    """Display schema version status of all Parquet files."""
+    from helpers.io import PQ_DIR, SCROBBLE_PQ_DIR
+    from helpers.schema import validate_schema
+
+    rows: list[dict[str, object]] = []
+
+    # Collecting rows first so the "Table" column can be sized to the longest name.
+    if SCROBBLE_PQ_DIR.exists() and any(SCROBBLE_PQ_DIR.rglob("*.parquet")):
+        first = next(SCROBBLE_PQ_DIR.rglob("*.parquet"))
+        info = validate_schema(first)
+        rows.append({
+            "table": info.get("table") or "?",
+            "file_version": str(info.get("file_version", "?")),
+            "current_version": str(info.get("current_version") or "?"),
+            "status": info.get("status") or "?",
+            "path": "scrobble/",
+            "missing_cols": info.get("missing_cols") or [],
+        })
+
+    for pf in sorted(PQ_DIR.glob("*.parquet")):
+        info = validate_schema(pf)
+        tbl = info.get("table") or pf.stem
+        cur = info.get("current_version")
+        rows.append({
+            "table": tbl,
+            "file_version": str(info.get("file_version", "?")),
+            "current_version": str(cur) if cur is not None else "?",
+            "status": info.get("status") or "?",
+            "path": pf.name,
+            "missing_cols": info.get("missing_cols") or [],
+        })
+
+    table_w = max([len("Table")] + [len(str(r["table"])) for r in rows]) if rows else len("Table")
+    status_w = max([len("Status")] + [len(str(r["status"])) for r in rows]) if rows else len("Status")
+
+    click.echo(f"{'Table':<{table_w}} {'File ver':>8} {'Current':>8}  {'Status':<{status_w}} Path")
+    click.echo(f"{'─' * table_w} {'─' * 8} {'─' * 8}  {'─' * status_w} {'─' * 4}")
+
+    for r in rows:
+        click.echo(
+            f"{r['table']:<{table_w}} {r['file_version']:>8} {r['current_version']:>8}  "
+            f"{r['status']:<{status_w}} {r['path']}"
+        )
+        missing = r.get("missing_cols")
+        if missing:
+            click.echo(f"{'':<{table_w}} {'':>8} {'':>8}  missing: {', '.join(missing)}")
+
+
+@schema.command("migrate")
+def schema_migrate() -> None:
+    """Migrate all Parquet files to current schema versions"""
+    from helpers.io import PQ_DIR
+    from helpers.schema import migrate_all
+    click.echo("Migrating Parquet schemas \u2026")
+    results = migrate_all(PQ_DIR)
+    if not results:
+        click.echo("No Parquet files found to migrate.")
+        return
+    for name, status in results.items():
+        click.echo(f"  {name:<30} {status}")
+    click.echo("Done.")
 
 
 # ── qa ─────────────────────────────────────────────────────────────────────────
@@ -1242,7 +1391,11 @@ def flow(source: str, full: bool) -> None:
     from flows.cf_ingest import weekly_ingest_flow
     click.echo("Starting Prefect flow …")
     result = weekly_ingest_flow(full=full, source=source)
-    click.echo(f"Done — {result['new_scrobbles']} scrobbles, {result['enriched_artists']} enriched.")
+    click.echo(
+        f"Done — {result['new_scrobbles']} scrobbles, {result['enriched_artists']} enriched, "
+        f"{result['flagged_for_review']} flagged, {result['avc_propagated']} propagated, "
+        f"{result['gs_rows_written']} GS rows, {result['models_trained']} models trained."
+    )
 
 
 if __name__ == "__main__":

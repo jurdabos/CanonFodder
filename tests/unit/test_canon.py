@@ -1,5 +1,5 @@
 """
-Unit tests for corefunc.canon — gold standard builder, XGBoost pipeline.
+Unit tests for corefunc.canon — gold standard builder, LightGBM pipeline.
 """
 from unittest.mock import patch, MagicMock
 import numpy as np
@@ -61,16 +61,16 @@ class TestTrainModel:
         ml_dir = tmp_path / "ML"
         ml_dir.mkdir()
         monkeypatch.setattr("corefunc.canon.model.MODEL_DIR", ml_dir)
-        monkeypatch.setattr("corefunc.canon.model.MODEL_PATH", ml_dir / "xgb.json")
-        monkeypatch.setattr("corefunc.canon.model.COLUMNS_PATH", ml_dir / "xgb_columns.json")
+        monkeypatch.setattr("corefunc.canon.model.MODEL_PATH", ml_dir / "lgbm_legacy.pkl")
+        monkeypatch.setattr("corefunc.canon.model.COLUMNS_PATH", ml_dir / "lgbm_columns.json")
         # Making start_run usable as a context manager
         mock_exp.start_run.return_value.__enter__ = MagicMock()
         mock_exp.start_run.return_value.__exit__ = MagicMock(return_value=False)
         from sklearn.pipeline import Pipeline
         model = train_model(test_size=0.3, random_state=42)
         assert isinstance(model, Pipeline)
-        assert "xgb" in model.named_steps
-        assert (ml_dir / "xgb.json").exists()
+        assert "clf" in model.named_steps
+        assert (ml_dir / "lgbm_legacy.pkl").exists()
         # Verifying MLflow calls
         mock_exp.init_experiment.assert_called_once()
         mock_exp.log_params.assert_called_once()
@@ -85,20 +85,20 @@ class TestEvaluate:
         """Returns a dict with precision, recall, f1, and auc keys."""
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import RobustScaler
-        from xgboost import XGBClassifier
+        from lightgbm import LGBMClassifier
         from sklearn.compose import ColumnTransformer
         # Building a tiny trained model
         rng = np.random.default_rng(99)
         X = pd.DataFrame({"f1": rng.random(20), "f2": rng.random(20)})
         y = pd.Series([0] * 10 + [1] * 10)
         pre = ColumnTransformer([("num", RobustScaler(), ["f1", "f2"])], remainder="drop")
-        xgb = XGBClassifier(n_estimators=5, random_state=42, eval_metric="logloss")
-        model = Pipeline([("prep", pre), ("xgb", xgb)])
+        clf = LGBMClassifier(n_estimators=5, random_state=42, verbosity=-1)
+        model = Pipeline([("prep", pre), ("clf", clf)])
         model.fit(X, y)
         metrics = evaluate(model, X, y)
         assert isinstance(metrics, dict)
         assert {"precision", "recall", "f1", "auc"} == set(metrics.keys())
         assert all(0.0 <= v <= 1.0 for v in metrics.values())
         captured = capsys.readouterr()
-        assert "XGBoost report" in captured.out
+        assert "LightGBM report" in captured.out
         assert "AUC" in captured.out

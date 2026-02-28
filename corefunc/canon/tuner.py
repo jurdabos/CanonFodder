@@ -47,9 +47,8 @@ from corefunc.canon.trainer import (
     verify_mlflow,
     _load_catalogue_lookups,
 )
-from helpers import experiment, stats
+from helpers import experiment
 from helpers.device import get_device
-from helpers.io import dump_parquet
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +56,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 ML_DIR = PROJECT_ROOT / "ML"
 ML_DIR.mkdir(exist_ok=True)
 _TUNABLE_MODELS = {"LightGBM", "XGBoost", "ExtraTrees"}
+_DEFAULT_TUNE_MODELS = ["LightGBM"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -385,14 +385,18 @@ def save_best_historical_models() -> list[str]:
         model_type = r.data.tags.get("model_type", "")
         opt_p = m.get("opt_precision", 0)
         auc = m.get("auc", 0)
+        hip_p = m.get("hiprec_precision", 0)
+        hip_f1 = m.get("hiprec_f1", 0)
+        c9r_score = 0.4 * hip_p + 0.3 * hip_f1 + 0.3 * auc
         if not model_type or opt_p == 0 or "_tuned" in model_type:
             continue
-        if model_type not in candidates or auc > candidates[model_type]["auc"]:
+        if model_type not in candidates or c9r_score > candidates[model_type]["c9r_score"]:
             candidates[model_type] = {
                 "run_id": r.info.run_id,
+                "c9r_score": c9r_score,
                 "auc": auc,
-                "opt_p": opt_p,
-                "opt_f1": m.get("opt_f1", 0),
+                "hip_p": hip_p,
+                "hip_f1": hip_f1,
             }
     saved: list[str] = []
     for model_type, info in sorted(candidates.items()):
@@ -406,8 +410,8 @@ def save_best_historical_models() -> list[str]:
                 pickle.dump(pipeline, f, protocol=pickle.HIGHEST_PROTOCOL)
             saved.append(str(pkl_path))
             log.info(
-                "Saved %s → %s (AUC=%.4f, opt_P=%.4f)",
-                model_type, pkl_path, info["auc"], info["opt_p"],
+                "Saved %s → %s (c9r=%.4f, AUC=%.4f, HiP_P=%.4f)",
+                model_type, pkl_path, info["c9r_score"], info["auc"], info["hip_p"],
             )
         except Exception as exc:
             log.warning("Failed to export %s (run %s): %s", model_type, run_id[:8], exc)
@@ -465,12 +469,12 @@ def run_tuning(
     # ── Step 3: Computing features (once, shared across all trials) ────────
     log.info("Computing features for training set...")
     train_df = compute_all_features(
-        train_pairs, catalogue=catalogue,
+        train_pairs, catalogue=catalogue, cat_design="proportional",
         name_to_albums=name_to_albums, name_to_tracks=name_to_tracks,
     )
     log.info("Computing features for test set...")
     test_df = compute_all_features(
-        test_pairs, catalogue=catalogue,
+        test_pairs, catalogue=catalogue, cat_design="proportional",
         name_to_albums=name_to_albums, name_to_tracks=name_to_tracks,
     )
     # ── Step 4: Pruning ────────────────────────────────────────────────────
@@ -501,7 +505,7 @@ def run_tuning(
         len(X_train), len(X_test), len(num_cols), spw, device,
     )
     # ── Step 6: Selecting models to tune ───────────────────────────────────
-    model_names = models or sorted(_TUNABLE_MODELS)
+    model_names = models or _DEFAULT_TUNE_MODELS
     model_names = [m for m in model_names if m in _TUNABLE_MODELS]
     if not model_names:
         raise RuntimeError(
@@ -614,10 +618,8 @@ def run_tuning(
             f"{r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}"
         )
     print("=" * 130)
-    best_model = max(results, key=lambda k: results[k]["opt_prec"])
-    print(
-        f"\nBest tuned model by opt precision: {best_model}_tuned "
-        f"(P={results[best_model]['opt_prec']:.4f}, "
-        f"AUC={results[best_model]['auc']:.4f})"
-    )
+    # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
+    best_model = max(results, key=lambda k: 0.4 * results[k]["hiprec_prec"] + 0.3 * results[k]["hiprec_f1"] + 0.3 * results[k]["auc"])
+    score = 0.4 * results[best_model]["hiprec_prec"] + 0.3 * results[best_model]["hiprec_f1"] + 0.3 * results[best_model]["auc"]
+    print(f"\nBest tuned model by c9r score: {best_model}_tuned (score={score:.4f})")
     return results

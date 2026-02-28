@@ -11,7 +11,6 @@ import itertools
 import logging
 import sys
 import warnings
-from collections import Counter
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -21,10 +20,6 @@ from sklearn.cluster import DBSCAN
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
     classification_report,
-    precision_recall_curve,
-    precision_score,
-    recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline
@@ -33,16 +28,15 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb
-from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, SCROBBLE_PQ, sanitize
-from helpers.features import compute_pair_features
-from helpers import cluster, stats
-from helpers.device import get_device
-from scripts.run_exp6_dbscan import (
-    compute_interaction_features, add_all_features, prune_features,
-    _optimal_threshold, _evaluate_at_threshold,
-    WRATIO_LOWER, WRATIO_UPPER, _SIM_SCORES,
-)
+from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb # noqa: E402
+from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, SCROBBLE_PQ # noqa: E402
+from helpers import cluster # noqa: E402
+from helpers.device import get_device # noqa: E402
+from scripts.run_exp6_dbscan import ( # noqa: E402
+    add_all_features, prune_features, # noqa: E402
+    _optimal_threshold, _evaluate_at_threshold, # noqa: E402
+    WRATIO_LOWER, WRATIO_UPPER, # noqa: E402
+) # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -68,7 +62,7 @@ def step1_dbscan_capped() -> tuple[float, list[list[str]]]:
     log.info("Unique artist names: %d", n)
     # Building anchor sets
     avc = read_parquet(AVC_PQ)
-    pos_groups = avc[(avc["to_link"].notna()) & (avc["to_link"] == True)]
+    pos_groups = avc[(avc["to_link"].notna()) & (avc["to_link"].eq(True))]
     name2idx = {name: i for i, name in enumerate(artist_names)}
     anchor_idx_sets = []
     # Collecting anchor names to protect from random subsampling
@@ -207,8 +201,8 @@ def step4_filter_and_subsample(verified_df: pd.DataFrame) -> pd.DataFrame:
     )
     mask = (verified_df["_wratio"] >= WRATIO_LOWER) & (verified_df["_wratio"] < WRATIO_UPPER)
     filtered = verified_df[mask].copy()
-    pos_df = filtered[filtered["to_link"] == True]
-    neg_df = filtered[filtered["to_link"] == False]
+    pos_df = filtered[filtered["to_link"].eq(True)]
+    neg_df = filtered[filtered["to_link"].eq(False)]
     n_pos = len(pos_df)
     n_neg_raw = len(neg_df)
     log.info("After WRatio filter: %d pos, %d neg (ratio %.0f:1).", n_pos, n_neg_raw, n_neg_raw / max(n_pos, 1))
@@ -219,7 +213,6 @@ def step4_filter_and_subsample(verified_df: pd.DataFrame) -> pd.DataFrame:
         neg_df = neg_df.copy()
         neg_df["_band"] = pd.cut(neg_df["_wratio"], bins=[60, 70, 80, 90, 95, 100], right=False)
         sampled_parts = []
-        rng = np.random.default_rng(RANDOM_STATE)
         band_counts = neg_df["_band"].value_counts()
         total_in_bands = band_counts.sum()
         for band, count in band_counts.items():
@@ -317,10 +310,10 @@ def step5_run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols
               f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
               f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}")
     print("=" * 120)
-    best = max(results, key=lambda x: x["auc"])
-    print(f"\nBest by AUC: {best['model']} (AUC={best['auc']:.4f})")
-    best_f1 = max(results, key=lambda x: x["opt_f1"])
-    print(f"Best by opt F1: {best_f1['model']} (F1={best_f1['opt_f1']:.4f})")
+    # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
+    best = max(results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
+    score = 0.4 * best["hiprec_prec"] + 0.3 * best["hiprec_f1"] + 0.3 * best["auc"]
+    print(f"\nBest model by c9r score: {best['model']} (score={score:.4f})")
     return results
 
 
@@ -356,7 +349,7 @@ def main():
     test_raw["_wr"] = test_raw.apply(lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1)
     test_raw = test_raw[(test_raw["_wr"] >= WRATIO_LOWER) & (test_raw["_wr"] < WRATIO_UPPER)].drop(columns=["_wr"])
     log.info("AVC test: %d pairs (pos=%d, neg=%d).",
-             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"] == False).sum())
+             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"].eq(False)).sum())
     test_df = add_all_features(test_raw.reset_index(drop=True))
     # Pruning
     target = "to_link"

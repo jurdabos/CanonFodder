@@ -3,7 +3,6 @@ Unit tests for helpers.cli (pure utility functions) and additional CLI/query tes
 """
 import pandas as pd
 import pytest
-from click.testing import CliRunner
 from helpers.cli import (
     _interval_ok,
     _parse_date,
@@ -12,7 +11,6 @@ from helpers.cli import (
     make_signature_hash,
 )
 from helpers.query import avc_df
-from main import cli
 
 
 class TestSplitVariants:

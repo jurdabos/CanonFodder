@@ -328,11 +328,8 @@ def run_experiment(
                 # Logging artefacts
                 experiment.log_confusion_matrix(y_test, y_pred)
                 experiment.log_feature_importance(final_pipeline, num_cols)
-                # SHAP for tree-based single models (not composites)
-                if model_name not in ("VotingEnsemble", "StackingEnsemble", "BaggingXGB"):
-                    # Passing pre-processed data to SHAP
-                    X_test_transformed = final_pipeline.named_steps["prep"].transform(X_test)
-                    experiment.log_shap_summary(final_pipeline, X_test_transformed, num_cols)
+                X_test_transformed = final_pipeline.named_steps["prep"].transform(X_test)
+                experiment.log_shap_summary(final_pipeline, X_test_transformed, num_cols)
                 # Logging model
                 experiment.log_model(final_pipeline)
                 log.info("%s → F1=%.4f, AUC=%.4f", model_name, test_metrics["f1"], test_metrics["auc"])
@@ -432,9 +429,8 @@ def run_holdout_experiment(
                 print(f"AUC: {test_metrics['auc']:.4f}")
                 experiment.log_confusion_matrix(y_test, y_pred)
                 experiment.log_feature_importance(final_pipeline, num_cols)
-                if model_name not in ("VotingEnsemble", "StackingEnsemble", "BaggingXGB"):
-                    X_test_transformed = final_pipeline.named_steps["prep"].transform(X_test)
-                    experiment.log_shap_summary(final_pipeline, X_test_transformed, num_cols)
+                X_test_transformed = final_pipeline.named_steps["prep"].transform(X_test)
+                experiment.log_shap_summary(final_pipeline, X_test_transformed, num_cols)
                 experiment.log_model(final_pipeline)
                 log.info("%s → F1=%.4f, AUC=%.4f", model_name, test_metrics["f1"], test_metrics["auc"])
     # Printing summary table

@@ -44,9 +44,9 @@ from helpers import cluster, experiment, stats
 from helpers.device import get_device
 from helpers.features import compute_pair_features
 from helpers.io import (
-    AVC_PQ, PQ_DIR, SCROBBLE_PQ,
-    read_parquet, dump_parquet, sanitize,
+    AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet, read_scrobble_df, dump_parquet, sanitize,
 )
+from sklearn.cluster import DBSCAN
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ _TREE_MODELS = {
     "XGBoost", "RandomForest", "ExtraTrees",
     "LightGBM", "GradientBoosting",
 }
+DEFAULT_MODELS = ["LightGBM"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -184,7 +185,7 @@ def _load_catalogue_lookups() -> tuple[dict[str, list[str]], dict[str, list[str]
             "mbdb_discography_solo.parquet not found — using scrobble-only catalogue.",
         )
     # Building unified lookups (Exp 14/15 approach)
-    scrobbles = read_parquet(SCROBBLE_PQ)
+    scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         log.warning("No scrobble data — catalogue features will be zeros.")
         return {}, {}
@@ -362,19 +363,25 @@ def compute_all_features(
     df: pd.DataFrame,
     *,
     catalogue: bool = True,
+    cat_design: str = "proportional",
     name_to_albums: dict[str, list[str]] | None = None,
     name_to_tracks: dict[str, list[str]] | None = None,
 ) -> pd.DataFrame:
-    """Computes base 23 + interaction 30 + optional catalogue 18 features.
+    """Computes base 23 + interaction 30 + optional catalogue features.
 
     When *catalogue* is True, *name_to_albums* and *name_to_tracks* must
     be provided (from ``_load_catalogue_lookups``).
+    Uses proportional (10 features) or presence (18 features) catalogue
+    design based on *cat_design*.
     """
     df = _add_base_features(df)
     if catalogue:
         if name_to_albums is None or name_to_tracks is None:
             raise ValueError("Catalogue lookups required when catalogue=True.")
-        df = _add_catalogue_features(df, name_to_albums, name_to_tracks)
+        if cat_design == "proportional":
+            df = _add_proportional_catalogue_features(df, name_to_albums, name_to_tracks)
+        else:
+            df = _add_catalogue_features(df, name_to_albums, name_to_tracks)
     return df
 
 
@@ -402,7 +409,7 @@ def _load_scrobble_only_lookups() -> tuple[dict[str, list[str]], dict[str, list[
 
     Used by Exp 13 where catalogue features come exclusively from scrobbles.
     """
-    scrobbles = read_parquet(SCROBBLE_PQ)
+    scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         log.warning("No scrobble data — catalogue features will be zeros.")
         return {}, {}
@@ -588,7 +595,7 @@ def _build_dbscan_training_data(
 ) -> pd.DataFrame:
     """Loads gs_mb_dbscan.parquet, filters by WRatio.
 
-    Used for Exp 6–8 (DBSCAN-seeded, MBDB-verified).
+    Used for Exp 6 (DBSCAN-seeded, MBDB-verified).
     """
     GS_DBSCAN_PQ = PQ_DIR / "gs_mb_dbscan.parquet"
     dbscan = read_parquet(GS_DBSCAN_PQ)
@@ -605,6 +612,232 @@ def _build_dbscan_training_data(
         len(dbscan), dbscan["to_link"].sum(), (~dbscan["to_link"]).sum(),
     )
     return dbscan
+
+
+def _build_dbscan_capped_training_data(
+    *,
+    cluster_cap: int = 30,
+    neg_ratio: int = 10,
+    wratio_lower: int = WRATIO_LOWER,
+    wratio_upper: int = WRATIO_UPPER,
+) -> pd.DataFrame:
+    """Builds training data from capped DBSCAN clusters with negative subsampling.
+
+    Used for Exp 7.  Caps oversized clusters at *cluster_cap*, preserving
+    anchor names (known positive AVC pairs).  Then subsamples negatives
+    to *neg_ratio*:1 stratified by WRatio bands.
+    """
+    GS_DBSCAN_CAPPED_PQ = PQ_DIR / "gs_mb_dbscan_capped.parquet"
+    if GS_DBSCAN_CAPPED_PQ.exists():
+        cached = read_parquet(GS_DBSCAN_CAPPED_PQ)
+        if cached is not None and not cached.empty:
+            log.info("Loaded gs_mb_dbscan_capped.parquet: %d pairs.", len(cached))
+            return cached
+    # ── Running capped DBSCAN pipeline ─────────────────────────────────────
+    from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb
+    scrobbles = read_scrobble_df()
+    artist_names = sorted(scrobbles["artist_name"].dropna().unique().tolist())
+    n = len(artist_names)
+    log.info("Capped DBSCAN: %d unique artist names, cluster_cap=%d.", n, cluster_cap)
+    # Building anchor sets from positive AVC groups
+    avc = read_parquet(AVC_PQ)
+    pos_groups = avc[(avc["to_link"].notna()) & (avc["to_link"].eq(True))]
+    name2idx = {name: i for i, name in enumerate(artist_names)}
+    anchor_idx_sets: list[list[int]] = []
+    anchor_names: set[str] = set()
+    for _, row in pos_groups.iterrows():
+        variants = [v.strip() for v in row["artist_variants_text"].split("{") if v.strip()]
+        idxs = [name2idx[v] for v in variants if v in name2idx]
+        if len(idxs) >= 2:
+            anchor_idx_sets.append(idxs)
+            anchor_names.update(v for v in variants if v in name2idx)
+    log.info("Anchor sets: %d (protecting %d anchor names).", len(anchor_idx_sets), len(anchor_names))
+    # Computing distance matrix
+    log.info("Computing %d×%d distance matrix...", n, n)
+    sim_matrix = process.cdist(artist_names, artist_names, scorer=fuzz.WRatio, score_cutoff=0, workers=-1) / 100.0
+    dist = 1.0 - sim_matrix
+    # Grid search for epsilon
+    log.info("Running ε grid search [0.05, 1.0)...")
+    best_eps = None
+    for eps in np.arange(0.05, 1.0, 0.01):
+        labels = DBSCAN(eps=eps, min_samples=2, metric="precomputed").fit_predict(dist)
+        if cluster.anchors_ok(labels, anchor_idx_sets):
+            best_eps = eps
+            break
+    if best_eps is None:
+        raise RuntimeError("No ε satisfies all anchor constraints.")
+    labels = DBSCAN(eps=best_eps, min_samples=2, metric="precomputed").fit_predict(dist)
+    log.info("Best ε = %.2f", best_eps)
+    # Building groups and capping oversized clusters
+    df_labels = pd.DataFrame({"artist": artist_names, "label": labels})
+    clustered = df_labels[df_labels["label"] != -1]
+    raw_groups = clustered.groupby("label")["artist"].apply(list).tolist()
+    rng = np.random.default_rng(RANDOM_STATE)
+    capped_groups: list[list[str]] = []
+    for group in raw_groups:
+        if len(group) <= cluster_cap:
+            capped_groups.append(group)
+        else:
+            anchors_in = [nm for nm in group if nm in anchor_names]
+            others = [nm for nm in group if nm not in anchor_names]
+            budget = cluster_cap - len(anchors_in)
+            sampled = rng.choice(others, size=min(budget, len(others)), replace=False).tolist() if budget > 0 and others else []
+            capped_groups.append(anchors_in + sampled)
+    log.info("Capped clusters: %d groups, %d total names.", len(capped_groups), sum(len(g) for g in capped_groups))
+    # Extracting pairs
+    rows: list[dict] = []
+    for group in capped_groups:
+        for a, b in itertools.combinations(sorted(set(group)), 2):
+            rows.append({"variant_a": a, "variant_b": b})
+    pairs_df = pd.DataFrame(rows)
+    log.info("Candidate pairs from capped clusters: %d", len(pairs_df))
+    # MBDB verification
+    if not check_local_mb():
+        raise RuntimeError("Local MBDB mirror not reachable.")
+    all_names_unique = sorted(set(pairs_df["variant_a"]) | set(pairs_df["variant_b"]))
+    log.info("Querying MBDB for %d unique names...", len(all_names_unique))
+    name_to_mbids: dict[str, set[str]] = {}
+    batch_size = 150
+    for i in range(0, len(all_names_unique), batch_size):
+        batch = all_names_unique[i:i + batch_size]
+        values = ",".join(f"'{_escape_pg(nm)}'" for nm in batch)
+        sql = f"""SELECT DISTINCT q.lookup_name, a.gid::text AS mbid
+FROM (
+    SELECT name AS lookup_name, id AS artist_id FROM musicbrainz.artist WHERE name IN ({values})
+    UNION
+    SELECT aa.name AS lookup_name, aa.artist AS artist_id FROM musicbrainz.artist_alias aa WHERE aa.name IN ({values})
+) q
+JOIN musicbrainz.artist a ON a.id = q.artist_id"""
+        result = _psql_csv(sql)
+        if not result.empty:
+            for _, r in result.iterrows():
+                name_to_mbids.setdefault(r["lookup_name"], set()).add(r["mbid"])
+    verified_rows: list[dict] = []
+    for _, pair in pairs_df.iterrows():
+        a, b = pair["variant_a"], pair["variant_b"]
+        mbids_a = name_to_mbids.get(a, set())
+        mbids_b = name_to_mbids.get(b, set())
+        if not mbids_a or not mbids_b:
+            continue
+        if mbids_a & mbids_b:
+            verified_rows.append({"variant_a": a, "variant_b": b, "to_link": True, "source": "dbscan_mbdb_pos"})
+        else:
+            verified_rows.append({"variant_a": a, "variant_b": b, "to_link": False, "source": "dbscan_mbdb_neg"})
+    verified_df = pd.DataFrame(verified_rows)
+    # Applying WRatio filter
+    verified_df["_wr"] = verified_df.apply(
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+    )
+    filtered = verified_df[
+        (verified_df["_wr"] >= wratio_lower) & (verified_df["_wr"] < wratio_upper)
+    ].copy()
+    # Subsampling negatives to target ratio
+    pos_df = filtered[filtered["to_link"].eq(True)]
+    neg_df = filtered[filtered["to_link"].eq(False)]
+    n_pos = len(pos_df)
+    target_neg = min(n_pos * neg_ratio, len(neg_df)) if neg_ratio > 0 else len(neg_df)
+    if len(neg_df) > target_neg:
+        neg_df = neg_df.copy()
+        neg_df["_band"] = pd.cut(neg_df["_wr"], bins=[60, 70, 80, 90, 95, 100], right=False)
+        sampled_parts: list[pd.DataFrame] = []
+        band_counts = neg_df["_band"].value_counts()
+        total_in_bands = band_counts.sum()
+        for band, count in band_counts.items():
+            band_df = neg_df[neg_df["_band"] == band]
+            n_sample = max(1, int(round(target_neg * count / total_in_bands)))
+            n_sample = min(n_sample, len(band_df))
+            sampled_parts.append(band_df.sample(n=n_sample, random_state=RANDOM_STATE))
+        neg_sampled = pd.concat(sampled_parts, ignore_index=True).drop(columns=["_band"])
+        log.info("Subsampled negatives: %d → %d (target ratio %d:1).", len(neg_df), len(neg_sampled), neg_ratio)
+    else:
+        neg_sampled = neg_df
+    combined = pd.concat([pos_df, neg_sampled], ignore_index=True).drop(columns=["_wr"]).reset_index(drop=True)
+    log.info(
+        "DBSCAN-capped train: %d pairs (pos=%d, neg=%d).",
+        len(combined), combined["to_link"].sum(), (~combined["to_link"]).sum(),
+    )
+    dump_parquet(combined, GS_DBSCAN_CAPPED_PQ)
+    return combined
+
+
+def _build_feature_sep_training_data(
+    *,
+    neg_count: int = 5000,
+    wratio_lower: int = WRATIO_LOWER,
+    wratio_upper: int = WRATIO_UPPER,
+) -> pd.DataFrame:
+    """Builds training data with distribution-matched negatives.
+
+    Used for Exp 8.  Samples *neg_count* positives from gs_mb.parquet
+    and distribution-matches the same number of negatives from
+    gs_mb_dbscan.parquet using fine-grained WRatio histogram binning.
+    """
+    GS_DBSCAN_PQ = PQ_DIR / "gs_mb_dbscan.parquet"
+    gs = read_parquet(GS_MB_PQ)
+    if gs is None or gs.empty:
+        raise RuntimeError("gs_mb.parquet not found — run 'c9r canon avc augment' first.")
+    positives = gs[gs["to_link"].eq(True)].sample(
+        n=min(neg_count, gs["to_link"].sum()), random_state=RANDOM_STATE,
+    )
+    log.info("Sampled %d positives from gs_mb.parquet.", len(positives))
+    # Loading DBSCAN negative pool
+    dbscan = read_parquet(GS_DBSCAN_PQ)
+    if dbscan is None or dbscan.empty:
+        raise RuntimeError("gs_mb_dbscan.parquet not found.")
+    neg_pool = dbscan[dbscan["to_link"].eq(False)].reset_index(drop=True)
+    log.info("DBSCAN negative pool: %d pairs.", len(neg_pool))
+    # Computing WRatio for both sides
+    pos_wr = positives.apply(
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+    )
+    neg_wr = neg_pool.apply(
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+    )
+    neg_pool = neg_pool.copy()
+    neg_pool["_wr"] = neg_wr
+    # Distribution matching using 8 bins in [60, 100)
+    n_bins = 8
+    bin_edges = np.linspace(60, 100, n_bins + 1)
+    pos_in_range = pos_wr[(pos_wr >= 60) & (pos_wr < 100)]
+    pos_hist, _ = np.histogram(pos_in_range, bins=bin_edges)
+    pos_fracs = pos_hist / max(pos_hist.sum(), 1)
+    n_target = min(neg_count, len(neg_pool))
+    neg_pool["_bin"] = pd.cut(neg_pool["_wr"], bins=bin_edges, right=False, labels=False)
+    neg_pool = neg_pool.dropna(subset=["_bin"])
+    neg_pool["_bin"] = neg_pool["_bin"].astype(int)
+    targets = (pos_fracs * n_target).astype(int)
+    targets[np.argmax(pos_fracs)] += n_target - targets.sum()
+    sampled_parts: list[pd.DataFrame] = []
+    shortfall = 0
+    available_bins: list[tuple] = []
+    for i in range(n_bins):
+        bin_df = neg_pool[neg_pool["_bin"] == i]
+        if len(bin_df) < targets[i]:
+            shortfall += targets[i] - len(bin_df)
+            sampled_parts.append(bin_df)
+        else:
+            available_bins.append((i, bin_df, targets[i]))
+    if shortfall > 0 and available_bins:
+        total_surplus = sum(len(bdf) - t for _, bdf, t in available_bins)
+        for i, bin_df, base_target in available_bins:
+            surplus = len(bin_df) - base_target
+            extra = int(round(shortfall * surplus / max(total_surplus, 1)))
+            final_n = min(base_target + extra, len(bin_df))
+            sampled_parts.append(bin_df.sample(n=final_n, random_state=RANDOM_STATE))
+    else:
+        for i, bin_df, target in available_bins:
+            sampled_parts.append(bin_df.sample(n=target, random_state=RANDOM_STATE))
+    neg_sampled = pd.concat(sampled_parts, ignore_index=True).drop(columns=["_wr", "_bin"])
+    log.info("Distribution-matched negatives: %d.", len(neg_sampled))
+    train = pd.concat([
+        positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+        neg_sampled[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+    ], ignore_index=True)
+    log.info(
+        "Feature-sep train: %d pairs (pos=%d, neg=%d).",
+        len(train), train["to_link"].sum(), (~train["to_link"]).sum(),
+    )
+    return train
 
 
 def _build_mbdb_max_training_data(
@@ -629,7 +862,7 @@ def _build_mbdb_max_training_data(
     dbscan = read_parquet(GS_DBSCAN_PQ)
     if dbscan is None or dbscan.empty:
         raise RuntimeError("gs_mb_dbscan.parquet not found.")
-    neg_pool = dbscan[dbscan["to_link"] == False].reset_index(drop=True)
+    neg_pool = dbscan[dbscan["to_link"].eq(False)].reset_index(drop=True)
     n_target = min(len(positives), len(neg_pool))
     neg_sampled = neg_pool.sample(n=n_target, random_state=RANDOM_STATE)
     train = pd.concat([
@@ -744,6 +977,10 @@ def _dispatch_data_build(
     test_size: float,
     wratio_lower: int,
     wratio_upper: int,
+    cluster_cap: int = 0,
+    neg_ratio: int = 0,
+    neg_matching: str = "none",
+    neg_count: int = 5000,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Routes to the correct data-build function based on configuration."""
     if data_source == "mixed":
@@ -778,6 +1015,17 @@ def _dispatch_data_build(
         train_pairs = _build_mbdb_max_training_data(
             wratio_lower=wratio_lower, wratio_upper=wratio_upper,
         )
+    elif data_source == "dbscan-capped":
+        train_pairs = _build_dbscan_capped_training_data(
+            cluster_cap=cluster_cap or 30,
+            neg_ratio=neg_ratio or 10,
+            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+        )
+    elif data_source == "dbscan" and neg_matching == "distribution":
+        train_pairs = _build_feature_sep_training_data(
+            neg_count=neg_count,
+            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+        )
     elif data_source == "dbscan":
         train_pairs = _build_dbscan_training_data(
             wratio_lower=wratio_lower, wratio_upper=wratio_upper,
@@ -788,12 +1036,89 @@ def _dispatch_data_build(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Feature separation constants (Exp 8)
+# ═════════════════════════════════════════════════════════════════════════════
+_WHOLE_STRING_FEATURES = [
+    "ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio",
+    "WRatio", "QRatio", "norm_levenshtein", "jaro_winkler",
+    "length_ratio", "abs_len_diff",
+]
+_NON_WS_FEATURES = [
+    "token_count_diff", "token_jaccard", "shared_token_ratio",
+    "lcs_token_len", "token_order_displacement",
+    "bigram_jaccard", "trigram_jaccard",
+    "edit_inserts", "edit_deletes", "edit_replaces",
+    "shared_prefix_len", "shared_suffix_len", "script_mismatch",
+]
+_WS_SIM_SCORES = [
+    "ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio",
+    "WRatio", "QRatio",
+]
+
+
+def _compute_cross_tier_interactions(base_feats: dict[str, float]) -> dict[str, float]:
+    """Computes interaction features with at most 1 whole-string factor.
+
+    Two types:
+    1. Cross-tier: 1 whole-string score × 1 non-WS feature.
+    2. Non-WS only: all pairwise products among non-WS features.
+    """
+    seen: Counter = Counter()
+    interactions: dict[str, float] = {}
+    for ws in _WS_SIM_SCORES:
+        ws_val = base_feats.get(ws, 0.0)
+        for nws in _NON_WS_FEATURES:
+            nws_val = base_feats.get(nws, 0.0)
+            col = sanitize(f"{ws} * {nws}", seen)
+            interactions[col] = ws_val * nws_val
+    for a_name, b_name in itertools.combinations(_NON_WS_FEATURES, 2):
+        a_val = base_feats.get(a_name, 0.0)
+        b_val = base_feats.get(b_name, 0.0)
+        col = sanitize(f"{a_name} * {b_name}", seen)
+        interactions[col] = a_val * b_val
+    return interactions
+
+
+def _add_separated_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Computes base features + cross-tier interactions (Exp 8 design).
+
+    Whole-string base features are computed (needed for interaction
+    products) but will be excluded from the final training columns.
+    """
+    n = len(df)
+    log.info("Computing separated features for %d pairs...", n)
+    # Computing base features (all 3 tiers)
+    base_rows: list[dict] = []
+    for i, (_, row) in enumerate(df.iterrows()):
+        feats = compute_pair_features(str(row["variant_a"]), str(row["variant_b"]))
+        base_rows.append(feats)
+        if (i + 1) % 200 == 0:
+            log.info("  Separated base features: %d/%d (%.0f%%)", i + 1, n, 100 * (i + 1) / n)
+    base_df = pd.DataFrame(base_rows, index=df.index)
+    for col in base_df.columns:
+        if col not in df.columns:
+            df[col] = base_df[col]
+    # Computing cross-tier + non-WS interactions
+    log.info("Computing cross-tier and non-WS interaction features...")
+    interaction_rows: list[dict] = []
+    for i, (_, row) in enumerate(df.iterrows()):
+        feats = compute_pair_features(str(row["variant_a"]), str(row["variant_b"]))
+        interaction_rows.append(_compute_cross_tier_interactions(feats))
+    interaction_df = pd.DataFrame(interaction_rows, index=df.index)
+    for col in interaction_df.columns:
+        if col not in df.columns:
+            df[col] = interaction_df[col]
+    return df
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Feature dispatch helper
 # ═════════════════════════════════════════════════════════════════════════════
 def _compute_features_for_split(
     df: pd.DataFrame,
     *,
     features: str,
+    feature_strategy: str = "standard",
     catalogue: bool,
     cat_design: str,
     name_to_albums: dict[str, list[str]] | None,
@@ -801,7 +1126,9 @@ def _compute_features_for_split(
     group_features: bool,
 ) -> pd.DataFrame:
     """Computes the appropriate features based on the feature tier setting."""
-    if features == "base":
+    if feature_strategy == "separated":
+        df = _add_separated_features(df)
+    elif features == "base":
         # Base 23 only — no interaction, no catalogue
         df = _add_base_features_only(df)
     else:
@@ -987,14 +1314,19 @@ def run_training(
     test_source: str = "holdout",
     features: str = "full",
     catalogue_source: str = "unified",
-    catalogue_design: str = "presence",
+    catalogue_design: str = "proportional",
     group_features: bool = False,
     wratio_lower: int = WRATIO_LOWER,
     wratio_upper: int = WRATIO_UPPER,
     experiment_num: int | None = None,
     include_composites: bool = False,
+    cluster_cap: int = 0,
+    neg_ratio: int = 0,
+    feature_strategy: str = "standard",
+    neg_matching: str = "none",
+    neg_count: int = 5000,
 ) -> dict[str, dict[str, float]]:
-"""Runs the unified training pipeline: data → features → CV → evaluation.
+    """Runs the unified training pipeline: data → features → CV → evaluation.
 
     Parameters
     ----------
@@ -1003,7 +1335,7 @@ def run_training(
     test_size : fraction held out for final evaluation.
     models : subset of model names to train (default: all 5 tree-based).
     catalogue : whether to include catalogue features.
-    data_source : training data origin (avc, mbdb, dbscan, mixed).
+    data_source : training data origin (avc, mbdb, dbscan, dbscan-capped, mixed).
     split_strategy : how to split (pair, group).
     test_source : test data origin (holdout, avc-full).
     features : feature tiers (base, interaction, full).
@@ -1014,6 +1346,11 @@ def run_training(
     wratio_upper : WRatio band upper bound.
     experiment_num : explicit experiment number for backfill labelling.
     include_composites : whether to include composite models.
+    cluster_cap : max cluster size for dbscan-capped (Exp 7).
+    neg_ratio : target negative:positive ratio for dbscan-capped (Exp 7).
+    feature_strategy : 'standard' or 'separated' (Exp 8).
+    neg_matching : 'none' or 'distribution' (Exp 8).
+    neg_count : target count for distribution-matched negatives (Exp 8).
 
     Returns a dict mapping model_name → held-out test metrics.
     """
@@ -1033,6 +1370,10 @@ def run_training(
         test_size=test_size,
         wratio_lower=wratio_lower,
         wratio_upper=wratio_upper,
+        cluster_cap=cluster_cap,
+        neg_ratio=neg_ratio,
+        neg_matching=neg_matching,
+        neg_count=neg_count,
     )
     # ── Step 2: Loading catalogue lookups (if needed) ──────────────────────
     name_to_albums: dict[str, list[str]] | None = None
@@ -1045,14 +1386,14 @@ def run_training(
     # ── Step 3: Computing features ─────────────────────────────────────────
     log.info("Computing features for training set...")
     train_df = _compute_features_for_split(
-        train_pairs, features=features,
+        train_pairs, features=features, feature_strategy=feature_strategy,
         catalogue=effective_catalogue, cat_design=effective_cat_design,
         name_to_albums=name_to_albums, name_to_tracks=name_to_tracks,
         group_features=group_features,
     )
     log.info("Computing features for test set...")
     test_df = _compute_features_for_split(
-        test_pairs, features=features,
+        test_pairs, features=features, feature_strategy=feature_strategy,
         catalogue=effective_catalogue, cat_design=effective_cat_design,
         name_to_albums=name_to_albums, name_to_tracks=name_to_tracks,
         group_features=group_features,
@@ -1060,6 +1401,9 @@ def run_training(
     # ── Step 4: Pruning ────────────────────────────────────────────────────
     target = "to_link"
     exclude = {target, "variant_a", "variant_b", "source", "_key", "variants"}
+    # Excluding whole-string features from training when using separated strategy
+    if feature_strategy == "separated":
+        exclude.update(_WHOLE_STRING_FEATURES)
     all_num = [
         c for c in train_df.columns
         if c not in exclude
@@ -1093,8 +1437,9 @@ def run_training(
     model_catalogue = _build_model_catalogue(spw, device, random_state=RANDOM_STATE)
     if not include_composites:
         model_catalogue = {k: v for k, v in model_catalogue.items() if k in _TREE_MODELS}
-    if models:
-        model_catalogue = {k: v for k, v in model_catalogue.items() if k in models}
+    # Defaulting to LightGBM when no explicit model list is provided
+    effective_models = models or DEFAULT_MODELS
+    model_catalogue = {k: v for k, v in model_catalogue.items() if k in effective_models}
     if not model_catalogue:
         raise RuntimeError("No models selected — check --models argument.")
     parent_name = run_name or f"exp{exp_num}_unified"
@@ -1128,6 +1473,11 @@ def run_training(
             "group_features": "length_stats" if group_features else "none",
             "catalogue_feature_design": effective_cat_design,
             "include_composites": include_composites,
+            "feature_strategy": feature_strategy,
+            "neg_matching": neg_matching,
+            "neg_count": neg_count if neg_matching == "distribution" else 0,
+            "cluster_cap": cluster_cap if data_source == "dbscan-capped" else 0,
+            "neg_ratio": neg_ratio if data_source == "dbscan-capped" else 0,
         })
         # Logging train/test splits as artefacts
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1243,6 +1593,8 @@ def run_training(
             f"{r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}"
         )
     print("=" * 130)
-    best = max(results, key=lambda k: results[k]["auc"])
-    print(f"\nBest model by AUC: {best} (AUC={results[best]['auc']:.4f})")
+    # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
+    best = max(results, key=lambda k: 0.4 * results[k]["hiprec_prec"] + 0.3 * results[k]["hiprec_f1"] + 0.3 * results[k]["auc"])
+    score = 0.4 * results[best]["hiprec_prec"] + 0.3 * results[best]["hiprec_f1"] + 0.3 * results[best]["auc"]
+    print(f"\nBest model by c9r score: {best} (score={score:.4f})")
     return results

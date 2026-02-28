@@ -1,7 +1,7 @@
 """
 Additional unit tests for HTTP.mbAPI — higher-level functions with mocking.
 """
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import pandas as pd
 import pytest
 from HTTP.mbAPI import (

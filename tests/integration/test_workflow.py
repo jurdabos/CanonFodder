@@ -2,7 +2,6 @@
 Integration tests for corefunc.workflow (scrobble ingestion pipeline).
 """
 import pandas as pd
-import pytest
 from unittest.mock import patch
 
 
@@ -17,12 +16,12 @@ class TestRunDataGatheringWorkflow:
         """Fetches, normalises, and persists scrobbles to Parquet."""
         mock_fetch.return_value = sample_scrobble_df
         mock_country.return_value = False
-        import helpers.io as io_mod
+        from helpers.io import scrobble_data_exists, read_scrobble_df
         from corefunc.workflow import run_data_gathering_workflow
         n = run_data_gathering_workflow("testuser")
         assert n == 3
-        assert io_mod.SCROBBLE_PQ.exists()
-        loaded = pd.read_parquet(io_mod.SCROBBLE_PQ)
+        assert scrobble_data_exists()
+        loaded = read_scrobble_df()
         assert len(loaded) == 3
 
     @patch("corefunc.workflow.lfAPI.fetch_scrobbles_since")
@@ -55,11 +54,11 @@ class TestRunDataGatheringWorkflowListenBrainz:
     ):
         """Fetches and persists scrobbles from ListenBrainz."""
         mock_fetch.return_value = sample_scrobble_df
-        import helpers.io as io_mod
+        from helpers.io import scrobble_data_exists
         from corefunc.workflow import run_data_gathering_workflow
         n = run_data_gathering_workflow("lbuser", source="listenbrainz")
         assert n == 3
-        assert io_mod.SCROBBLE_PQ.exists()
+        assert scrobble_data_exists()
 
     @patch("HTTP.lblink.fetch_scrobbles_since")
     def test_lb_skips_country_sync(

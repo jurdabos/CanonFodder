@@ -293,21 +293,15 @@ class TestQaLbIngest:
         result = qa_lb_ingest()
         assert result["status"] == "skipped"
 
-    def test_full_report_on_good_data(self, populated_pq, monkeypatch):
+    def test_full_report_on_good_data(self, populated_pq):
         """Returns a passing report for clean sample data."""
-        import corefunc.qa as qa_mod
-        monkeypatch.setattr(qa_mod, "SCROBBLE_PQ", populated_pq / "scrobble.parquet")
-        monkeypatch.setattr(qa_mod, "QA_REPORT_PQ", populated_pq / "qa_report.parquet")
         result = qa_lb_ingest()
         assert result["passed"] is True
         assert result["row_count"] == 3
         assert (populated_pq / "qa_report.parquet").exists()
 
-    def test_report_persisted(self, populated_pq, monkeypatch):
+    def test_report_persisted(self, populated_pq):
         """Verifies that a row was appended to qa_report.parquet."""
-        import corefunc.qa as qa_mod
-        monkeypatch.setattr(qa_mod, "SCROBBLE_PQ", populated_pq / "scrobble.parquet")
-        monkeypatch.setattr(qa_mod, "QA_REPORT_PQ", populated_pq / "qa_report.parquet")
         qa_lb_ingest()
         report_df = pd.read_parquet(populated_pq / "qa_report.parquet")
         assert len(report_df) == 1

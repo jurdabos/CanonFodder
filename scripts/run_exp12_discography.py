@@ -37,12 +37,12 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from corefunc.canon.experiment_runner import _build_model_catalogue
-from corefunc.mb_local import _psql_csv, check_local_mb
-from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, sanitize, SCROBBLE_PQ
-from helpers.features import compute_pair_features
-from helpers import cluster, stats
-from helpers.device import get_device
+from corefunc.canon.experiment_runner import _build_model_catalogue # noqa: E402
+from corefunc.mb_local import _psql_csv, check_local_mb # noqa: E402
+from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, sanitize, SCROBBLE_PQ # noqa: E402
+from helpers.features import compute_pair_features # noqa: E402
+from helpers import cluster, stats # noqa: E402
+from helpers.device import get_device # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -166,7 +166,7 @@ def assemble_training() -> pd.DataFrame:
     log.info("Positives in [%d,%d): %d.", WRATIO_LOWER, WRATIO_UPPER, len(positives))
     # Loading DBSCAN negatives
     dbscan = read_parquet(GS_DBSCAN_PQ)
-    neg_pool = dbscan[dbscan["to_link"] == False].reset_index(drop=True)
+    neg_pool = dbscan[dbscan["to_link"].eq(False)].reset_index(drop=True)
     neg_wr = _compute_wratio_bulk(neg_pool, "negative")
     neg_pool = neg_pool.copy()
     neg_pool["_wr"] = neg_wr
@@ -517,8 +517,10 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
     print("\n── Baselines ──")
     print("Exp 6  ExtraTrees (gs_mb_dbscan, 2158:1):    AUC=0.8920, opt F1=0.7050 (P=0.750, R=0.667, thr=0.940)")
     print("Exp 11 RandomForest (gs_mb_max, no disco):    AUC=0.8838, opt F1=0.6429 (P=0.551, R=0.771, thr=0.995)")
-    best = max(results, key=lambda x: x["auc"])
-    print(f"\nBest model by AUC: {best['model']} (AUC={best['auc']:.4f})")
+    # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
+    best = max(results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
+    score = 0.4 * best["hiprec_prec"] + 0.3 * best["hiprec_f1"] + 0.3 * best["auc"]
+    print(f"\nBest model by c9r score: {best['model']} (score={score:.4f})")
     return results
 
 

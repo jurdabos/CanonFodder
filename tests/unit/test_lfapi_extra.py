@@ -96,9 +96,9 @@ class TestFetchScrobblesSince:
 class TestEnrichArtistMbids:
     """Tests enrich_artist_mbids with mocked API calls."""
 
-    @patch("HTTP.lfAPI.dump_parquet")
+    @patch("HTTP.lfAPI.dump_scrobble_df")
     @patch("HTTP.lfAPI.lastfm_request")
-    @patch("HTTP.lfAPI.read_parquet")
+    @patch("HTTP.lfAPI.read_scrobble_df")
     def test_no_scrobbles(self, mock_read, mock_req, mock_dump):
         """Returns success with 0 enriched when no scrobbles exist."""
         mock_read.return_value = None
@@ -107,9 +107,9 @@ class TestEnrichArtistMbids:
         assert result["enriched"] == 0
 
     @patch("HTTP.lfAPI.time.sleep")
-    @patch("HTTP.lfAPI.dump_parquet")
+    @patch("HTTP.lfAPI.dump_scrobble_df")
     @patch("HTTP.lfAPI.lastfm_request")
-    @patch("HTTP.lfAPI.read_parquet")
+    @patch("HTTP.lfAPI.read_scrobble_df")
     def test_enriches_missing_mbids(self, mock_read, mock_req, mock_dump, mock_sleep):
         """Enriches artists missing MBIDs via Last.fm API."""
         df = pd.DataFrame({

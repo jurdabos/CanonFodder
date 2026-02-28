@@ -11,7 +11,7 @@ from datetime import datetime, UTC, timedelta
 from pathlib import Path
 import duckdb
 import pandas as pd
-from helpers.io import SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, C_PQ
+from helpers.io import ARTIST_INFO_PQ, AVC_PQ, C_PQ, scrobble_data_exists, scrobble_duckdb_from
 from helpers.query import (
     _canonical_cte,
     artist_country_stats,
@@ -44,7 +44,7 @@ def overview_stats() -> dict:
     Returns a dict with total scrobbles, unique artists, date range,
     yearly totals, and play-count distribution quartiles.
     """
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return {"error": "scrobble.parquet not found"}
     cte = _canonical_cte()
     con = _con()
@@ -59,7 +59,7 @@ def overview_stats() -> dict:
                 COUNT(DISTINCT s.album_title)     AS unique_albums,
                 MIN(s.play_time)                  AS earliest,
                 MAX(s.play_time)                  AS latest
-            FROM {_pq(SCROBBLE_PQ)} s
+            FROM {scrobble_duckdb_from()} s
             LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
             WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
         """).df()
@@ -67,7 +67,7 @@ def overview_stats() -> dict:
         # Yearly totals
         yearly = con.execute(f"""
             SELECT EXTRACT(YEAR FROM play_time) AS year, COUNT(*) AS plays
-            FROM {_pq(SCROBBLE_PQ)}
+            FROM {scrobble_duckdb_from()}
             WHERE artist_name IS NOT NULL AND artist_name != ''
             GROUP BY year
             ORDER BY year
@@ -78,7 +78,7 @@ def overview_stats() -> dict:
             counts AS (
                 SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                        COUNT(*) AS plays
-                FROM {_pq(SCROBBLE_PQ)} s
+                FROM {scrobble_duckdb_from()} s
                 LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
                 WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
                 GROUP BY COALESCE(cm.canonical_name, s.artist_name)
@@ -147,14 +147,14 @@ def variant_candidates(
     dicts), combined_count, similarity_score.
     """
     from rapidfuzz import fuzz, process
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return []
     con = _con()
     try:
         # Getting artist play counts above threshold
         artists_df = con.execute(f"""
             SELECT artist_name, COUNT(*) AS plays
-            FROM {_pq(SCROBBLE_PQ)}
+            FROM {scrobble_duckdb_from()}
             WHERE artist_name IS NOT NULL AND artist_name != ''
             GROUP BY artist_name
             HAVING plays >= {min_plays}
@@ -207,13 +207,13 @@ def top_artists_profile(n: int = 20, *, canonize: bool = False) -> dict:
     When canonize=True, applies the artist_variants_canonized mapping
     before aggregation.
     """
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return {"error": "scrobble.parquet not found"}
     con = _con()
     try:
         raw_df = con.execute(f"""
             SELECT artist_name, COUNT(*) AS plays
-            FROM {_pq(SCROBBLE_PQ)}
+            FROM {scrobble_duckdb_from()}
             WHERE artist_name IS NOT NULL AND artist_name != ''
             GROUP BY artist_name
             ORDER BY plays DESC
@@ -229,7 +229,7 @@ def top_artists_profile(n: int = 20, *, canonize: bool = False) -> dict:
                 WITH {cte}
                 SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                        COUNT(*) AS plays
-                FROM {_pq(SCROBBLE_PQ)} s
+                FROM {scrobble_duckdb_from()} s
                 LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
                 WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
                 GROUP BY COALESCE(cm.canonical_name, s.artist_name)
@@ -281,7 +281,7 @@ def trusted_companions(*, start_year: int = 2006, end_year: int = 2025) -> dict:
     Returns dict with companion artists, their per-year play counts, and
     consistency metrics (standard deviation of yearly plays).
     """
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return {"error": "scrobble.parquet not found"}
     cte = _canonical_cte()
     con = _con()
@@ -289,7 +289,7 @@ def trusted_companions(*, start_year: int = 2006, end_year: int = 2025) -> dict:
         # Getting unique years in the range
         years = con.execute(f"""
             SELECT DISTINCT EXTRACT(YEAR FROM play_time)::INT AS year
-            FROM {_pq(SCROBBLE_PQ)}
+            FROM {scrobble_duckdb_from()}
             WHERE play_time IS NOT NULL
               AND EXTRACT(YEAR FROM play_time) BETWEEN {start_year} AND {end_year}
             ORDER BY year
@@ -305,7 +305,7 @@ def trusted_companions(*, start_year: int = 2006, end_year: int = 2025) -> dict:
                     COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                     EXTRACT(YEAR FROM s.play_time)::INT AS year,
                     COUNT(*) AS plays
-                FROM {_pq(SCROBBLE_PQ)} s
+                FROM {scrobble_duckdb_from()} s
                 LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
                 WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
                   AND EXTRACT(YEAR FROM s.play_time) BETWEEN {start_year} AND {end_year}
@@ -356,7 +356,7 @@ def country_breakdown(top_n: int = 15) -> list[dict]:
     Each entry has: country, name (English), play_count, artist_count,
     pct (share of all enriched scrobbles).
     """
-    if not SCROBBLE_PQ.exists() or not ARTIST_INFO_PQ.exists():
+    if not scrobble_data_exists() or not ARTIST_INFO_PQ.exists():
         return []
     cte = _canonical_cte()
     con = _con()
@@ -373,7 +373,7 @@ def country_breakdown(top_n: int = 15) -> list[dict]:
             enriched AS (
                 SELECT ai.country, COUNT(*) AS play_count,
                        COUNT(DISTINCT COALESCE(cm.canonical_name, s.artist_name)) AS artist_count
-                FROM {_pq(SCROBBLE_PQ)} s
+                FROM {scrobble_duckdb_from()} s
                 LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
                 JOIN {_pq(ARTIST_INFO_PQ)} ai
                     ON COALESCE(cm.canonical_name, s.artist_name) = ai.artist_name

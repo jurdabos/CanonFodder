@@ -14,8 +14,7 @@ import logging
 import time
 import pandas as pd
 from helpers.io import (
-    ARTIST_INFO_PQ, SCROBBLE_PQ,
-    read_parquet, append_to_parquet, dump_parquet,
+    ARTIST_INFO_PQ, read_parquet, append_to_parquet, read_scrobble_df, dump_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
@@ -29,8 +28,8 @@ def enrich_artist_country(*, batch: int = 100) -> int:
     Uses the remote MusicBrainz JSON API (via HTTP/mbAPI.py).
     Returns the number of artists enriched.
     """
-    from HTTP.mbAPI import search_artist, _cache_artist  # noqa: private ok inside project
-    scrobbles = read_parquet(SCROBBLE_PQ)
+    from HTTP.mbAPI import search_artist, _cache_artist
+    scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         return 0
     known = read_parquet(ARTIST_INFO_PQ)
@@ -84,7 +83,7 @@ def backfill_mbids() -> int:
 
     Returns the number of scrobble rows updated.
     """
-    scrobbles = read_parquet(SCROBBLE_PQ)
+    scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         return 0
     artist_info = read_parquet(ARTIST_INFO_PQ)
@@ -105,7 +104,7 @@ def backfill_mbids() -> int:
     n_updated = int(updated_mask.sum())
     if n_updated > 0:
         scrobbles.loc[filled[updated_mask].index, "artist_mbid"] = filled[updated_mask]
-        dump_parquet(scrobbles, SCROBBLE_PQ)
+        dump_scrobble_df(scrobbles)
         log.info("Backfilled %d MBIDs into scrobble.parquet.", n_updated)
     return n_updated
 

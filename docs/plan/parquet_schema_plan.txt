@@ -1,0 +1,51 @@
+Versioned Parquet Schemas with Migration Scripts
+Addresses SRD §2.5 ("Schema changes tracked via versioned Parquet schemas with migration scripts") and §4.4 ("Parquet schema mismatches abort with clear error message").
+Current State
+helpers/io.py defines PyArrow schemas (SCROBBLE_SCHEMA, ARTIST_INFO_SCHEMA, AVC_SCHEMA) and column lists (UC_COLS, GS_MB_COLS) but:
+No version numbers attached to any schema
+No metadata embedded in written Parquet files
+dump_parquet() / append_to_parquet() use df.to_parquet() — no schema enforcement, no stamping
+Partitioned scrobble writers (dump_scrobble_df, ingest_scrobbles) similarly un-stamped
+read_parquet() returns raw DataFrame with no version/schema validation
+QA module (corefunc/qa.py) checks column sets via _check_schema() but knows nothing about versions
+One ad-hoc migration exists (migrate_scrobble_to_partitioned) — no general framework
+Proposed Changes
+1. New module: helpers/schema.py
+Single source of truth for schema versions, migration registry, and validation helpers.
+SCHEMA_REGISTRY — dict mapping table name → {"version": int, "schema": pa.schema, "cols": list[str]}
+Tables: scrobble (v1), artist_info (v1), avc (v1), uc (v1), gs_mb (v1)
+Also adds missing pa.schema definitions for uc and gs_mb
+_PATH_TO_TABLE — maps filename stems ("scrobble.parquet", "artist_info.parquet", etc.) to table names, plus awareness of partitioned scrobble layout (part.parquet inside scrobble/)
+stamp_metadata(table: pa.Table, table_name: str) → pa.Table — adds c9r_table and c9r_schema_version to Arrow table metadata; called just before pq.write_table()
+read_file_version(path: Path) → tuple[str | None, int] — reads Parquet footer metadata, returns (table_name, version) without loading data; returns (None, 0) for un-stamped files
+validate_schema(path: Path) → dict — compares file's embedded version + columns against registry; returns status dict with {"table", "file_version", "current_version", "status", "missing_cols", "extra_cols"}
+Migration registry — _MIGRATIONS: dict[tuple[str, int, int], Callable[[Path], None]] and a register_migration decorator
+migrate_file(path: Path) → int — reads version, walks migration chain to current, returns new version
+migrate_all() → dict[str, str] — walks all known Parquet files in PQ_DIR, migrates each, returns summary
+Built-in v0→v1 migrations — for each table, validate column set matches v1, then re-write with metadata stamp (no data changes needed since schemas already match)
+2. Modify helpers/io.py
+dump_parquet(): after building the PyArrow table, infer table name from path via _PATH_TO_TABLE; if recognised, call stamp_metadata() before writing with pq.write_table(); otherwise fall through to current df.to_parquet() behaviour (for unmanaged files like experiment outputs)
+append_to_parquet(): same stamping logic on the final write
+read_parquet(): after reading, call read_file_version() to check; if file version < current, log a logger.warning("… run 'c9r schema migrate' …"). If file version > current, raise RuntimeError per §4.4
+Partitioned scrobble helpers (dump_scrobble_df, ingest_scrobbles): stamp each part.parquet with scrobble metadata
+Move the existing SCROBBLE_SCHEMA, ARTIST_INFO_SCHEMA, AVC_SCHEMA definitions into helpers/schema.py and re-export from io.py for backward compat
+3. CLI commands in main.py
+c9r schema show — scans PQ_DIR, runs validate_schema() on each file, prints a table:
+  table | file_version | current | status | path
+c9r schema migrate — runs migrate_all(), reports per-file results
+4. Tests in tests/unit/test_schema.py
+test_stamp_and_read_roundtrip — write stamped file, read back version
+test_read_legacy_file_returns_v0 — un-stamped file returns version 0
+test_validate_schema_ok — stamped v1 file passes
+test_validate_schema_version_mismatch — legacy file reports needs-migration
+test_migrate_v0_to_v1 — migrates legacy file, stamps metadata
+test_migrate_already_current — no-op for current version
+test_dump_parquet_stamps_metadata — verify dump_parquet() embeds version
+test_read_parquet_warns_on_stale — verify warning logged for old version
+test_read_parquet_raises_on_future — verify RuntimeError for version > current
+5. Impact on existing code
+dump_parquet() callers: transparent — signature unchanged, stamping auto-detected from path
+read_parquet() callers: transparent — only adds warning/error for version mismatch
+Partitioned writers: explicit stamp_metadata() call added
+QA module: no changes needed (its column checks are complementary)
+Test fixtures: conftest.py already patches paths; un-stamped fixture files will just be treated as v0 (no warnings in tests since read_parquet() only warns, and tests write directly via df.to_parquet(), not through dump_parquet())

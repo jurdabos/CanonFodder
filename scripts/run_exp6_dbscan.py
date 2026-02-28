@@ -35,11 +35,11 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb
-from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, SCROBBLE_PQ, sanitize
-from helpers.features import compute_pair_features
-from helpers import cluster, stats
-from helpers.device import get_device
+from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb # noqa: E402
+from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, SCROBBLE_PQ, sanitize # noqa: E402
+from helpers.features import compute_pair_features # noqa: E402
+from helpers import cluster, stats # noqa: E402
+from helpers.device import get_device # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ def step1_dbscan_grid_search() -> tuple[float, np.ndarray, list[str]]:
     log.info("Unique artist names: %d", n)
     # Building anchor index sets from positive AVC groups
     avc = read_parquet(AVC_PQ)
-    pos_groups = avc[(avc["to_link"].notna()) & (avc["to_link"] == True)]
+    pos_groups = avc[(avc["to_link"].notna()) & (avc["to_link"].eq(True))]
     name2idx = {name: i for i, name in enumerate(artist_names)}
     anchor_idx_sets = []
     for _, row in pos_groups.iterrows():
@@ -362,9 +362,10 @@ def step6_run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols
               f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
               f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}")
     print("=" * 120)
-    # Detailed threshold sweep for best model by AUC
-    best = max(results, key=lambda x: x["auc"])
-    print(f"\nBest model by AUC: {best['model']} (AUC={best['auc']:.4f})")
+    # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
+    best = max(results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
+    score = 0.4 * best["hiprec_prec"] + 0.3 * best["hiprec_f1"] + 0.3 * best["auc"]
+    print(f"\nBest model by c9r score: {best['model']} (score={score:.4f})")
     return results
 
 
@@ -399,7 +400,7 @@ def main():
     test_raw["_wr"] = test_raw.apply(lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1)
     test_raw = test_raw[(test_raw["_wr"] >= WRATIO_LOWER) & (test_raw["_wr"] < WRATIO_UPPER)].drop(columns=["_wr"])
     log.info("AVC test set: %d pairs (pos=%d, neg=%d).",
-             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"] == False).sum())
+             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"].eq(False)).sum())
     test_df = add_all_features(test_raw.reset_index(drop=True))
     # Pruning features
     target = "to_link"

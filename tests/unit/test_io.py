@@ -2,7 +2,6 @@
 Unit tests for helpers.io (Parquet I/O layer).
 """
 import pandas as pd
-import pytest
 from helpers.io import (
     append_to_parquet,
     dump_parquet,
@@ -142,11 +141,11 @@ class TestIngestScrobbles:
     """Tests the high-level ingest_scrobbles helper."""
 
     def test_ingests_and_returns_count(self, tmp_pq_dir, sample_scrobble_df):
-        """Normalises and writes scrobbles; returns row count."""
-        import helpers.io as io_mod
+        """Normalises and writes scrobbles to partitioned layout; returns row count."""
+        from helpers.io import scrobble_data_exists
         n = ingest_scrobbles(sample_scrobble_df)
         assert n == 3
-        assert io_mod.SCROBBLE_PQ.exists()
+        assert scrobble_data_exists()
 
 
 class TestLatestScrobbleTs:

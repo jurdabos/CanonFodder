@@ -139,7 +139,7 @@ wheels = [
 
 [[package]]
 name = "c9r"
-version = "0.6.2"
+version = "0.8"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -152,6 +152,7 @@ dependencies = [
     { name = "numpy" },
     { name = "optuna" },
     { name = "pandas" },
+    { name = "prefect" },
     { name = "pyarrow" },
     { name = "pypopulation" },
     { name = "python-dotenv" },
@@ -184,6 +185,13 @@ prefect = [
     { name = "prefect" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "fpdf2" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
@@ -198,6 +206,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "optuna", specifier = ">=4.0" },
     { name = "pandas", specifier = ">=2.2" },
+    { name = "prefect", specifier = ">=3.4.17" },
     { name = "prefect", marker = "extra == 'all'", specifier = ">=3.0" },
     { name = "prefect", marker = "extra == 'prefect'", specifier = ">=3.0" },
     { name = "pyarrow", specifier = ">=18.0" },
@@ -220,6 +229,13 @@ requires-dist = [
     { name = "xgboost", specifier = ">=3.0" },
 ]
 provides-extras = ["prefect", "dev", "all"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "fpdf2", specifier = ">=2.8.7" },
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+]
 
 [[package]]
 name = "cachetools"
@@ -654,6 +670,15 @@ wheels = [
 ]
 
 [[package]]
+name = "defusedxml"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
+]
+
+[[package]]
 name = "docker"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -801,6 +826,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6f/9a/3b536bad3be4f26186f296e749ff17bad3e6d57232c104d752d24b2e265b/fonttools-4.61.0-cp314-cp314t-win32.whl", hash = "sha256:63c7125d31abe3e61d7bb917329b5543c5b3448db95f24081a13aaf064360fc8", size = 2330707, upload-time = "2025-11-28T17:05:43.548Z" },
     { url = "https://files.pythonhosted.org/packages/18/ea/e6b9ac610451ee9f04477c311ad126de971f6112cb579fa391d2a8edb00b/fonttools-4.61.0-cp314-cp314t-win_amd64.whl", hash = "sha256:67d841aa272be5500de7f447c40d1d8452783af33b4c3599899319f6ef9ad3c1", size = 2395950, upload-time = "2025-11-28T17:05:45.638Z" },
     { url = "https://files.pythonhosted.org/packages/0c/14/634f7daea5ffe6a5f7a0322ba8e1a0e23c9257b80aa91458107896d1dfc7/fonttools-4.61.0-py3-none-any.whl", hash = "sha256:276f14c560e6f98d24ef7f5f44438e55ff5a67f78fa85236b218462c9f5d0635", size = 1144485, upload-time = "2025-11-28T17:05:47.573Z" },
+]
+
+[[package]]
+name = "fpdf2"
+version = "2.8.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "defusedxml" },
+    { name = "fonttools" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/27/f2/72feae0b2827ed38013e4307b14f95bf0b3d124adfef4d38a7d57533f7be/fpdf2-2.8.7.tar.gz", hash = "sha256:7060ccee5a9c7ab0a271fb765a36a23639f83ef8996c34e3d46af0a17ede57f9", size = 362351, upload-time = "2026-02-28T05:39:16.456Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/66/0a/cf50ecffa1e3747ed9380a3adfc829259f1f86b3fdbd9e505af789003141/fpdf2-2.8.7-py3-none-any.whl", hash = "sha256:d391fc508a3ce02fc43a577c830cda4fe6f37646f2d143d489839940932fbc19", size = 327056, upload-time = "2026-02-28T05:39:14.619Z" },
 ]
 
 [[package]]

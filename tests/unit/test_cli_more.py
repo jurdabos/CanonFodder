@@ -3,8 +3,6 @@ Unit tests for helpers.cli interactive functions with mocked prompts.
 """
 from unittest.mock import patch, MagicMock
 import pandas as pd
-import pytest
-from click.testing import CliRunner
 from helpers.cli import (
     ask,
     choose_lastfm_user,

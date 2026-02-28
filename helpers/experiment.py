@@ -114,8 +114,52 @@ def log_feature_importance(model, feature_names: list[str], top_n: int = 20) -> 
     log.debug("Logged feature importance plot to MLflow.")
 
 
+def _get_shap_estimator(estimator):
+    """Extracts a SHAP-compatible estimator from ensembles and CUDA models.
+
+    For ensemble meta-estimators (Voting, Stacking, Bagging), picks the
+    best fitted sub-estimator that supports TreeExplainer.
+    For XGBoost with device='cuda', returns a CPU-bound deep copy so
+    SHAP can read the tree structures.
+    Returns None if no suitable estimator is found.
+    """
+    import copy
+    from sklearn.ensemble import BaggingClassifier, StackingClassifier, VotingClassifier
+    # Extracting a tree-based sub-estimator from ensemble wrappers
+    if isinstance(estimator, (VotingClassifier, StackingClassifier)):
+        for sub in estimator.estimators_:
+            if hasattr(sub, "feature_importances_"):
+                log.info("SHAP: using sub-estimator %s from %s.",
+                         type(sub).__name__, type(estimator).__name__)
+                estimator = sub
+                break
+        else:
+            log.warning("No tree-based sub-estimator in %s; skipping SHAP.",
+                        type(estimator).__name__)
+            return None
+    elif isinstance(estimator, BaggingClassifier):
+        if estimator.estimators_:
+            log.info("SHAP: using first bagged %s.",
+                     type(estimator.estimators_[0]).__name__)
+            estimator = estimator.estimators_[0]
+        else:
+            log.warning("BaggingClassifier has no fitted estimators; skipping SHAP.")
+            return None
+    # Moving CUDA-resident XGBoost to CPU for SHAP compatibility
+    device = getattr(estimator, "device", None)
+    if device and str(device).startswith("cuda"):
+        estimator = copy.deepcopy(estimator)
+        estimator.set_params(device="cpu")
+        log.debug("SHAP: deep-copied XGBoost to CPU.")
+    return estimator
+
+
 def log_shap_summary(model, X_sample, feature_names: list[str]) -> None:
-    """Computes SHAP values and saves the summary plot as an MLflow artefact."""
+    """Computes SHAP values and saves the summary plot as an MLflow artefact.
+
+    Handles ensemble models by explaining their best tree-based
+    sub-estimator, and CUDA XGBoost by deep-copying to CPU.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -129,6 +173,10 @@ def log_shap_summary(model, X_sample, feature_names: list[str]) -> None:
     estimator = model
     if hasattr(model, "named_steps"):
         estimator = list(model.named_steps.values())[-1]
+    # Resolving ensembles and CUDA models to a SHAP-compatible estimator
+    estimator = _get_shap_estimator(estimator)
+    if estimator is None:
+        return
     # Ensuring X_sample is a DataFrame for SHAP compatibility
     if not isinstance(X_sample, pd.DataFrame):
         X_sample = pd.DataFrame(X_sample, columns=feature_names)

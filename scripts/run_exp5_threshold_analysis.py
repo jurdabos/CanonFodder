@@ -11,7 +11,6 @@ import sys
 import warnings
 from pathlib import Path
 import numpy as np
-import pandas as pd
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
@@ -28,8 +27,8 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.run_exp5_filtered import build_filtered_test, build_filtered_train, _add_features
-from helpers.device import get_device
+from scripts.run_exp5_filtered import build_filtered_test, build_filtered_train, _add_features # noqa: E402
+from helpers.device import get_device # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)

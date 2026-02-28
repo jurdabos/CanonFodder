@@ -13,7 +13,7 @@ import click
 import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
-from .io import PQ_DIR, AVC_PQ, UC_PQ, read_parquet, append_to_parquet, dump_parquet
+from .io import AVC_PQ, UC_PQ, read_parquet, append_to_parquet, dump_parquet  # noqa: E402
 log = logging.getLogger(__name__)
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[1] if "__file__" in globals() else Path.cwd()

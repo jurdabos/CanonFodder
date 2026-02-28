@@ -13,14 +13,14 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.run_exp6_dbscan import (
-    add_all_features, prune_features, GS_DBSCAN_PQ,
-    WRATIO_LOWER, WRATIO_UPPER,
-)
-from helpers.io import AVC_PQ, read_parquet
-from helpers import cluster, stats
-from rapidfuzz import fuzz
-import pandas as pd
+from scripts.run_exp6_dbscan import ( # noqa: E402
+    add_all_features, prune_features, GS_DBSCAN_PQ, # noqa: E402
+    WRATIO_LOWER, WRATIO_UPPER, # noqa: E402
+) # noqa: E402
+from helpers.io import AVC_PQ, read_parquet # noqa: E402
+from helpers import cluster # noqa: E402
+from rapidfuzz import fuzz # noqa: E402
+import pandas as pd # noqa: E402
 
 
 def main():

@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 from rapidfuzz import fuzz, process
 from helpers.features import compute_pair_features
-from helpers.io import SCROBBLE_PQ, PQ_DIR, read_parquet, sanitize
+from helpers.io import PQ_DIR, read_parquet, read_scrobble_df, sanitize
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def _load_catalogue_cache() -> tuple[dict[str, list[str]], dict[str, list[str]]]
                 )
             log.info("Solo-credit disco lookup: %d MBIDs.", len(mbid_to_disco))
     # Loading scrobble data
-    scrobbles = read_parquet(SCROBBLE_PQ)
+    scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         log.warning("No scrobble data — catalogue features will be zeros.")
         _catalogue_cache = {"albums": {}, "tracks": {}}

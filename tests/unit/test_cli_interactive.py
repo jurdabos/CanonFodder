@@ -2,8 +2,7 @@
 Unit tests for helpers.cli interactive and pure helper functions.
 """
 import pandas as pd
-import pytest
-from helpers.cli import _apply_canonical, _overlaps, _remember_artist_variant, _split_variants
+from helpers.cli import _apply_canonical, _overlaps, _remember_artist_variant
 
 
 class TestApplyCanonical:

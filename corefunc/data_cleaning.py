@@ -4,8 +4,9 @@ import logging
 import re
 import pandas as pd
 from helpers.io import (
-    ARTIST_INFO_PQ, SCROBBLE_PQ,
+    ARTIST_INFO_PQ,
     read_parquet, dump_parquet,
+    read_scrobble_df, dump_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
@@ -136,11 +137,11 @@ def fix_encoding() -> dict[str, tuple[int, int]]:
     """
     results: dict[str, tuple[int, int]] = {}
     # Repairing scrobble.parquet
-    df = read_parquet(SCROBBLE_PQ)
+    df = read_scrobble_df()
     if df is not None and not df.empty:
         df, repaired = _fix_df_encoding(df, _SCROBBLE_TEXT_COLS)
         if repaired:
-            dump_parquet(df, SCROBBLE_PQ)
+            dump_scrobble_df(df)
         results["scrobble"] = (repaired, len(df))
         log.info("scrobble.parquet: %d rows repaired out of %d.", repaired, len(df))
     else:

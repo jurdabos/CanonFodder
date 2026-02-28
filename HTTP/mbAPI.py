@@ -36,18 +36,18 @@ import os
 import re
 import time
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict
 import musicbrainzngs as mb
 import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
-from HTTP.client import USER_AGENT as DEFAULT_UA
-from helpers.io import ARTIST_INFO_PQ, read_parquet, append_to_parquet
-from tenacity import retry, stop_after_attempt, wait_exponential
+from HTTP.client import USER_AGENT as DEFAULT_UA  # noqa: E402
+from helpers.io import ARTIST_INFO_PQ, read_parquet, append_to_parquet  # noqa: E402
+from tenacity import retry, stop_after_attempt, wait_exponential  # noqa: E402
 _RETRY = retry(
     reraise=True,
-    stop=stop_after_attempt(5),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(8),
+    wait=wait_exponential(multiplier=1, min=1, max=60),
 )
 _UA_RE = re.compile(r"(?P<app>[^/]+)/(?P<ver>[^ ]+) \((?P<contact>[^)]+)\)")
 

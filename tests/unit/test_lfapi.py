@@ -2,7 +2,6 @@
 Unit tests for HTTP.lfAPI (Last.fm API helpers).
 """
 import pandas as pd
-import pytest
 from HTTP.lfAPI import (
     _clean_track,
     _normalise_tracks,

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "c9r"
-version = "0.6.2"
+version = "0.8"
 description = "Reproducible pipeline for music scrobble ingestion, artist-name record linkage, and interactive analytics."
 requires-python = ">=3.12"
 license = "MIT"
@@ -20,6 +20,7 @@ dependencies = [
   "numpy>=2.0",
   "optuna>=4.0",
   "pandas>=2.2",
+  "prefect>=3.4.17",
   "pyarrow>=18.0",
   "pypopulation>=2020.3",
   "python-dotenv>=1.1",
@@ -77,6 +78,7 @@ omit = [
 ]
 
 [tool.coverage.report]
+fail_under = 80
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -89,4 +91,11 @@ exclude_lines = [
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+
+[dependency-groups]
+dev = [
+    "fpdf2>=2.8.7",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
+]
 

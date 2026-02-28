@@ -35,13 +35,12 @@ def make_request(
                 return r
             if 500 <= r.status_code < 600:
                 print(f"{url} -> {r.status_code}  retry {attempt}/{max_retries}")
-                attempt = attempt + 1
-                sleep(2)
+                sleep(min(2 ** attempt, 120))
                 continue
             # 4xx or other unexpected
             print(f"{url} -> {r.status_code}\n{r.text[:300]}")
             return r
         except requests.RequestException as exc:
             print(f"network error {exc}  retry {attempt}/{max_retries}")
-            sleep(2)
+            sleep(min(2 ** attempt, 120))
     return None

@@ -658,13 +658,21 @@ class TestProfileUc:
 
 
 class TestTrainCommand:
-    """Tests the 'train' command."""
+    """Tests the 'train' command group."""
 
-    def test_train_runs(self, runner, monkeypatch):
-        """Invokes train_model and reports done."""
-        mock_train = MagicMock()
-        monkeypatch.setattr("corefunc.canon.model.train_model", mock_train)
+    def test_train_no_subcommand_shows_help(self, runner):
+        """Invoking 'train' without a subcommand prints help."""
         result = runner.invoke(cli, ["train"])
         assert result.exit_code == 0
-        assert "Done" in result.output
-        mock_train.assert_called_once()
+        assert "Train canonisation models" in result.output
+        assert "run" in result.output
+        assert "tcn" in result.output
+
+    def test_train_run_invokes_pipeline(self, runner, monkeypatch):
+        """Invoking 'train run' calls run_training and reports completion."""
+        mock_run = MagicMock()
+        monkeypatch.setattr("corefunc.canon.trainer.run_training", mock_run)
+        result = runner.invoke(cli, ["train", "run"])
+        assert result.exit_code == 0
+        assert "Training complete" in result.output
+        mock_run.assert_called_once()

@@ -12,14 +12,16 @@ discover_candidates – scans scrobble data for new variant candidates.
 """
 from __future__ import annotations
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 import duckdb
 import pandas as pd
 from helpers.io import (
-    ALIAS_SEP, AVC_PQ, PQ_DIR, SCROBBLE_PQ, ARTIST_INFO_PQ,
+    ALIAS_SEP, AVC_PQ, PQ_DIR, ARTIST_INFO_PQ,
     read_parquet, dump_parquet, append_to_parquet,
+    scrobble_data_exists, scrobble_duckdb_from,
 )
 
 log = logging.getLogger(__name__)
@@ -322,14 +324,14 @@ def discover_candidates(
     from helpers.inference import compute_inference_features, load_model
     if model is None:
         model = load_model()
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return []
     # Getting unique artist names with play counts
     con = duckdb.connect()
     try:
         artists_df = con.execute(f"""
             SELECT artist_name, COUNT(*) AS plays
-            FROM {_pq(SCROBBLE_PQ)}
+            FROM {scrobble_duckdb_from()}
             WHERE artist_name IS NOT NULL AND artist_name != ''
             GROUP BY artist_name
             HAVING plays >= {min_plays}
@@ -377,6 +379,7 @@ def discover_candidates(
                     "variant_a": name,
                     "variant_b": match_name,
                     "probability": prob,
+                    "features_json": json.dumps(feats, allow_nan=False),
                 })
                 if prob >= proba_threshold:
                     positive_pairs.append((name, match_name, prob))

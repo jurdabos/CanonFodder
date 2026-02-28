@@ -1,0 +1,51 @@
+# VCS
+.git/
+.gitignore
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Caches
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Data files (mounted at runtime, not baked into image)
+PQ/
+*.parquet
+
+# MLflow artefacts (tracking DB + runs)
+mlruns/
+mlruns.db
+mlartifacts/
+
+# Model pickles are git-ignored but explicitly COPY'd in the Dockerfile;
+# the general COPY . . would miss them, so we do NOT ignore ML/ here.
+
+# Generated / temp
+pics/
+visualizations/
+*.log
+*.bak
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docs not needed at runtime
+docs/
+*.md
+!README.md
+
+# Tests not needed at runtime
+tests/

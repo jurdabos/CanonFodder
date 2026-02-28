@@ -41,11 +41,11 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from corefunc.canon.experiment_runner import _build_model_catalogue, _safe_get_params
-from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, sanitize, SCROBBLE_PQ
-from helpers.features import compute_pair_features
-from helpers import cluster, experiment, stats
-from helpers.device import get_device
+from corefunc.canon.experiment_runner import _build_model_catalogue, _safe_get_params # noqa: E402
+from helpers.io import AVC_PQ, read_parquet, dump_parquet, sanitize, SCROBBLE_PQ # noqa: E402
+from helpers.features import compute_pair_features # noqa: E402
+from helpers import cluster, experiment, stats # noqa: E402
+from helpers.device import get_device # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -449,7 +449,7 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
                     # Highlighting disco/melo features
                     dm_feats = [(n, v) for n, v in imps if n.startswith(("disco_", "melo_"))]
                     if dm_feats:
-                        print(f"  ── Disco/melo features ──")
+                        print("  ── Disco/melo features ──")
                         for name, imp in dm_feats:
                             print(f"  {name:<40} {imp:.4f}")
     # Summary table
@@ -469,8 +469,10 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
     print("Exp 12 XGBoost (gs_mb_max+disco, full AVC test):  — domain gap on discographies")
     print("Exp 13 note: train/test are both AVC subsets (group-level split), so not directly")
     print("       comparable to Exp 6 which trains on DBSCAN-mined data and tests on full AVC.")
-    best = max(results, key=lambda x: x["auc"])
-    print(f"\nBest model by AUC: {best['model']} (AUC={best['auc']:.4f})")
+    # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
+    best = max(results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
+    score = 0.4 * best["hiprec_prec"] + 0.3 * best["hiprec_f1"] + 0.3 * best["auc"]
+    print(f"\nBest model by c9r score: {best['model']} (score={score:.4f})")
     return results
 
 

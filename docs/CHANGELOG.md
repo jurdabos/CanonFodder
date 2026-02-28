@@ -1,6 +1,85 @@
 # Changelog
 
-All notable changes to c9r (CanonFodder) in reverse chronological order.
+All notable changes to c9r (CanonFodder) in reverse chronological order.                                                                                   
+
+---
+
+## 2026-02-28: Prediction log schema and feature quantile drift detection
+- corefunc/canon/workflow.py — `_log_predictions()` now includes a `features_json` column (JSON-serialised ~63-feature dict from `compute_inference_features`) alongside `timestamp`, `variant_a`, `variant_b`, `probability`. Every `canon machine` run now persists the full feature vector for downstream drift detection.
+- corefunc/qa.py — `qa_predictions()` extended with feature quantile drift detection via new `_feature_quantile_drift()` helper. Parses `features_json`, computes per-feature medians for baseline and recent windows, and flags features whose median shift exceeds `DRIFT_FEATURE_QUANTILE_THRESHOLD` (0.15). The report now includes a `feature_quantiles` dict and any feature-level warnings.
+- tests/unit/test_qa_ml_extra.py — all `TestQaPredictions` fixtures updated to include the full 5-column schema (`timestamp`, `variant_a`, `variant_b`, `probability`, `features_json`). `test_drift_detected` now verifies feature quantile warnings.
+- tests/unit/test_enrich_extra.py — `test_log_predictions` updated to include `features_json` and assert on the full column set.
+- Deleted stale `PQ/predictions_log.parquet` (had only 2 columns: `timestamp`, `probability`). File regenerates with the correct schema on next `canon machine` run.
+
+---
+
+## 2026-02-28: Documentation overhaul
+- README.md — updated tech stack (LightGBM primary, ListenBrainz recommended), added all missing commands (`tune`, `schema`, `migrate-scrobbles`, `train run`/`train tcn`), documented every CLI option with default values, added drift detection and schema management sections.
+- WARP.md — full rewrite from MySQL/SQLAlchemy/Alembic-era content to match current Parquet+DuckDB+Click+LightGBM architecture. Covers data flow, ML pipeline, drift detection, schema management, directory layout.
+
+---
+
+## 2026-02-28: New test files
+- tests/unit/test_trainer_ml.py — 73 tests covering trainer.py utility functions (parsing, Jaccard, fuzzy overlap, proportional features, cross-tier interactions), feature dispatch, evaluation helpers, CV loop, GPU fallback, MLflow helpers, and all data builders (_dispatch_data_build, mixed, group, mbdb, dbscan, etc.)
+- tests/unit/test_tcn_tuner_runner.py — 27 tests covering SiameseTCN/HybridTCN forward passes, NamePairDataset/HybridDataset, prediction/evaluation helpers, training loops (smoke tests), tuner search spaces + objective function, and experiment_runner CV/GPU fallback
+- tests/unit/test_final_coverage.py — 22 tests covering device.py GPU probe, _build_feature_sep/mbdb_max data builders, unicode script detection, script mismatch flags, and legacy compatibility shims
+
+---
+
+## 2026-02-28: LightGBM as default model across the repo
+- corefunc/canon/model.py (legacy module): Replaced XGBClassifier with LGBMClassifier, switched model artefact paths to lgbm_legacy.pkl / lgbm_columns.json, updated hyperparams (using is_unbalance=True instead of scale_pos_weight), changed save to pickle, removed unused get_device import.
+- corefunc/canon/trainer.py (unified training pipeline): Added DEFAULT_MODELS = ["LightGBM"] so c9r train run trains only LightGBM by default (override with --models). Changed catalogue_design default from "presence" to "proportional" to use the 10-feature proportional catalogue (matching inference features). Added cat_design parameter to compute_all_features().
+- corefunc/canon/tuner.py (Optuna tuning): Added _DEFAULT_TUNE_MODELS = ["LightGBM"] so c9r tune tunes only LightGBM by default. Updated compute_all_features() calls to use cat_design="proportional".
+- main.py (CLI): Updated --catalogue-design default to "proportional", updated --models help text for both train run and tune to say (default: LightGBM).
+- tests/unit/test_canon.py: Updated assertions from XGBoost step names/report headers to LightGBM equivalents.
+
+The serving path (helpers/inference.py, corefunc/model_server.py) and discovery path (corefunc/canon/workflow.py) already pointed to lightgbm_best.pkl with proportional catalogue features — no changes needed there.
+
+---
+
+## 2026-02-27: Versioned Parquet schema feature implemented
+- helpers/schema.py — schema registry, version tracking, metadata stamp/read, validation, migration framework with v0→v1 migrations
+- helpers/io.py — auto-stamps on write, warns on stale / raises on future version
+- main.py — *c9r schema show* and *c9r schema migrate* CLI commands
+- tests/unit/test_schema.py — 15 tests covering all schema functionality
+
+---
+
+## 2026-02-27: Year-partitioned scrobble implementation
+- Core I/O (helpers/io.py): Added SCROBBLE_PQ_DIR, plus helpers read_scrobble_df(), scrobble_duckdb_from(), dump_scrobble_df(), scrobble_data_exists(), and migrate_scrobble_to_partitioned(). Rewrote ingest_scrobbles() to write PQ/scrobble/year=YYYY/part.parquet partitions. All helpers fall back to the legacy single file for backward compat.
+- Consumers updated (10 files): DuckDB queries (query.py, profile.py, canon/workflow.py) use scrobble_duckdb_from(). Pandas readers (enrich.py, data_cleaning.py, qa.py, trainer.py, mb_local.py, inference.py, lfAPI.py) use read_scrobble_df()/dump_scrobble_df().
+- CLI (main.py): Added *c9r migrate-scrobbles [--remove-legacy]* command.
+- Tests: Updated conftest.py to patch SCROBBLE_PQ_DIR, fixed assertions in test_io.py, test_data_cleaning.py, and test_workflow.py. 454/455 tests pass; the one failure is a pre-existing TestTrainCommand issue.
+
+---
+
+## 2026-02-27: Prefect flow updated to cover functional reqs from SRD
+- propagate_avc_task (FR-05) — runs after canonise_batch to apply decided AVC mappings to artist_info.parquet, so canonisation doesn't just flag variants but actually applies them.
+- augment_gs_task (FR-06) — refreshes gold-standard pairs from the local MB mirror; skips gracefully if the Docker mirror is down.
+- retrain_model_task (FR-07) — retrains the canonisation model on current data; skips if there are fewer than 20 decided AVC rows.
+The flow now covers FR-01 through FR-07 and FR-10 directly. FR-08 (ASGI server) and FR-09 (interactive BI/profiling) are inherently outside a batch pipeline — they're served by c9r serve and c9r dashboard respectively.
+
+## 2026-02-27: SRD requirement around backoff fulfilled
+- HTTP/client.py — sleep(2) → sleep(min(2 ** attempt, 120)) giving 2s, 4s, 8s … capped at 120s. Also removed the dead attempt = attempt + 1 line.
+- HTTP/mbAPI.py — stop_after_attempt(5) → 8; raised max wait from 10s to 60s so later retries aren't artificially compressed.
+- flows/cf_ingest.py — constant retry_delay_seconds=30 → exponential_backoff(backoff_factor=10) (10s, 20s, 40s, 80s …) on both fetch_scrobbles and enrich_artists, keeping the existing jitter.
+
+---
+
+## 2026-02-27: Updates to ML reenactment logic
+
+1. trainer.py — new data builders (_build_dbscan_capped_training_data, _build_feature_sep_training_data), feature-separation logic, expanded run_training() params
+2. tcn_trainer.py (new) — consolidated Siamese TCN + Hybrid TCN module with run_tcn_training() entry point
+3. main.py — new --data-source=dbscan-capped, --cluster-cap, --neg-ratio, --feature-strategy, --neg-matching, --neg-count options on train run; new train tcn subcommand with --model, --epochs, --batch-size, --lr, --patience, --experiment, --run-name
+4. __init__.py — exports run_tcn_training
+
+---
+
+## 2026-02-27: Update best-model choosing score to composite 0.4 × HiP_P + 0.3 × HiP_F1 + 0.3 × AUC all through the repo, e.g.:
+- Experiment scripts (exp6, 7, 7b, 8, 11, 12, 13, 14, 15): replaced max(..., key=x["auc"]) with the composite c9r score
+- corefunc/canon/trainer.py: same (dict-of-dicts style)
+- corefunc/canon/tuner.py run_tuning: replaced opt_prec selection with c9r score
+- corefunc/canon/tuner.py save_best_historical_models: replaced AUC-based comparison with c9r score computed from MLflow metrics (hiprec_precision, hiprec_f1, auc)
 
 ---
 

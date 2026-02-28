@@ -1,7 +1,7 @@
 """
 Unit tests for HTTP.lfAPI pagination and higher-level fetch helpers.
 """
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import pandas as pd
 import pytest
 from HTTP.lfAPI import (

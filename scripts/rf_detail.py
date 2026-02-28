@@ -4,8 +4,6 @@ import sys
 import warnings
 from pathlib import Path
 import numpy as np
-import pandas as pd
-from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, precision_recall_curve, roc_auc_score
@@ -15,7 +13,7 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.run_exp5_filtered import build_filtered_test, build_filtered_train, _add_features
+from scripts.run_exp5_filtered import build_filtered_test, build_filtered_train, _add_features # noqa: E402
 
 
 def main():

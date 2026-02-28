@@ -1,6 +1,5 @@
 """Unit tests for corefunc.data_cleaning (Parquet-based artist dedup and encoding repair)."""
 import pandas as pd
-import pytest
 from corefunc.data_cleaning import (
     _repair_text,
     clean_artist_info,
@@ -77,7 +76,7 @@ class TestFixEncoding:
         assert results["scrobble"] == (0, 2)
 
     def test_repairs_scrobble_bad_chars(self, tmp_pq_dir):
-        """Repairs encoding corruption in scrobble.parquet."""
+        """Repairs encoding corruption in scrobble data."""
         import helpers.io as io_mod
         df = pd.DataFrame({
             "artist_name": ["Good Artist", "Good Artist 2"],
@@ -89,9 +88,11 @@ class TestFixEncoding:
         df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         results = fix_encoding()
         assert results["scrobble"] == (1, 2)
-        # Verifying the repaired value
-        result = pd.read_parquet(io_mod.SCROBBLE_PQ)
-        assert result.loc[0, "track_title"] == "Don\u2019t Cry"
+        # Verifying the repaired value (dump_scrobble_df writes to partitioned dir)
+        from helpers.io import read_scrobble_df
+        result = read_scrobble_df()
+        row = result[result["artist_name"] == "Good Artist"].iloc[0]
+        assert row["track_title"] == "Don\u2019t Cry"
 
     def test_repairs_artist_info_bad_chars(self, tmp_pq_dir):
         """Repairs encoding corruption in artist_info.parquet."""

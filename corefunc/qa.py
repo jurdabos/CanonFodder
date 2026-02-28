@@ -6,6 +6,7 @@ duplicate detection, MBID validation, row-count reconciliation,
 and character-encoding sanity.
 """
 from __future__ import annotations
+import json
 import logging
 import re
 from datetime import datetime, UTC
@@ -13,8 +14,8 @@ from typing import Any
 import pandas as pd
 from helpers.io import (
     SCROBBLE_COLS, ARTIST_INFO_COLS, AVC_COLS, GS_MB_COLS,
-    SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, UC_PQ, GS_MB_PQ, PQ_DIR, QA_REPORT_PQ,
-    UUID_RE, read_parquet, append_to_parquet,
+    ARTIST_INFO_PQ, AVC_PQ, UC_PQ, GS_MB_PQ, PQ_DIR, QA_REPORT_PQ,
+    UUID_RE, read_parquet, append_to_parquet, read_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
@@ -204,7 +205,7 @@ def qa_lb_ingest(
     dict
         Nested QA results keyed by check name.
     """
-    df = read_parquet(SCROBBLE_PQ)
+    df = read_scrobble_df()
     if df is None or df.empty:
         log.warning("scrobble.parquet is empty or missing — QA skipped.")
         return {"status": "skipped", "reason": "no data"}
@@ -510,6 +511,58 @@ def qa_uc(*, source: str | None = None) -> dict[str, Any]:
 PREDICTIONS_LOG_PQ = PQ_DIR / "predictions_log.parquet"
 DRIFT_MEAN_SHIFT_THRESHOLD = 0.10
 DRIFT_AMBIGUOUS_RATIO_THRESHOLD = 2.0
+DRIFT_FEATURE_QUANTILE_THRESHOLD = 0.15
+
+
+def _feature_quantile_drift(
+    baseline: pd.DataFrame,
+    recent: pd.DataFrame,
+    threshold: float = DRIFT_FEATURE_QUANTILE_THRESHOLD,
+) -> tuple[dict[str, dict[str, float]], list[str]]:
+    """
+    Compares median feature values between baseline and recent windows.
+
+    Parses features_json, computes per-feature medians, and flags any
+    feature whose absolute median shift exceeds *threshold*.
+    Returns (quantiles_dict, warnings_list).
+    """
+    quantiles: dict[str, dict[str, float]] = {}
+    warnings: list[str] = []
+    if "features_json" not in baseline.columns or "features_json" not in recent.columns:
+        return quantiles, warnings
+    # Parsing JSON strings into DataFrames
+    try:
+        bl_feats = pd.DataFrame(
+            baseline["features_json"].dropna().apply(json.loads).tolist(),
+        )
+        rc_feats = pd.DataFrame(
+            recent["features_json"].dropna().apply(json.loads).tolist(),
+        )
+    except (json.JSONDecodeError, TypeError):
+        return quantiles, warnings
+    if bl_feats.empty or rc_feats.empty:
+        return quantiles, warnings
+    # Comparing medians for each shared numeric feature
+    shared_cols = sorted(set(bl_feats.columns) & set(rc_feats.columns))
+    for col in shared_cols:
+        bl_series = pd.to_numeric(bl_feats[col], errors="coerce").dropna()
+        rc_series = pd.to_numeric(rc_feats[col], errors="coerce").dropna()
+        if bl_series.empty or rc_series.empty:
+            continue
+        bl_med = float(bl_series.median())
+        rc_med = float(rc_series.median())
+        shift = abs(rc_med - bl_med)
+        quantiles[col] = {
+            "baseline_median": round(bl_med, 4),
+            "recent_median": round(rc_med, 4),
+            "shift": round(shift, 4),
+        }
+        if shift > threshold:
+            warnings.append(
+                f"Feature '{col}' median shifted by {shift:.3f} "
+                f"(baseline={bl_med:.3f}, recent={rc_med:.3f})."
+            )
+    return quantiles, warnings
 
 
 def qa_predictions(
@@ -520,8 +573,8 @@ def qa_predictions(
     """
     Compares recent prediction statistics against a baseline window.
 
-    Checks for data drift by monitoring mean probability shift and
-    ambiguous-band proportion changes.
+    Checks for data drift by monitoring mean probability shift,
+    ambiguous-band proportion changes, and feature quantile shifts.
     Returns a report dict with warnings when thresholds are breached.
     """
     df = read_parquet(PREDICTIONS_LOG_PQ)
@@ -559,6 +612,8 @@ def qa_predictions(
         recent_ambig / baseline_ambig
         if baseline_ambig > 0.01 else 1.0
     )
+    # Computing feature quantile drift
+    feat_quantiles, feat_warnings = _feature_quantile_drift(baseline, recent)
     # Building warnings
     warnings_list: list[str] = []
     if mean_shift > DRIFT_MEAN_SHIFT_THRESHOLD:
@@ -571,6 +626,7 @@ def qa_predictions(
             f"Ambiguous-band proportion grew {ambig_ratio:.1f}x "
             f"(baseline={baseline_ambig:.1%}, recent={recent_ambig:.1%})."
         )
+    warnings_list.extend(feat_warnings)
     report: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
         "target": "predictions",
@@ -582,6 +638,7 @@ def qa_predictions(
         "mean_shift": round(mean_shift, 4),
         "baseline_ambig_rate": round(baseline_ambig, 4),
         "recent_ambig_rate": round(recent_ambig, 4),
+        "feature_quantiles": feat_quantiles,
         "warnings": warnings_list,
         "passed": len(warnings_list) == 0,
     }

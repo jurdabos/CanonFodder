@@ -16,11 +16,6 @@ from rapidfuzz import fuzz
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
-    classification_report,
-    precision_recall_curve,
-    precision_score,
-    recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline
@@ -29,14 +24,14 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from helpers.io import AVC_PQ, PQ_DIR, read_parquet
-from helpers import cluster, stats
-from helpers.device import get_device
-from scripts.run_exp6_dbscan import (
-    add_all_features, prune_features,
-    _optimal_threshold, _evaluate_at_threshold,
-    GS_DBSCAN_PQ, WRATIO_LOWER, WRATIO_UPPER,
-)
+from helpers.io import AVC_PQ, read_parquet # noqa: E402
+from helpers import cluster # noqa: E402
+from helpers.device import get_device # noqa: E402
+from scripts.run_exp6_dbscan import ( # noqa: E402
+    add_all_features, prune_features, # noqa: E402
+    _optimal_threshold, _evaluate_at_threshold, # noqa: E402
+    GS_DBSCAN_PQ, WRATIO_LOWER, WRATIO_UPPER, # noqa: E402
+) # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -48,8 +43,8 @@ NEG_RATIOS = [5, 10, 20, 50]
 
 def subsample_negatives(df: pd.DataFrame, ratio: int) -> pd.DataFrame:
     """Subsamples negatives with stratified WRatio band allocation."""
-    pos = df[df["to_link"] == True].copy()
-    neg = df[df["to_link"] == False].copy()
+    pos = df[df["to_link"].eq(True)].copy()
+    neg = df[df["to_link"].eq(False)].copy()
     n_pos = len(pos)
     target_neg = min(n_pos * ratio, len(neg))
     if len(neg) <= target_neg:
@@ -138,7 +133,7 @@ def main():
     # Building AVC test
     test_raw = build_avc_test()
     log.info("AVC test: %d pairs (pos=%d, neg=%d).",
-             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"] == False).sum())
+             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"].eq(False)).sum())
     # Pre-computing test features once
     log.info("Computing AVC test features...")
     test_df = add_all_features(test_raw)
@@ -181,7 +176,7 @@ def main():
             ratios_seen.append(r["ratio"])
     for ratio in ratios_seen:
         ratio_results = [r for r in all_results if r["ratio"] == ratio]
-        best = max(ratio_results, key=lambda x: x["opt_f1"])
+        best = max(ratio_results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
         print(f"{best['ratio']:<15} {best['model']:<22} {best['auc']:>6.4f} {best['default_f1']:>7.4f} "
               f"{best['opt_thr']:>8.3f} {best['opt_f1']:>7.4f} {best['opt_prec']:>6.3f} {best['opt_rec']:>6.3f} "
               f"{best['hiprec_f1']:>7.4f} {best['hiprec_prec']:>6.3f}")

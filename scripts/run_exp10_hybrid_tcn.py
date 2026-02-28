@@ -15,8 +15,6 @@ from __future__ import annotations
 import itertools
 import logging
 import sys
-import warnings
-from collections import Counter
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -38,11 +36,11 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from corefunc.mb_local import _psql_csv, check_local_mb
-from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet
-from helpers.features import compute_pair_features
-from helpers.stats import length_stats
-from helpers import cluster
+from corefunc.mb_local import _psql_csv, check_local_mb # noqa: E402
+from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet # noqa: E402
+from helpers.features import compute_pair_features # noqa: E402
+from helpers.stats import length_stats # noqa: E402
+from helpers import cluster # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -143,7 +141,7 @@ def step2_assemble_training(positives_all: pd.DataFrame) -> pd.DataFrame:
     log.info("Positives in [%d,%d): %d (of %d total).", WRATIO_LOWER, WRATIO_UPPER, len(positives), len(positives_all))
     # Loading DBSCAN negatives
     dbscan = read_parquet(GS_DBSCAN_PQ)
-    neg_pool = dbscan[dbscan["to_link"] == False].reset_index(drop=True)
+    neg_pool = dbscan[dbscan["to_link"].eq(False)].reset_index(drop=True)
     neg_wr = _compute_wratio_bulk(neg_pool, "negative")
     neg_pool = neg_pool.copy()
     neg_pool["_wr"] = neg_wr

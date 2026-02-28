@@ -10,7 +10,10 @@ import logging
 from pathlib import Path
 import duckdb
 import pandas as pd
-from helpers.io import SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, QA_REPORT_PQ, UC_PQ, ALIAS_SEP
+from helpers.io import (
+    ARTIST_INFO_PQ, AVC_PQ, QA_REPORT_PQ, UC_PQ, ALIAS_SEP,
+    scrobble_data_exists, scrobble_duckdb_from,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,7 @@ def top_artists(n: int = 10) -> pd.DataFrame:
         WITH {_canonical_cte()}
         SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                COUNT(*) AS play_count
-        FROM {_pq(SCROBBLE_PQ)} s
+        FROM {scrobble_duckdb_from()} s
         LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
         WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
         GROUP BY COALESCE(cm.canonical_name, s.artist_name)
@@ -92,7 +95,7 @@ def top_artists(n: int = 10) -> pd.DataFrame:
 def scrobble_count() -> int:
     """Returns the total number of scrobbles."""
     df = query(f"""
-        SELECT COUNT(*) AS cnt FROM {_pq(SCROBBLE_PQ)}
+        SELECT COUNT(*) AS cnt FROM {scrobble_duckdb_from()}
         WHERE artist_name IS NOT NULL AND artist_name != ''
     """)
     return int(df["cnt"].iloc[0]) if not df.empty else 0
@@ -103,7 +106,7 @@ def unique_artists() -> int:
     df = query(f"""
         WITH {_canonical_cte()}
         SELECT COUNT(DISTINCT COALESCE(cm.canonical_name, s.artist_name)) AS cnt
-        FROM {_pq(SCROBBLE_PQ)} s
+        FROM {scrobble_duckdb_from()} s
         LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
         WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
     """)
@@ -116,7 +119,7 @@ def top_albums(n: int = 10) -> pd.DataFrame:
         WITH {_canonical_cte()}
         SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                s.album_title, COUNT(*) AS play_count
-        FROM {_pq(SCROBBLE_PQ)} s
+        FROM {scrobble_duckdb_from()} s
         LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
         WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
           AND s.album_title IS NOT NULL AND s.album_title != ''
@@ -132,7 +135,7 @@ def top_tracks(n: int = 10) -> pd.DataFrame:
         WITH {_canonical_cte()}
         SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                s.track_title, s.album_title, COUNT(*) AS play_count
-        FROM {_pq(SCROBBLE_PQ)} s
+        FROM {scrobble_duckdb_from()} s
         LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
         WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
           AND s.track_title IS NOT NULL AND s.track_title != ''
@@ -148,7 +151,7 @@ def recent_scrobbles(n: int = 10) -> pd.DataFrame:
         WITH {_canonical_cte()}
         SELECT COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                s.track_title, s.album_title, s.play_time
-        FROM {_pq(SCROBBLE_PQ)} s
+        FROM {scrobble_duckdb_from()} s
         LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
         WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
         ORDER BY s.play_time DESC
@@ -176,7 +179,7 @@ def scrobbles_between(start: str, end: str) -> pd.DataFrame:
     """Returns scrobbles within a date range (ISO format strings)."""
     return query(f"""
         SELECT *
-        FROM {_pq(SCROBBLE_PQ)}
+        FROM {scrobble_duckdb_from()}
         WHERE play_time >= '{start}' AND play_time < '{end}'
         ORDER BY play_time
     """)
@@ -226,14 +229,14 @@ def monthly_scrobble_counts() -> pd.DataFrame:
     Result columns: year (int), month (int), scrobble_count (int).
     Ordered by year, month ascending.
     """
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return pd.DataFrame(columns=["year", "month", "scrobble_count"])
     return query(f"""
         SELECT
             EXTRACT(YEAR  FROM play_time)::INT AS year,
             EXTRACT(MONTH FROM play_time)::INT AS month,
             COUNT(*) AS scrobble_count
-        FROM {_pq(SCROBBLE_PQ)}
+        FROM {scrobble_duckdb_from()}
         WHERE artist_name IS NOT NULL AND artist_name != ''
           AND play_time IS NOT NULL
         GROUP BY year, month
@@ -248,7 +251,7 @@ def yearly_top_n_artists(top_n: int = 3) -> pd.DataFrame:
     Result columns: year (int), rank (int), artist_name (str),
     play_count (int).
     """
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return pd.DataFrame(columns=["year", "rank", "artist_name", "play_count"])
     cte = _canonical_cte()
     return query(f"""
@@ -258,7 +261,7 @@ def yearly_top_n_artists(top_n: int = 3) -> pd.DataFrame:
                 EXTRACT(YEAR FROM s.play_time)::INT AS year,
                 COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                 COUNT(*) AS play_count
-            FROM {_pq(SCROBBLE_PQ)} s
+            FROM {scrobble_duckdb_from()} s
             LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
             WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
               AND s.play_time IS NOT NULL
@@ -288,7 +291,7 @@ def listening_clock(granularity: str = "hour") -> pd.DataFrame:
         ``"hour"`` → columns ``hour`` (0–23), ``scrobble_count``.
         ``"weekday"`` → columns ``weekday`` (0=Mon … 6=Sun), ``scrobble_count``.
     """
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         col = "hour" if granularity == "hour" else "weekday"
         return pd.DataFrame(columns=[col, "scrobble_count"])
     if granularity == "weekday":
@@ -297,7 +300,7 @@ def listening_clock(granularity: str = "hour") -> pd.DataFrame:
             SELECT
                 (DAYOFWEEK(play_time) + 6) % 7 AS weekday,
                 COUNT(*) AS scrobble_count
-            FROM {_pq(SCROBBLE_PQ)}
+            FROM {scrobble_duckdb_from()}
             WHERE artist_name IS NOT NULL AND artist_name != ''
               AND play_time IS NOT NULL
             GROUP BY weekday
@@ -307,7 +310,7 @@ def listening_clock(granularity: str = "hour") -> pd.DataFrame:
         SELECT
             EXTRACT(HOUR FROM play_time)::INT AS hour,
             COUNT(*) AS scrobble_count
-        FROM {_pq(SCROBBLE_PQ)}
+        FROM {scrobble_duckdb_from()}
         WHERE artist_name IS NOT NULL AND artist_name != ''
           AND play_time IS NOT NULL
         GROUP BY hour
@@ -321,11 +324,11 @@ def daily_scrobble_dates() -> pd.DataFrame:
 
     Result columns: play_date (date).  Used by streak analysis.
     """
-    if not SCROBBLE_PQ.exists():
+    if not scrobble_data_exists():
         return pd.DataFrame(columns=["play_date"])
     return query(f"""
         SELECT DISTINCT play_time::DATE AS play_date
-        FROM {_pq(SCROBBLE_PQ)}
+        FROM {scrobble_duckdb_from()}
         WHERE artist_name IS NOT NULL AND artist_name != ''
           AND play_time IS NOT NULL
         ORDER BY play_date
@@ -340,12 +343,12 @@ def user_country_scrobble_counts() -> pd.DataFrame:
     the uc.parquet row whose [start_date, end_date] contains play_time.
     Returns columns: country_code (str), scrobble_count (int).
     """
-    if not SCROBBLE_PQ.exists() or not UC_PQ.exists():
+    if not scrobble_data_exists() or not UC_PQ.exists():
         return pd.DataFrame(columns=["country_code", "scrobble_count"])
     return query(f"""
         SELECT uc.country_code,
                COUNT(*) AS scrobble_count
-        FROM {_pq(SCROBBLE_PQ)} s
+        FROM {scrobble_duckdb_from()} s
         JOIN {_pq(UC_PQ)} uc
           ON s.play_time::DATE >= uc.start_date::DATE
          AND (uc.end_date IS NULL OR s.play_time::DATE <= uc.end_date::DATE)
@@ -370,11 +373,11 @@ def user_country_top_entities(top_n: int = 3) -> dict[str, pd.DataFrame]:
         "albums": pd.DataFrame(columns=["country_code", "rank", "artist_name", "album_title", "play_count"]),
         "tracks": pd.DataFrame(columns=["country_code", "rank", "artist_name", "track_title", "album_title", "play_count"]),
     }
-    if not SCROBBLE_PQ.exists() or not UC_PQ.exists():
+    if not scrobble_data_exists() or not UC_PQ.exists():
         return empty
     cte = _canonical_cte()
     uc_join = (
-        f"{_pq(SCROBBLE_PQ)} s"
+        f"{scrobble_duckdb_from()} s"
         f" JOIN {_pq(UC_PQ)} uc"
         f"   ON s.play_time::DATE >= uc.start_date::DATE"
         f"  AND (uc.end_date IS NULL OR s.play_time::DATE <= uc.end_date::DATE)"
@@ -468,7 +471,7 @@ def artist_country_stats() -> pd.DataFrame:
             ai.country,
             COUNT(*) AS play_count,
             COUNT(DISTINCT COALESCE(cm.canonical_name, s.artist_name)) AS artist_count
-        FROM {_pq(SCROBBLE_PQ)} s
+        FROM {scrobble_duckdb_from()} s
         LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
         JOIN {_pq(ARTIST_INFO_PQ)} ai
             ON COALESCE(cm.canonical_name, s.artist_name) = ai.artist_name
