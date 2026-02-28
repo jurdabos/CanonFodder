@@ -344,3 +344,104 @@ def run_experiment(
         print(f"{name:<22} {m['precision']:>9.4f} {m['recall']:>8.4f} {m['f1']:>8.4f} {m['auc']:>8.4f}")
     print("=" * 70)
     return results
+
+
+# ── Holdout experiment (explicit train/test DataFrames) ───────────────────────
+def run_holdout_experiment(
+    *,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    n_folds: int = 10,
+    random_state: int = 47,
+    run_name: str | None = None,
+    models: list[str] | None = None,
+) -> dict[str, dict[str, float]]:
+    """Trains on train_df and evaluates on a fixed test_df (no random split).
+
+    Designed for experiments where the test set is a hand-curated gold
+    standard (e.g. avc.parquet) independent of the training data.
+    Both DataFrames must already contain feature columns and 'to_link'.
+    """
+    experiment.init_experiment()
+    device = get_device()
+    target = "to_link"
+    exclude = {"variants", target, "variant_a", "variant_b", "source", "_key"}
+    num_cols = [c for c in train_df.columns if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")]
+    X_train = train_df[num_cols]
+    y_train = train_df[target].astype(int).values
+    X_test = test_df[num_cols]
+    y_test = test_df[target].astype(int).values
+    spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
+    log.info(
+        "Holdout experiment: %d train, %d test, %d features, spw=%.2f, device=%s",
+        len(X_train), len(X_test), len(num_cols), spw, device,
+    )
+    catalogue = _build_model_catalogue(spw, device, random_state)
+    if models:
+        catalogue = {k: v for k, v in catalogue.items() if k in models}
+    results: dict[str, dict[str, float]] = {}
+    parent_run_name = run_name or "holdout_experiment"
+    with experiment.start_run(run_name=parent_run_name):
+        experiment.log_params({
+            "experiment_type": "holdout",
+            "n_folds": n_folds,
+            "random_state": random_state,
+            "n_features": len(num_cols),
+            "n_train": len(X_train),
+            "n_test": len(X_test),
+            "test_source": "avc_hand_curated",
+            "device_probed": device,
+            "model_count": len(catalogue),
+        })
+        for model_name, clf in catalogue.items():
+            log.info("─── Training %s ───", model_name)
+            with experiment.start_run(run_name=model_name, nested=True):
+                import mlflow
+                mlflow.set_tag("model_type", model_name)
+                safe_params = _safe_get_params(clf)
+                safe_params["device_used"] = device
+                experiment.log_params(safe_params)
+                # Cross-validation on the training set
+                cv_metrics = _cv_evaluate(
+                    clf, X_train, y_train, num_cols,
+                    n_folds=n_folds,
+                    random_state=random_state,
+                    model_name=model_name,
+                )
+                experiment.log_metrics(cv_metrics)
+                # Training final model on full training set
+                pre = ColumnTransformer(
+                    [("num", Pipeline([("scaler", RobustScaler())]), num_cols)],
+                    remainder="drop",
+                    verbose_feature_names_out=False,
+                )
+                pre.set_output(transform="pandas")
+                final_pipeline = Pipeline([("prep", pre), ("clf", clone(clf))])
+                final_pipeline, actual_device = _fit_with_gpu_fallback(
+                    final_pipeline, X_train, y_train, device,
+                )
+                if actual_device != device:
+                    experiment.log_params({"device_fallback": actual_device})
+                # Evaluating on the hand-curated holdout test set
+                test_metrics = _evaluate(final_pipeline, X_test, y_test)
+                experiment.log_metrics(test_metrics)
+                results[model_name] = test_metrics
+                y_pred = final_pipeline.predict(X_test)
+                print(f"\n=== {model_name} (avc holdout) ===")
+                print(classification_report(y_test, y_pred, target_names=["no link", "link"]))
+                print(f"AUC: {test_metrics['auc']:.4f}")
+                experiment.log_confusion_matrix(y_test, y_pred)
+                experiment.log_feature_importance(final_pipeline, num_cols)
+                if model_name not in ("VotingEnsemble", "StackingEnsemble", "BaggingXGB"):
+                    X_test_transformed = final_pipeline.named_steps["prep"].transform(X_test)
+                    experiment.log_shap_summary(final_pipeline, X_test_transformed, num_cols)
+                experiment.log_model(final_pipeline)
+                log.info("%s → F1=%.4f, AUC=%.4f", model_name, test_metrics["f1"], test_metrics["auc"])
+    # Printing summary table
+    print("\n" + "=" * 70)
+    print(f"{'Model':<22} {'Precision':>9} {'Recall':>8} {'F1':>8} {'AUC':>8}")
+    print("-" * 70)
+    for name, m in sorted(results.items(), key=lambda x: x[1]["f1"], reverse=True):
+        print(f"{name:<22} {m['precision']:>9.4f} {m['recall']:>8.4f} {m['f1']:>8.4f} {m['auc']:>8.4f}")
+    print("=" * 70)
+    return results

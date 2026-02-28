@@ -185,18 +185,28 @@ def avc_augment(pos_limit: int, neg_limit: int, similarity_floor: int) -> None:
 @canon.command("human")
 def canon_human() -> None:
     """Tackle undecided artist name variants interactively"""
+    import re
     from corefunc.canon.workflow import undecided_rows, update_avc_decision
     pending = undecided_rows()
     if pending.empty:
         click.echo("No undecided variant groups — all caught up.")
         return
+    # Extracting model probabilities from comment field and sorting descending
+    def _parse_prob(comment: str) -> float:
+        """Extracts probability from 'p=0.XXXX' comment prefix."""
+        m = re.match(r"p=(\d+\.\d+)", str(comment or ""))
+        return float(m.group(1)) if m else 0.0
+    pending["_prob"] = pending["comment"].apply(_parse_prob)
+    pending = pending.sort_values("_prob", ascending=False).reset_index(drop=True)
     total = len(pending)
     click.echo(f"\n{total} undecided variant group(s) to review.\n")
     for i, (_, row) in enumerate(pending.iterrows(), 1):
         variants = [v.strip() for v in str(row["artist_variants_text"]).split("{") if v.strip()]
         if len(variants) < 2:
             continue
-        click.echo(f"\n── ({i} of {total}) ──")
+        prob = row["_prob"]
+        prob_display = f"  [model p={prob:.4f}]" if prob > 0 else ""
+        click.echo(f"\n── ({i} of {total}){prob_display} ──")
         click.echo("These artist names appear to be variants:")
         choices: dict[str, str] = {}
         for j, v in enumerate(variants, 1):
@@ -261,30 +271,16 @@ def canon_experiment(run_name: str | None, augment: bool, folds: int, models: st
 @click.option("--limit", default=2000, type=int, help="Max artists to scan.")
 def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> None:
     """Finds new artist name variant candidates using ML"""
-    from corefunc.canon.workflow import (
-        list_mlflow_runs, load_run_model, discover_candidates, write_new_candidates,
-    )
-    # Listing available models
-    runs = list_mlflow_runs()
-    if not runs:
-        click.echo("No finished MLflow runs found. Train a model first with 'c9r train'.")
+    from corefunc.canon.workflow import discover_candidates, write_new_candidates
+    from helpers.inference import load_model, MODEL_PATH
+    # Loading the persisted LightGBM pipeline
+    try:
+        model = load_model()
+    except FileNotFoundError:
+        click.echo(f"Model not found at {MODEL_PATH}. Train first with 'c9r train'.")
         return
-    click.echo(f"\nAvailable models ({len(runs)}):\n")
-    click.echo(f"  {'#':>3}  {'Run Name':<24}  {'Date':<19}  {'Prec':>6}  {'Rec':>6}  {'F1':>6}  {'AUC':>6}")
-    click.echo(f"  {'─' * 3}  {'─' * 24}  {'─' * 19}  {'─' * 6}  {'─' * 6}  {'─' * 6}  {'─' * 6}")
-    for j, run in enumerate(runs, 1):
-        click.echo(
-            f"  {j:>3}  {run['run_name']:<24}  {run['start_time']:<19}"
-            f"  {run['precision']:>6.4f}  {run['recall']:>6.4f}  {run['f1']:>6.4f}  {run['auc']:>6.4f}"
-        )
-    choice = click.prompt("\nSelect model number", type=int, default=1)
-    if choice < 1 or choice > len(runs):
-        click.echo("Invalid selection.")
-        return
-    selected = runs[choice - 1]
-    click.echo(f"\nLoading model from run '{selected['run_name']}' …")
-    model = load_run_model(selected["run_id"])
-    click.echo(f"Scanning for new variant candidates (cutoff={cutoff}, threshold={threshold}) …")
+    click.echo(f"Model loaded ({len(model.feature_names_in_)} features).")
+    click.echo(f"Scanning for variant candidates (cutoff={cutoff}, threshold={threshold}) …")
     candidates = discover_candidates(
         model, wratio_cutoff=cutoff, proba_threshold=threshold,
         min_plays=min_plays, limit=limit,
@@ -294,7 +290,8 @@ def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> 
         return
     click.echo(f"\nFound {len(candidates)} new candidate group(s):")
     for c in candidates[:20]:
-        click.echo(f"  {' ↔ '.join(c['variants'])}")
+        prob_str = f"  (p={c['max_prob']:.4f})" if "max_prob" in c else ""
+        click.echo(f"  {' ↔ '.join(c['variants'])}{prob_str}")
     if len(candidates) > 20:
         click.echo(f"  … and {len(candidates) - 20} more.")
     if click.confirm("\nAdd these to avc.parquet for human review?", default=True):
@@ -304,17 +301,130 @@ def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> 
         click.echo("Cancelled.")
 
 
-# ── train ──────────────────────────────────────────────────────────────────────
+# ── train (command group) ──────────────────────────────────────────────────────────
+_DATA_SOURCE_CHOICES = click.Choice(
+    ["avc", "mbdb", "mbdb-max", "dbscan", "mixed"], case_sensitive=False,
+)
+_SPLIT_CHOICES = click.Choice(["pair", "group"], case_sensitive=False)
+_TEST_SOURCE_CHOICES = click.Choice(["holdout", "avc-full"], case_sensitive=False)
+_FEATURE_CHOICES = click.Choice(["base", "interaction", "full"], case_sensitive=False)
+_CAT_SOURCE_CHOICES = click.Choice(
+    ["none", "scrobble", "mbdb", "unified"], case_sensitive=False,
+)
+_CAT_DESIGN_CHOICES = click.Choice(["proportional", "presence"], case_sensitive=False)
+
+
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def train(ctx: click.Context) -> None:
+    """Train canonisation models — see subcommands"""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@train.command("run")
+@click.option("--run-name", default=None, help="MLflow parent run name (auto-generated if omitted).")
+@click.option("--folds", default=5, type=int, help="Number of CV folds.")
+@click.option("--test-size", default=0.20, type=float, help="Held-out test fraction.")
+@click.option("--models", default=None, help="Comma-separated model names (default: all 5 tree-based).")
+@click.option("--catalogue/--no-catalogue", default=True, help="Include catalogue features.")
+@click.option("--data-source", type=_DATA_SOURCE_CHOICES, default="avc", help="Training data origin.")
+@click.option("--split", "split_strategy", type=_SPLIT_CHOICES, default="pair", help="Split strategy (pair or group level).")
+@click.option("--test-source", type=_TEST_SOURCE_CHOICES, default="holdout", help="Test data origin (holdout from split, or full AVC).")
+@click.option("--features", type=_FEATURE_CHOICES, default="full", help="Feature tiers: base (23), interaction (53), full (71).")
+@click.option("--catalogue-source", type=_CAT_SOURCE_CHOICES, default="unified", help="Catalogue data origin.")
+@click.option("--catalogue-design", type=_CAT_DESIGN_CHOICES, default="presence", help="Catalogue feature style.")
+@click.option("--group-features/--no-group-features", default=False, help="Include group-level length_stats features.")
+@click.option("--wratio-lower", default=60, type=int, help="WRatio band lower bound.")
+@click.option("--wratio-upper", default=100, type=int, help="WRatio band upper bound.")
+@click.option("--experiment", "experiment_num", default=None, type=int, help="Experiment number for backfill labelling.")
+@click.option("--include-composites", is_flag=True, help="Include composite models (Voting, Stacking, Bagging).")
+def train_run(
+    run_name: str | None,
+    folds: int,
+    test_size: float,
+    models: str | None,
+    catalogue: bool,
+    data_source: str,
+    split_strategy: str,
+    test_source: str,
+    features: str,
+    catalogue_source: str,
+    catalogue_design: str,
+    group_features: bool,
+    wratio_lower: int,
+    wratio_upper: int,
+    experiment_num: int | None,
+    include_composites: bool,
+) -> None:
+    """Train canonisation models (unified pipeline with MLflow tracking)"""
+    from corefunc.canon.trainer import run_training
+    model_list = [m.strip() for m in models.split(",")] if models else None
+    cat_label = " +catalogue" if catalogue and features == "full" else " (no catalogue)"
+    click.echo(
+        f"Training pipeline — data={data_source}, split={split_strategy}, "
+        f"features={features}{cat_label}, {folds}-fold CV …"
+    )
+    if model_list:
+        click.echo(f"Models: {', '.join(model_list)}")
+    run_training(
+        run_name=run_name,
+        n_folds=folds,
+        test_size=test_size,
+        models=model_list,
+        catalogue=catalogue,
+        data_source=data_source,
+        split_strategy=split_strategy,
+        test_source=test_source,
+        features=features,
+        catalogue_source=catalogue_source,
+        catalogue_design=catalogue_design,
+        group_features=group_features,
+        wratio_lower=wratio_lower,
+        wratio_upper=wratio_upper,
+        experiment_num=experiment_num,
+        include_composites=include_composites,
+    )
+    click.echo("\nTraining complete. View results with 'c9r mlflow-ui'.")
+
+
+# ── tune ───────────────────────────────────────────────────────────────────────
 @cli.command()
-@click.option("--run-name", default=None, help="MLflow run name for this training session.")
-@click.option("--augment/--no-augment", default=False, help="Include MBDB pairs from gs_mb.parquet.")
-def train(run_name: str | None, augment: bool) -> None:
-    """Train a canonisation model"""
-    from corefunc.canon.model import train_model
-    label = " (with MBDB augmentation)" if augment else ""
-    click.echo(f"Training XGBoost model{label} …")
-    train_model(run_name=run_name, augment=augment)
-    click.echo("Done.")
+@click.option("--run-name", default=None, help="MLflow parent run name (auto-generated if omitted).")
+@click.option("--models", default=None, help="Comma-separated model names (default: LightGBM,XGBoost,ExtraTrees).")
+@click.option("--trials", default=60, type=int, help="Optuna trials per model.")
+@click.option("--folds", default=3, type=int, help="CV folds for tuning inner loop.")
+@click.option("--test-size", default=0.20, type=float, help="Held-out test fraction.")
+@click.option("--min-precision", default=0.90, type=float, help="Precision floor for the objective.")
+@click.option("--catalogue/--no-catalogue", default=True, help="Include catalogue features.")
+def tune(
+    run_name: str | None,
+    models: str | None,
+    trials: int,
+    folds: int,
+    test_size: float,
+    min_precision: float,
+    catalogue: bool,
+) -> None:
+    """Optuna hyperparameter tuning with precision-biased objective"""
+    from corefunc.canon.tuner import run_tuning
+    model_list = [m.strip() for m in models.split(",")] if models else None
+    click.echo(
+        f"Optuna tuning — {trials} trials/model, {folds}-fold CV, "
+        f"min_precision={min_precision} …"
+    )
+    if model_list:
+        click.echo(f"Models: {', '.join(model_list)}")
+    run_tuning(
+        run_name=run_name,
+        models=model_list,
+        n_trials=trials,
+        n_folds=folds,
+        test_size=test_size,
+        min_precision=min_precision,
+        catalogue=catalogue,
+    )
+    click.echo("\nTuning complete. View results with 'c9r mlflow-ui'.")
 
 
 # ── mlflow-ui ──────────────────────────────────────────────────────────────────

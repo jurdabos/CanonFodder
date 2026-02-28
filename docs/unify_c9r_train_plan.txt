@@ -1,0 +1,36 @@
+Unified Training Pipeline for c9r train
+Problem
+The current c9r train (via corefunc/canon/model.py:train_model()) is a legacy single-model XGBoost trainer with no catalogue features, no per-fold tracking, no threshold sweep, and an --augment flag for a MBDB-mixing strategy that Experiments 4–12 proved harmful.  Meanwhile, Experiments 13–15 run as standalone scripts in scripts/ with their own feature engineering, data splitting, and evaluation — but with inconsistent MLflow integration and no way to invoke them from the CLI.
+Design Decisions (from 15 experiments)
+Data split: AVC pair-level flattening + stratified pair-level split (Exp 14/15).  This avoids both the domain gap of MBDB training (Exp 4–12) and the group-level n_variants leakage of Exp 13.  WRatio [60, 100) filter is standard.
+Features (3 tiers + interactions + catalogue):
+(A–C) Base 23 from compute_pair_features() — whole-string, token, character
+Interaction 30 — pairwise diffs/products of 6 similarity scores
+Catalogue 18 — Exp 15 presence-and-quality design (best_match_score, top3_avg, any_exact, n_exact, n_matches at 70/80/90, log_fuzzy, min_count × 2 domains)
+NO group-level length_stats() (dropped since Exp 14)
+Variance (0.001) + correlation (0.95) pruning via stats.py
+Models: 5 tree-based only (XGBoost, RF, ExtraTrees, LightGBM, GradientBoosting).  Composites dropped after Exp 8.
+Evaluation: k-fold stratified CV with per-fold MLflow nested runs, plus held-out test eval at 3 operating points (default 0.5, F1-optimal, high-precision P≥0.80).  Confusion matrix, feature importance, SHAP artefacts logged.
+MLflow: Pre-verify tracking URI before any training.  Log experiment number (auto-incrementing), experiment_type, all data/feature/model params.
+Changes
+1. New corefunc/canon/trainer.py
+New unified training module with:
+verify_mlflow() — tests that MLflow tracking URI is reachable and writable by starting + ending a dummy run.  Called before any training.
+build_training_data() — AVC pair-level flatten → WRatio filter → stratified split.  Returns (train_df, test_df).
+compute_all_features(df, name_to_albums, name_to_tracks) — base 23 + interaction 30 + presence catalogue 18.  Reuses logic from run_exp15_presence_features.py.
+prune_feature_columns(X) — variance + correlation pruning via stats.py.
+run_training(...) — main entry point.  For each of 5 models: k-fold CV with per-fold MLflow nested runs, fit final model on full training set, evaluate on held-out test at 3 operating points.  Logs params, metrics, artefacts.  Saves best model to ML/.
+Data sources for catalogue: unified MBID→MBDB + scrobble fallback from Exp 14/15 (reads mbdb_discography_solo.parquet if present, falls back to scrobble-only).
+2. Updated CLI in main.py
+Replace current c9r train options:
+c9r train [OPTIONS]
+  --run-name TEXT         MLflow run name (default: auto-generated)
+  --folds INT             CV folds (default: 5)
+  --test-size FLOAT       Held-out test fraction (default: 0.20)
+  --models TEXT           Comma-separated model names (default: all 5)
+  --catalogue / --no-catalogue  Include catalogue features (default: yes)
+Remove --augment (obsolete).
+3. Updated corefunc/canon/__init__.py
+Export the new run_training function alongside existing exports.
+4. Keep backward compatibility
+The old model.py:train_model() stays untouched (used by canon machine for single-model quick training).  The new trainer is the primary path for experiment-grade training.

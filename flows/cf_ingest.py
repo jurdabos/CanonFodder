@@ -108,6 +108,36 @@ def clean_artists() -> tuple[int, int]:
     return removed, remaining
 
 
+@task(
+    name="canonise_batch",
+    description="Discovers and flags artist name variant candidates using the ML model.",
+    retries=0,
+    log_prints=True,
+)
+def canonise_batch() -> dict[str, int]:
+    """Runs batch canonisation; returns counts.
+
+    Loads the persisted LightGBM pipeline in-process (no HTTP dependency).
+    Exits gracefully when the model pickle is missing.
+    """
+    from corefunc.canon.workflow import discover_candidates, write_new_candidates
+    logger = get_run_logger()
+    try:
+        from helpers.inference import load_model
+        model = load_model()
+    except FileNotFoundError as exc:
+        logger.warning("Canonisation skipped — model not available: %s", exc)
+        return {"flagged_for_review": 0, "skipped": 0}
+    logger.info("Running batch canonisation (%d features).", len(model.feature_names_in_))
+    candidates = discover_candidates(model)
+    if not candidates:
+        logger.info("No new variant candidates found.")
+        return {"flagged_for_review": 0, "skipped": 0}
+    written = write_new_candidates(candidates)
+    logger.info("Flagged %d candidate group(s) for human review.", written)
+    return {"flagged_for_review": written, "skipped": 0}
+
+
 @flow(
     name="c9r_ingest",
     description="Weekly c9r scrobble-ingestion pipeline.",
@@ -118,7 +148,7 @@ def weekly_ingest_flow(*, full: bool = False, source: str | None = None) -> dict
     """
     Orchestrates the weekly ingestion pipeline.
 
-    Steps: fetch → enrich → clean.
+    Steps: fetch → fix-encoding → enrich → clean → canonise.
     """
     logger = get_run_logger()
     start = datetime.now(UTC)
@@ -139,6 +169,8 @@ def weekly_ingest_flow(*, full: bool = False, source: str | None = None) -> dict
     encoding_fixed = sum(r[0] for r in enc_results.values())
     enriched = enrich_artists()
     removed, remaining = clean_artists()
+    # Appending canonisation as the 5th step
+    canon_result = canonise_batch()
     end = datetime.now(UTC)
     duration = end - start
     logger.info("Flow finished in %s.", duration)
@@ -148,6 +180,8 @@ def weekly_ingest_flow(*, full: bool = False, source: str | None = None) -> dict
         "enriched_artists": enriched,
         "cleaned": removed,
         "remaining": remaining,
+        "flagged_for_review": canon_result["flagged_for_review"],
+        "skipped": canon_result["skipped"],
         "duration": str(duration),
     }
 

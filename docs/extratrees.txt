@@ -1,0 +1,10 @@
+Extra-Trees (Extremely Randomized Trees) is an ensemble method closely related to Random Forest, introduced by Geurts, Ernst & Wehenkel (2006). The key differences from Random Forest lie in how splits are chosen:
+
+**How it differs from Random Forest:**
+In a standard Random Forest, each tree is built on a bootstrap sample and finds the *best* split among a random subset of features. Extra-Trees goes further in two ways: it typically uses the **whole training set** (no bootstrap sampling by default), and for each candidate feature it picks a **random split threshold** rather than searching for the optimal one. The best of these random splits is then selected.
+
+This extra layer of randomization has practical consequences. Training is **faster** because there's no expensive optimal-split search. The added randomness also tends to **reduce variance** more aggressively than Random Forest, though it may slightly increase bias. In practice, the two often perform comparably, but Extra-Trees can shine when you want speed or when overfitting is a concern.
+
+In scikit-learn, the implementations are `ExtraTreesClassifier` and `ExtraTreesRegressor`. The API mirrors `RandomForestClassifier`/`RandomForestRegressor` almost exactly, so swapping one for the other in an experiment is trivial — just change the class name.
+
+Given your record linkage work, Extra-Trees could be worth benchmarking alongside your XGBoost and Random Forest pipelines. The speed advantage is nice during feature engineering iteration, and the stronger regularization effect might help if you encounter overfitting on your similarity-score features.

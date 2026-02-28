@@ -14,8 +14,16 @@ from helpers.io import GS_MB_PQ, dump_parquet
 log = logging.getLogger(__name__)
 # Alias types to include (1 = Artist name, 3 = Search hint; excludes 2 = Legal name)
 _ALIAS_TYPES = "(1, 3)"
-_EXACT_NEG_CAP = 500
-_NAME_POOL_SIZE = 10_000
+
+
+def _exact_neg_cap(neg_limit: int) -> int:
+    """Scales same-name negative cap proportionally to the requested limit."""
+    return max(200, min(neg_limit // 15, 1000))
+
+
+def _name_pool_size(neg_limit: int) -> int:
+    """Scales the fuzzy-negative name pool to at least 2x the requested limit."""
+    return max(10_000, neg_limit * 2)
 
 
 def extract_positive_pairs(limit: int = 5000) -> pd.DataFrame:
@@ -24,8 +32,11 @@ def extract_positive_pairs(limit: int = 5000) -> pd.DataFrame:
 
     Excludes Legal name aliases (type 2) which map real names to stage names
     and would teach the model to link genuinely different-looking strings.
+    When limit > 10 000, supplements with cross-alias pairs (alias_a ↔ alias_b
+    of the same artist) to improve training diversity.
     Returns a DataFrame with variant_a, variant_b, to_link, source columns.
     """
+    # ── Primary source: alias → canonical ─────────────────────────────────
     sql = f"""\
 SELECT a.name  AS canonical,
        aa.name AS alias
@@ -36,14 +47,50 @@ WHERE a.name != aa.name
 ORDER BY RANDOM()
 LIMIT {limit}"""
     df = _psql_csv(sql)
+    frames: list[pd.DataFrame] = []
     if df.empty:
-        log.warning("No positive pairs returned from MBDB.")
+        log.warning("No primary positive pairs returned from MBDB.")
+    else:
+        df = df.rename(columns={"alias": "variant_a", "canonical": "variant_b"})
+        df["to_link"] = True
+        df["source"] = "mb_alias"
+        frames.append(df[["variant_a", "variant_b", "to_link", "source"]])
+        log.info("Primary: %d alias→canonical positive pairs.", len(df))
+    # ── Secondary source: cross-alias pairs (alias_a ↔ alias_b) ──────────
+    primary_count = len(frames[0]) if frames else 0
+    cross_budget = max(0, limit - primary_count)
+    if cross_budget >= 500:
+        cross_limit = min(cross_budget, limit // 3)
+        sql_cross = f"""\
+SELECT aa1.name AS alias_a,
+       aa2.name AS alias_b
+FROM musicbrainz.artist_alias aa1
+JOIN musicbrainz.artist_alias aa2
+     ON aa1.artist = aa2.artist AND aa1.id < aa2.id
+WHERE aa1.name != aa2.name
+  AND (aa1.type IS NULL OR aa1.type IN {_ALIAS_TYPES})
+  AND (aa2.type IS NULL OR aa2.type IN {_ALIAS_TYPES})
+ORDER BY RANDOM()
+LIMIT {cross_limit}"""
+        cross_df = _psql_csv(sql_cross)
+        if not cross_df.empty:
+            cross_df = cross_df.rename(columns={"alias_a": "variant_a", "alias_b": "variant_b"})
+            cross_df["to_link"] = True
+            cross_df["source"] = "mb_cross_alias"
+            frames.append(cross_df[["variant_a", "variant_b", "to_link", "source"]])
+            log.info("Cross-alias: %d positive pairs.", len(cross_df))
+    if not frames:
         return pd.DataFrame(columns=["variant_a", "variant_b", "to_link", "source"])
-    df = df.rename(columns={"alias": "variant_a", "canonical": "variant_b"})
-    df["to_link"] = True
-    df["source"] = "mb_alias"
-    log.info("Extracted %d positive pairs from MBDB aliases.", len(df))
-    return df[["variant_a", "variant_b", "to_link", "source"]]
+    combined = pd.concat(frames, ignore_index=True)
+    # Dropping rows with missing variant names
+    combined = combined.dropna(subset=["variant_a", "variant_b"])
+    # Deduplicating pairs (order-insensitive)
+    combined["_key"] = combined.apply(
+        lambda r: tuple(sorted([str(r["variant_a"]), str(r["variant_b"])])), axis=1,
+    )
+    combined = combined.drop_duplicates(subset=["_key"]).drop(columns=["_key"])
+    log.info("Extracted %d total positive pairs from MBDB.", len(combined))
+    return combined.head(limit).reset_index(drop=True)
 
 
 def extract_negative_pairs(
@@ -54,14 +101,14 @@ def extract_negative_pairs(
     Generates negative (to_link=False) pairs from MBDB in two phases.
 
     Phase A — same-name negatives: pairs of different artists sharing an
-    identical name, capped at _EXACT_NEG_CAP.
+    identical name, capped adaptively based on the requested limit.
     Phase B — hard negatives: pulls a pool of distinct artist names and
     uses RapidFuzz to find cross-artist pairs with WRatio >= similarity_floor.
     Returns a DataFrame with variant_a, variant_b, to_link, source columns.
     """
     frames: list[pd.DataFrame] = []
     # ── Phase A: same-name negatives ──────────────────────────────────────
-    exact_limit = min(_EXACT_NEG_CAP, limit)
+    exact_limit = _exact_neg_cap(limit)
     sql_exact = f"""\
 SELECT DISTINCT ON (a1.name)
        a1.name AS name_a,
@@ -70,7 +117,7 @@ FROM musicbrainz.artist a1
 JOIN musicbrainz.artist a2
      ON a1.name = a2.name AND a1.id < a2.id
 WHERE length(a1.name) >= 3
-ORDER BY a1.name
+ORDER BY a1.name, RANDOM()
 LIMIT {exact_limit}"""
     exact_df = _psql_csv(sql_exact)
     if not exact_df.empty:
@@ -83,7 +130,7 @@ LIMIT {exact_limit}"""
     # ── Phase B: hard negatives via RapidFuzz ─────────────────────────────
     remaining = limit - phase_a_count
     if remaining > 0:
-        fuzzy_df = _generate_hard_negatives(remaining, similarity_floor)
+        fuzzy_df = _generate_hard_negatives(remaining, similarity_floor, limit)
         if not fuzzy_df.empty:
             frames.append(fuzzy_df)
             log.info("Phase B: %d hard-negative pairs.", len(fuzzy_df))
@@ -95,6 +142,7 @@ LIMIT {exact_limit}"""
 def _generate_hard_negatives(
     limit: int,
     similarity_floor: int,
+    neg_limit: int,
 ) -> pd.DataFrame:
     """
     Pulls a MBID-keyed pool of artist names from MBDB and uses RapidFuzz
@@ -102,7 +150,9 @@ def _generate_hard_negatives(
 
     Only keeps pairs where the two names map to different MBIDs, so every
     hard negative is verified as genuinely different artists.
+    Pool size scales with the requested neg_limit for better yield.
     """
+    pool_size = _name_pool_size(neg_limit)
     # Pulling a diverse (name, mbid) pool — artists with at least a few credits
     sql_pool = f"""\
 SELECT a.name, a.gid::text AS mbid
@@ -113,7 +163,7 @@ WHERE length(a.name) >= 3
 GROUP BY a.name, a.gid
 HAVING COUNT(DISTINCT acn.artist_credit) >= 2
 ORDER BY RANDOM()
-LIMIT {_NAME_POOL_SIZE}"""
+LIMIT {pool_size}"""
     pool_df = _psql_csv(sql_pool)
     if pool_df.empty or len(pool_df) < 10:
         log.warning("Name pool too small for hard-negative generation.")

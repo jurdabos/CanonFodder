@@ -2,6 +2,58 @@
 
 All notable changes to c9r (CanonFodder) in reverse chronological order.
 
+---
+
+## 2026-02-27: c9r train options expanded
+- main.py — c9r train is now a command group. c9r train run exposes 11 new options beyond the existing 5:  --data-source, --split, --test-source, --features, --catalogue-source, --catalogue-design, --group-features, --wratio-lower, --wratio-upper, --experiment, --include-composites.
+- corefunc/canon/trainer.py — run_training() accepts all new parameters and dispatches to the correct data builder, feature computation, and catalogue design. New functions:
+  - _dispatch_data_build() — routes to the right data source
+  - _build_mbdb_training_data() (Exp 4–5), _build_dbscan_training_data() (Exp 6–8), _build_mbdb_max_training_data() (Exp 11–12), _build_mixed_training_data() (Exp 1–3), _build_avc_group_split() (Exp 13), _build_avc_full_test() (cross-domain test)
+  - _load_scrobble_only_lookups() — scrobble-only catalogue (Exp 13)
+  - _add_proportional_catalogue_features() — Jaccard/fuzzy_ratio catalogue design (Exp 12–13)
+  - _compute_features_for_split() — dispatches base / interaction / full features
+  - _add_base_features_only() — base 23 without interaction terms
+
+---
+
+## 2026-02-27: Integration added
+- New file: helpers/inference.py — Single-pair feature engineering for inference. Produces all 63 raw features (base 23 + interaction 30 + catalogue 10) so any pruned model pickle can select its subset via feature_names_in_. Includes session-level catalogue cache (MBDB solo-credit + scrobble fallback) and load_model() helper. Smoke test confirms all 41 features the Exp 15 LightGBM expects are covered, with correct predictions (Beatles/The Beatles → p=0.994, Mozart/Metallica → p≈0.000).
+- Updated corefunc/model_server.py — Replaced XGBoost load_model() + separate xgb_columns.json with a single pickle.load() of the self-contained Pipeline. The pipeline carries its own column order in feature_names_in_.
+- Updated corefunc/canon/workflow.py — discover_candidates() now uses compute_inference_features() for full 41-feature scoring instead of the old 6-feature fuzzy_scores(). Loads the pickle directly when no model is passed. Every prediction is logged to PQ/predictions_log.parquet (timestamp, pair, probability). Model probability stored in AVC comment field as p=0.XXXX. Results sorted by descending probability.
+- Updated main.py — canon machine simplified: loads pickle directly, no MLflow run selection UI. Shows probability alongside each candidate. canon human now parses p=X.XXXX from the comment field, sorts groups by descending probability, and displays [model p=X.XXXX] in the review prompt.
+- Updated flows/cf_ingest.py — Added canonise_batch as the 5th Prefect task. Loads the pickle in-process (no HTTP dependency). Gracefully skips when the pickle is missing. Flow returns flagged_for_review and skipped counts.
+- Updated corefunc/qa.py — Added qa_predictions() for drift detection. Compares baseline vs recent prediction windows on mean probability shift (threshold: 0.10) and ambiguous-band proportion growth (threshold: 2×).
+
+---
+
+## 2026-02-27: c9r tune added
+### Historical model pickles saved (5 best-AUC models from Exp 14-16):
+- extratrees_best.pkl — AUC=0.980, opt_P=0.837
+- lightgbm_best.pkl — AUC=0.979, opt_P=0.923
+- xgboost_best.pkl — AUC=0.977, opt_P=0.864
+- randomforest_best.pkl — AUC=0.980, opt_P=0.826
+- gradientboosting_best.pkl — AUC=0.965, opt_P=0.780
+### Optuna tuning pipeline verified end-to-end (5-trial smoke test on LightGBM):
+- Best trial scored 0.944 (mean CV precision=0.944, worst fold=0.909)
+- Tuned model: lightgbm_tuned.pkl — AUC=0.967, opt_P=0.919
+### New files/changes:
+- corefunc/canon/tuner.py — Optuna tuning module with precision-biased objective (mean_precision - 0.5 * penalty), search spaces for LightGBM/XGBoost/ExtraTrees, post-tuning retrain with full 5-fold CV + MLflow logging, and save_best_historical_models() for pickle export.
+- main.py — new c9r tune command with --models, --trials, --folds, --min-precision, --catalogue/--no-catalogue.
+- corefunc/canon/__init__.py — exports run_tuning.
+
+---
+
+## 2026-02-27: Tier 3 of c9r enrich is added (for enrich --rebuild)
+### Example run:
+- Tier 1: 15,805 artists by MBID (13,118 unique MBIDs)
+- Tier 2: 6 artists by exact name match
+- Tier 3: 37 artists by catalogue overlap
+- Stubs: 4,953 truly unresolved
+- Coverage: 76.2% of artist_info entries have MBID; 90.1% of scrobble rows have MBID
+- Backfill: 678 MBIDs propagated into scrobble.parquet
+
+---
+
 ## 2026-02-25 – Adding country_code filter list to profile uc
 - corefunc/profile.py — user_country_medal_profile now accepts an optional country_codes: list[str] | None. When provided, it filters the scrobble counts to only those ISO-2 codes (case-insensitive) instead of using the top-ucn by volume.
 - main.py — Added -c option to profile uc plus a _parse_country_codes helper that accepts both HU,ES,DK and (HU, ES, DK) formats.

@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 from helpers.io import (
     SCROBBLE_COLS, ARTIST_INFO_COLS, AVC_COLS, GS_MB_COLS,
-    SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, UC_PQ, GS_MB_PQ, QA_REPORT_PQ,
+    SCROBBLE_PQ, ARTIST_INFO_PQ, AVC_PQ, UC_PQ, GS_MB_PQ, PQ_DIR, QA_REPORT_PQ,
     UUID_RE, read_parquet, append_to_parquet,
 )
 
@@ -503,4 +503,91 @@ def qa_uc(*, source: str | None = None) -> dict[str, Any]:
         "passed": True,
     }
     _persist_report(report)
+    return report
+
+
+# ── predictions QA (drift detection) ─────────────────────────────────────────
+PREDICTIONS_LOG_PQ = PQ_DIR / "predictions_log.parquet"
+DRIFT_MEAN_SHIFT_THRESHOLD = 0.10
+DRIFT_AMBIGUOUS_RATIO_THRESHOLD = 2.0
+
+
+def qa_predictions(
+    *,
+    baseline_days: int = 30,
+    recent_days: int = 7,
+) -> dict[str, Any]:
+    """
+    Compares recent prediction statistics against a baseline window.
+
+    Checks for data drift by monitoring mean probability shift and
+    ambiguous-band proportion changes.
+    Returns a report dict with warnings when thresholds are breached.
+    """
+    df = read_parquet(PREDICTIONS_LOG_PQ)
+    if df is None or df.empty:
+        log.info("predictions_log.parquet is empty — drift check skipped.")
+        return {"status": "skipped", "reason": "no predictions logged"}
+    if "timestamp" not in df.columns or "probability" not in df.columns:
+        return {"status": "skipped", "reason": "missing required columns"}
+    now = pd.Timestamp.now(tz="UTC")
+    baseline_cutoff = now - pd.Timedelta(days=baseline_days)
+    recent_cutoff = now - pd.Timedelta(days=recent_days)
+    # Ensuring timestamp is tz-aware for comparison
+    ts = pd.to_datetime(df["timestamp"], utc=True)
+    baseline = df[(ts >= baseline_cutoff) & (ts < recent_cutoff)]
+    recent = df[ts >= recent_cutoff]
+    if baseline.empty or recent.empty:
+        return {
+            "status": "insufficient_data",
+            "total_predictions": len(df),
+            "baseline_count": len(baseline),
+            "recent_count": len(recent),
+        }
+    # Computing summary statistics
+    baseline_mean = float(baseline["probability"].mean())
+    recent_mean = float(recent["probability"].mean())
+    mean_shift = abs(recent_mean - baseline_mean)
+    # Ambiguous-band proportion (0.2 ≤ p < 0.8)
+    baseline_ambig = float((
+        (baseline["probability"] >= 0.2) & (baseline["probability"] < 0.8)
+    ).mean())
+    recent_ambig = float((
+        (recent["probability"] >= 0.2) & (recent["probability"] < 0.8)
+    ).mean())
+    ambig_ratio = (
+        recent_ambig / baseline_ambig
+        if baseline_ambig > 0.01 else 1.0
+    )
+    # Building warnings
+    warnings_list: list[str] = []
+    if mean_shift > DRIFT_MEAN_SHIFT_THRESHOLD:
+        warnings_list.append(
+            f"Mean probability shifted by {mean_shift:.3f} "
+            f"(baseline={baseline_mean:.3f}, recent={recent_mean:.3f})."
+        )
+    if ambig_ratio > DRIFT_AMBIGUOUS_RATIO_THRESHOLD:
+        warnings_list.append(
+            f"Ambiguous-band proportion grew {ambig_ratio:.1f}x "
+            f"(baseline={baseline_ambig:.1%}, recent={recent_ambig:.1%})."
+        )
+    report: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "target": "predictions",
+        "total_predictions": len(df),
+        "baseline_count": len(baseline),
+        "recent_count": len(recent),
+        "baseline_mean_prob": round(baseline_mean, 4),
+        "recent_mean_prob": round(recent_mean, 4),
+        "mean_shift": round(mean_shift, 4),
+        "baseline_ambig_rate": round(baseline_ambig, 4),
+        "recent_ambig_rate": round(recent_ambig, 4),
+        "warnings": warnings_list,
+        "passed": len(warnings_list) == 0,
+    }
+    if warnings_list:
+        for w in warnings_list:
+            log.warning("Drift detected: %s", w)
+    else:
+        log.info("Prediction drift check passed.")
     return report

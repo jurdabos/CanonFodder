@@ -151,7 +151,7 @@ class TestGenerateHardNegatives:
         ]
         mock_csv.return_value = pd.DataFrame(pool)
         from corefunc.canon.augment import _generate_hard_negatives
-        result = _generate_hard_negatives(limit=10, similarity_floor=60)
+        result = _generate_hard_negatives(limit=10, similarity_floor=60, neg_limit=10)
         assert not result.empty
         assert (result["to_link"] == False).all()  # noqa: E712
         assert (result["source"] == "mb_neg_fuzzy").all()
@@ -161,7 +161,7 @@ class TestGenerateHardNegatives:
         """Returns empty when the name pool is too small."""
         mock_csv.return_value = pd.DataFrame({"name": ["A", "B"], "mbid": ["m1", "m2"]})
         from corefunc.canon.augment import _generate_hard_negatives
-        result = _generate_hard_negatives(limit=10, similarity_floor=60)
+        result = _generate_hard_negatives(limit=10, similarity_floor=60, neg_limit=10)
         assert result.empty
 
     @patch("corefunc.canon.augment._psql_csv")
@@ -177,7 +177,7 @@ class TestGenerateHardNegatives:
         ]
         mock_csv.return_value = pd.DataFrame(pool)
         from corefunc.canon.augment import _generate_hard_negatives
-        result = _generate_hard_negatives(limit=10, similarity_floor=60)
+        result = _generate_hard_negatives(limit=10, similarity_floor=60, neg_limit=10)
         assert result.empty
 
 

@@ -1,5 +1,5 @@
 """
-FastAPI server for serving the XGBoost artist-name canonisation model.
+FastAPI server for serving the artist-name canonisation model.
 
 Endpoints
 ---------
@@ -8,44 +8,28 @@ POST /predict         – single-pair prediction
 POST /predict_batch   – batch prediction
 """
 from __future__ import annotations
-import json
 import logging
-from pathlib import Path
 from typing import Dict, List, Optional, Union
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from xgboost import XGBClassifier
 from importlib.metadata import version as pkg_version
+from helpers.inference import load_model, MODEL_PATH
 
 logger = logging.getLogger(__name__)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MODEL_PATH = PROJECT_ROOT / "ML" / "xgb.json"
-COLUMNS_PATH = PROJECT_ROOT / "ML" / "xgb_columns.json"
 app = FastAPI(title="c9r model server", version=pkg_version("c9r"))
-_model: Optional[XGBClassifier] = None
+_model = None
 _columns: Optional[List[str]] = None
-
-
-def _load_model() -> tuple[XGBClassifier, List[str]]:
-    """Loads the XGBoost model and column list from disk."""
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Model not found: {MODEL_PATH}")
-    if not COLUMNS_PATH.exists():
-        raise FileNotFoundError(f"Columns not found: {COLUMNS_PATH}")
-    xgb = XGBClassifier()
-    xgb.load_model(MODEL_PATH)
-    cols = json.loads(COLUMNS_PATH.read_text())
-    logger.info("Model loaded from %s", MODEL_PATH)
-    return xgb, cols
 
 
 @app.on_event("startup")
 def _startup() -> None:
-    """Loads the model when the server starts."""
+    """Loads the LightGBM pipeline when the server starts."""
     global _model, _columns
     try:
-        _model, _columns = _load_model()
+        _model = load_model()
+        _columns = list(_model.feature_names_in_)
+        logger.info("Model loaded: %d features.", len(_columns))
     except FileNotFoundError as exc:
         logger.warning("Model not available at startup: %s", exc)
 
@@ -81,7 +65,11 @@ class PredictResponse(BaseModel):
 @app.get("/health")
 def health() -> dict:
     """Returns server health status."""
-    return {"status": "ok", "model_loaded": _model is not None}
+    return {
+        "status": "ok",
+        "model_loaded": _model is not None,
+        "model_path": str(MODEL_PATH),
+    }
 
 
 @app.post("/predict", response_model=PredictResponse)

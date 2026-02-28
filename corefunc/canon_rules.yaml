@@ -16,7 +16,7 @@ checksum: sha256
 canonization_rules:
   - number: 1
     text: Lookup of official artist name versions is the most authoritative way to decide on canonical variant.
-    example: [Discogs, MB, official website, registries, Wikipedia]
+    example: [MusicBrainz DB, Discogs, official website, registries, Wikipedia]
   - number: 2
     text: '&' is preferred over 'and', 'And', 'und, 'Und'.
     example: Bohren & der Club of Gore
@@ -28,7 +28,7 @@ canonization_rules:
     example: The Dream Syndicate
   - number: 5
     text: The name of artists from countries following the Western name order follows the Western name order.
-    example: Christ Watson
+    example: Chris Watson
   - number: 6
     text: The name of artists from countries following the Eastern name order follows the Eastern name order.
     example: Víg Mihály

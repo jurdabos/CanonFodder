@@ -18,7 +18,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 from helpers.io import (
-    ALIAS_SEP, AVC_PQ, SCROBBLE_PQ, ARTIST_INFO_PQ,
+    ALIAS_SEP, AVC_PQ, PQ_DIR, SCROBBLE_PQ, ARTIST_INFO_PQ,
     read_parquet, dump_parquet, append_to_parquet,
 )
 
@@ -289,8 +289,21 @@ def _make_hash(signature: str) -> str:
     return hashlib.sha256(signature.encode("utf-8")).hexdigest()
 
 
+PREDICTIONS_LOG_PQ = PQ_DIR / "predictions_log.parquet"
+
+
+def _log_predictions(prediction_rows: list[dict]) -> None:
+    """Appends prediction records to predictions_log.parquet for drift detection."""
+    if not prediction_rows:
+        return
+    df = pd.DataFrame(prediction_rows)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+    append_to_parquet(df, PREDICTIONS_LOG_PQ)
+    log.info("Logged %d predictions to %s.", len(df), PREDICTIONS_LOG_PQ.name)
+
+
 def discover_candidates(
-    model,
+    model=None,
     *,
     wratio_cutoff: int = 75,
     proba_threshold: float = 0.5,
@@ -300,11 +313,15 @@ def discover_candidates(
     """
     Scans scrobble.parquet for new artist name variant candidates.
 
-    Uses RapidFuzz for fast pre-filtering and the ML model for classification.
-    Returns a list of dicts with keys: signature, variants, hash.
+    Uses RapidFuzz for fast pre-filtering and the full 41-feature pipeline
+    for classification.  Loads ``ML/lightgbm_best.pkl`` when *model* is
+    None.  Logs every prediction to ``PQ/predictions_log.parquet``.
+    Returns a list of dicts with keys: signature, variants, hash, max_prob.
     """
     from rapidfuzz import fuzz, process
-    from helpers.cluster import fuzzy_scores
+    from helpers.inference import compute_inference_features, load_model
+    if model is None:
+        model = load_model()
     if not SCROBBLE_PQ.exists():
         return []
     # Getting unique artist names with play counts
@@ -330,10 +347,13 @@ def discover_candidates(
         log.info("All artist names already covered by avc/artist_info.")
         return []
     log.info("Scanning %d uncovered artist names for variant candidates.", len(candidates))
-    # Pre-filtering with RapidFuzz, then classifying with ML model
+    # Pre-filtering with RapidFuzz, then classifying with the full feature pipeline
     all_names = artists_df["artist_name"].tolist()
     pairs_seen: set[frozenset] = set()
-    positive_pairs: list[tuple[str, str]] = []
+    positive_pairs: list[tuple[str, str, float]] = []
+    prediction_log: list[dict] = []
+    now_ts = datetime.now(timezone.utc)
+    n_scored = 0
     for name in candidates:
         matches = process.extract(
             name, all_names, scorer=fuzz.WRatio, score_cutoff=wratio_cutoff, limit=10,
@@ -345,18 +365,33 @@ def discover_candidates(
             if pair in pairs_seen:
                 continue
             pairs_seen.add(pair)
-            # Computing feature vector and classifying
+            # Computing full feature vector and classifying
             try:
-                scores = fuzzy_scores(name, match_name)
-                vec = pd.DataFrame([scores])
-                prob = model.predict_proba(vec)[0, 1]
+                feats = compute_inference_features(name, match_name)
+                vec = pd.DataFrame([feats])
+                prob = float(model.predict_proba(vec)[0, 1])
+                n_scored += 1
+                # Logging every prediction for drift detection
+                prediction_log.append({
+                    "timestamp": now_ts,
+                    "variant_a": name,
+                    "variant_b": match_name,
+                    "probability": prob,
+                })
                 if prob >= proba_threshold:
-                    positive_pairs.append((name, match_name))
+                    positive_pairs.append((name, match_name, prob))
             except Exception:
                 log.debug("Skipping pair (%s, %s) — model prediction failed.", name, match_name)
+    log.info("Scored %d pairs, %d above threshold %.2f.", n_scored, len(positive_pairs), proba_threshold)
+    # Persisting prediction log
+    _log_predictions(prediction_log)
     if not positive_pairs:
         log.info("No new variant candidates found.")
         return []
+    # Building pair→probability lookup for group-level max
+    pair_probs: dict[frozenset, float] = {}
+    for a, b, prob in positive_pairs:
+        pair_probs[frozenset((a, b))] = prob
     # Grouping pairwise links via union-find
     parent: dict[str, str] = {}
 
@@ -373,7 +408,7 @@ def discover_candidates(
         if ra != rb:
             parent[ra] = rb
 
-    for a, b in positive_pairs:
+    for a, b, _ in positive_pairs:
         parent.setdefault(a, a)
         parent.setdefault(b, b)
         union(a, b)
@@ -395,7 +430,18 @@ def discover_candidates(
         h = _make_hash(sig)
         if h in existing_hashes:
             continue
-        new_candidates.append({"signature": sig, "variants": sorted(members), "hash": h})
+        # Computing the maximum pairwise probability for this group
+        max_prob = 0.0
+        from itertools import combinations
+        for ma, mb in combinations(sorted(members), 2):
+            p = pair_probs.get(frozenset((ma, mb)), 0.0)
+            max_prob = max(max_prob, p)
+        new_candidates.append({
+            "signature": sig, "variants": sorted(members),
+            "hash": h, "max_prob": round(max_prob, 4),
+        })
+    # Sorting by descending probability
+    new_candidates.sort(key=lambda c: c["max_prob"], reverse=True)
     return new_candidates
 
 
@@ -403,6 +449,7 @@ def write_new_candidates(candidates: list[dict]) -> int:
     """
     Appends newly discovered candidate groups to avc.parquet with to_link=NULL.
 
+    Stores the model probability in the comment field for human review.
     Returns the number of rows written.
     """
     if not candidates:
@@ -410,12 +457,13 @@ def write_new_candidates(candidates: list[dict]) -> int:
     rows = []
     now = pd.Timestamp(datetime.now(timezone.utc))
     for c in candidates:
+        prob_comment = f"p={c['max_prob']:.4f}" if "max_prob" in c else ""
         rows.append({
             "artist_variants_hash": c["hash"],
             "artist_variants_text": c["signature"],
             "canonical_name": "",
             "to_link": pd.NA,
-            "comment": "",
+            "comment": prob_comment,
             "stamp": now,
         })
     df = pd.DataFrame(rows)
