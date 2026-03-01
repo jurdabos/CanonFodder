@@ -76,20 +76,21 @@ class TestWeeklyIngestFlow:
     @patch("flows.cf_ingest.augment_gs_task", return_value={"rows_written": 0, "skipped": True})
     @patch("flows.cf_ingest.propagate_avc_task", return_value={"updated": 0, "aliases_added": 0})
     @patch("flows.cf_ingest.canonise_batch", return_value={"flagged_for_review": 0, "skipped": 0})
+    @patch("flows.cf_ingest.clean_artists", return_value=(0, 2))
+    @patch("flows.cf_ingest.enrich_artists", return_value=0)
     @patch("flows.cf_ingest.fix_encoding_task", return_value={"scrobble": (0, 3), "artist_info": (0, 2)})
-    @patch("HTTP.mbAPI.search_artist", return_value=[])
-    @patch("corefunc.workflow.lfAPI.fetch_scrobbles_since")
-    @patch("corefunc.workflow.lfAPI.sync_user_country", return_value=False)
+    @patch("flows.cf_ingest.fetch_scrobbles", return_value=3)
     def test_full_flow(
-        self, mock_country, mock_fetch, mock_search,
-        mock_enc, mock_canon, mock_prop, mock_gs, mock_retrain,
-        tmp_pq_dir, sample_scrobble_df,
+        self, mock_fetch, mock_enc, mock_enrich, mock_clean,
+        mock_canon, mock_prop, mock_gs, mock_retrain,
+        tmp_pq_dir,
     ):
         """Runs the complete flow and returns a result dict."""
-        mock_fetch.return_value = sample_scrobble_df
         from flows.cf_ingest import weekly_ingest_flow
         result = weekly_ingest_flow.fn()
         assert result["new_scrobbles"] == 3
         assert result["encoding_fixed"] == 0
         assert result["flagged_for_review"] == 0
+        assert result["cleaned"] == 0
+        assert result["remaining"] == 2
         assert "duration" in result

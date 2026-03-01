@@ -14,7 +14,7 @@ jobs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@6b9c6063abd6010835c3c7f4a7a2c0fe0116bf2d  # v5
+      uses: astral-sh/setup-uv@0ca8f610542aa7f4acaf39e65cf4eb3c35091883  # v7
 
     - name: Lint Python code
       run: uvx ruff check HTTP/ corefunc/ helpers/ flows/ main.py tests/
@@ -31,7 +31,7 @@ jobs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@6b9c6063abd6010835c3c7f4a7a2c0fe0116bf2d  # v5
+      uses: astral-sh/setup-uv@0ca8f610542aa7f4acaf39e65cf4eb3c35091883  # v7
       with:
         enable-cache: true
 
@@ -63,7 +63,7 @@ jobs:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
 
     - name: Install uv
-      uses: astral-sh/setup-uv@6b9c6063abd6010835c3c7f4a7a2c0fe0116bf2d  # v5
+      uses: astral-sh/setup-uv@0ca8f610542aa7f4acaf39e65cf4eb3c35091883  # v7
       with:
         enable-cache: true
 
