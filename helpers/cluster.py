@@ -2,6 +2,7 @@
 Wraps assorted clustering utilities including fuzzy string scoring and
 quality metrics.
 """
+
 from functools import partial
 import itertools
 import numpy as np
@@ -44,6 +45,7 @@ def calculate_clustering_metrics(name, labels, data, cluster_centers=None, model
     """
     from sklearn.metrics import silhouette_score
     from scipy.spatial.distance import cdist
+
     non_noise_indices = labels != -1
     clustered_data = data[non_noise_indices].to_numpy()
     clustered_labels = labels[non_noise_indices]
@@ -65,9 +67,7 @@ def calculate_clustering_metrics(name, labels, data, cluster_centers=None, model
             cluster_points = clustered_data[clustered_labels == i]
             total_points += len(cluster_points)
             for j in range(len(cluster_points)):
-                squared_distance = np.sum(
-                    (cluster_points[j] - cluster_centers[i]) ** 2, axis=0
-                )
+                squared_distance = np.sum((cluster_points[j] - cluster_centers[i]) ** 2, axis=0)
                 wss += squared_distance
         if total_points > 0:
             weighted_wss = wss / total_points
@@ -84,7 +84,7 @@ def calculate_clustering_metrics(name, labels, data, cluster_centers=None, model
         if cluster_centers is not None:
             distances = cdist(clustered_data, cluster_centers)
             min_distances = np.min(distances, axis=1)
-            log_likelihood = -0.5 * np.sum(min_distances ** 2, axis=0)
+            log_likelihood = -0.5 * np.sum(min_distances**2, axis=0)
         else:
             log_likelihood = np.nan
         # BIC calculation
@@ -101,12 +101,11 @@ def calculate_clustering_metrics(name, labels, data, cluster_centers=None, model
     }
 
 
-def dbscan_with_anchors(artist_names, dist_matrix, anchor_idx_sets,
-                        eps_range=np.arange(0.05, 1.0, 0.01),
-                        min_samples=2):
+def dbscan_with_anchors(
+    artist_names, dist_matrix, anchor_idx_sets, eps_range=np.arange(0.05, 1.0, 0.01), min_samples=2
+):
     for eps in eps_range:
-        labels = DBSCAN(eps=eps, min_samples=min_samples,
-                        metric="precomputed").fit_predict(dist_matrix)
+        labels = DBSCAN(eps=eps, min_samples=min_samples, metric="precomputed").fit_predict(dist_matrix)
         if anchors_ok(labels, anchor_idx_sets):
             return eps, labels
     raise RuntimeError("No ε satisfies anchor constraints.")
@@ -133,46 +132,37 @@ def fuzzy_scores(a: str, b: str) -> dict:
         "token_sort_ratio": fuzz.token_sort_ratio(a, b) / 100,
         "token_set_ratio": fuzz.token_set_ratio(a, b) / 100,
         "WRatio": fuzz.WRatio(a, b) / 100,
-        "QRatio": fuzz.QRatio(a, b) / 100
+        "QRatio": fuzz.QRatio(a, b) / 100,
     }
 
 
-def most_similar(name: str,
-                 choices: Sequence[str],
-                 clf,
-                 threshold: float = 0.5) -> Tuple[str | None, float]:
+def most_similar(name: str, choices: Sequence[str], clf, threshold: float = 0.5) -> Tuple[str | None, float]:
     """
     Returns the best match above `threshold` together with its probability
     """
     scorer = partial(_clf_scorer, clf=clf)
-    match, score, _ = process.extractOne(
-        name, choices,
-        scorer=scorer,
-        score_cutoff=threshold
-    )
+    match, score, _ = process.extractOne(name, choices, scorer=scorer, score_cutoff=threshold)
     return match, score or 0.0
 
 
 def tree_to_rule_list(decision_tree, feature_names, prob_threshold=0.5):
     tree_ = decision_tree.tree_
-    feature_name = [
-        feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!"
-        for i in tree_.feature
-    ]
+    feature_name = [feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!" for i in tree_.feature]
     rules = []
 
     def walk(node, conds):
         if tree_.feature[node] != _tree.TREE_UNDEFINED:
             name = feature_name[node]
             thr = tree_.threshold[node]
-            walk(tree_.children_left[node], conds + [f'({name} <= {thr:.3f})'])
-            walk(tree_.children_right[node], conds + [f'({name} >  {thr:.3f})'])
+            walk(tree_.children_left[node], conds + [f"({name} <= {thr:.3f})"])
+            walk(tree_.children_right[node], conds + [f"({name} >  {thr:.3f})"])
         else:
             pos = tree_.value[node][0, 1]
             neg = tree_.value[node][0, 0]
             p1 = pos / (pos + neg)
             cls = 1 if pos > neg else 0
             rules.append((" & ".join(conds), cls, p1))
+
     walk(0, [])
     # Keeping only leaves that are class 1 **and** above threshold
     return [(c, p) for c, cls, p in rules if cls == 1 and p >= prob_threshold]
@@ -187,8 +177,6 @@ variant_sets = [
     ["Gorillaz, Stevie Nicks", "GorillazStevie Nicks"],
     ["Gorillaz, Tame Impala, Bootie Brown", "GorillazTame ImpalaBootie Brown"],
     ["Gorillaz, Thundercat", "GorillazThundercat"],
-    ["Robert Miles & Trilok Gurtu",
-     "Robert Miles And Trilok Gurtu",
-     "Robert Miles, Trilok Gurtu"],
+    ["Robert Miles & Trilok Gurtu", "Robert Miles And Trilok Gurtu", "Robert Miles, Trilok Gurtu"],
     ["La Monte Young", "Lamonte Young"],
 ]

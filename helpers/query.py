@@ -5,14 +5,20 @@ Every function opens a fresh, in-process DuckDB connection, queries the
 Parquet files directly, and returns the result as a pandas DataFrame or
 scalar.  No persistent DuckDB database file is created.
 """
+
 from __future__ import annotations
 import logging
 from pathlib import Path
 import duckdb
 import pandas as pd
 from helpers.io import (
-    ARTIST_INFO_PQ, AVC_PQ, QA_REPORT_PQ, UC_PQ, ALIAS_SEP,
-    scrobble_data_exists, scrobble_duckdb_from,
+    ARTIST_INFO_PQ,
+    AVC_PQ,
+    QA_REPORT_PQ,
+    UC_PQ,
+    ALIAS_SEP,
+    scrobble_data_exists,
+    scrobble_duckdb_from,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,9 +53,7 @@ def _canonical_cte() -> str:
     Intended for cross-module use (imported by corefunc.profile).
     """
     if not ARTIST_INFO_PQ.exists():
-        return ("canonical_map AS ("
-                "SELECT NULL::VARCHAR AS canonical_name, "
-                "NULL::VARCHAR AS variant_name WHERE false)")
+        return "canonical_map AS (SELECT NULL::VARCHAR AS canonical_name, NULL::VARCHAR AS variant_name WHERE false)"
     return f"""canonical_map AS (
         SELECT canonical_name, variant_name
         FROM (
@@ -371,7 +375,9 @@ def user_country_top_entities(top_n: int = 3) -> dict[str, pd.DataFrame]:
     empty = {
         "artists": pd.DataFrame(columns=["country_code", "rank", "artist_name", "play_count"]),
         "albums": pd.DataFrame(columns=["country_code", "rank", "artist_name", "album_title", "play_count"]),
-        "tracks": pd.DataFrame(columns=["country_code", "rank", "artist_name", "track_title", "album_title", "play_count"]),
+        "tracks": pd.DataFrame(
+            columns=["country_code", "rank", "artist_name", "track_title", "album_title", "play_count"]
+        ),
     }
     if not scrobble_data_exists() or not UC_PQ.exists():
         return empty
@@ -382,8 +388,7 @@ def user_country_top_entities(top_n: int = 3) -> dict[str, pd.DataFrame]:
         f"   ON s.play_time::DATE >= uc.start_date::DATE"
         f"  AND (uc.end_date IS NULL OR s.play_time::DATE <= uc.end_date::DATE)"
     )
-    base_where = ("WHERE s.artist_name IS NOT NULL AND s.artist_name != ''"
-                  " AND s.play_time IS NOT NULL")
+    base_where = "WHERE s.artist_name IS NOT NULL AND s.artist_name != '' AND s.play_time IS NOT NULL"
     # Ranking artists per country
     artists = query(f"""
         WITH {cte},

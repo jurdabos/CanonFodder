@@ -4,9 +4,11 @@ Tests for flows/cf_ingest.py Prefect tasks and flow.
 Uses unittest.mock to isolate from external dependencies (Last.fm, MusicBrainz).
 Requires the prefect optional dependency.
 """
+
 import logging
 import pytest
 from unittest.mock import patch
+
 prefect = pytest.importorskip("prefect")
 
 
@@ -34,6 +36,7 @@ class TestFetchScrobblesTask:
         """Returns the number of ingested scrobbles."""
         mock_fetch.return_value = sample_scrobble_df
         from flows.cf_ingest import fetch_scrobbles
+
         n = fetch_scrobbles.fn("testuser")
         assert n == 3
 
@@ -41,8 +44,10 @@ class TestFetchScrobblesTask:
     def test_returns_zero_when_empty(self, mock_fetch, tmp_pq_dir):
         """Returns 0 when the API yields nothing."""
         import pandas as pd
+
         mock_fetch.return_value = pd.DataFrame()
         from flows.cf_ingest import fetch_scrobbles
+
         n = fetch_scrobbles.fn("testuser")
         assert n == 0
 
@@ -54,6 +59,7 @@ class TestEnrichArtistsTask:
     def test_returns_zero_when_no_unknowns(self, mock_search, populated_pq):
         """Returns 0 when all artists are already known."""
         from flows.cf_ingest import enrich_artists
+
         n = enrich_artists.fn()
         assert n == 0
 
@@ -64,6 +70,7 @@ class TestCleanArtistsTask:
     def test_deduplicates(self, populated_pq):
         """Runs deduplication and returns (removed, remaining)."""
         from flows.cf_ingest import clean_artists
+
         removed, remaining = clean_artists.fn()
         assert removed == 0
         assert remaining == 2
@@ -81,12 +88,20 @@ class TestWeeklyIngestFlow:
     @patch("flows.cf_ingest.fix_encoding_task", return_value={"scrobble": (0, 3), "artist_info": (0, 2)})
     @patch("flows.cf_ingest.fetch_scrobbles", return_value=3)
     def test_full_flow(
-        self, mock_fetch, mock_enc, mock_enrich, mock_clean,
-        mock_canon, mock_prop, mock_gs, mock_retrain,
+        self,
+        mock_fetch,
+        mock_enc,
+        mock_enrich,
+        mock_clean,
+        mock_canon,
+        mock_prop,
+        mock_gs,
+        mock_retrain,
         tmp_pq_dir,
     ):
         """Runs the complete flow and returns a result dict."""
         from flows.cf_ingest import weekly_ingest_flow
+
         result = weekly_ingest_flow.fn()
         assert result["new_scrobbles"] == 3
         assert result["encoding_fixed"] == 0

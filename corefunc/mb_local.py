@@ -5,6 +5,7 @@ Requires musicbrainz-docker to be running.  Communicates with the DB
 container via ``docker exec`` and ``psql``, so no additional Python
 dependencies are needed.
 """
+
 from __future__ import annotations
 import io
 import logging
@@ -65,9 +66,10 @@ def check_local_mb() -> bool:
     """Returns True if the local MusicBrainz mirror is reachable."""
     try:
         result = subprocess.run(
-            ["docker", "exec", MB_CONTAINER, "psql",
-             "-U", MB_USER, "-d", MB_DB, "-c", "SELECT 1"],
-            capture_output=True, text=True, timeout=10,
+            ["docker", "exec", MB_CONTAINER, "psql", "-U", MB_USER, "-d", MB_DB, "-c", "SELECT 1"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -84,9 +86,11 @@ def _psql_csv(sql: str) -> pd.DataFrame:
     """
     copy_sql = f"COPY ({sql}) TO STDOUT WITH CSV HEADER"
     result = subprocess.run(
-        ["docker", "exec", "-i", MB_CONTAINER,
-         "psql", "-U", MB_USER, "-d", MB_DB],
-        input=copy_sql, capture_output=True, text=True, timeout=300,
+        ["docker", "exec", "-i", MB_CONTAINER, "psql", "-U", MB_USER, "-d", MB_DB],
+        input=copy_sql,
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
     if result.returncode != 0:
         raise RuntimeError(f"psql error: {result.stderr.strip()}")
@@ -115,7 +119,9 @@ def _enrich_by_mbid(mbids: Sequence[str]) -> pd.DataFrame:
             frames.append(df)
         log.info(
             "MBID batch %d–%d: %d resolved.",
-            i + 1, min(i + _MBID_BATCH, len(mbid_list)), len(df),
+            i + 1,
+            min(i + _MBID_BATCH, len(mbid_list)),
+            len(df),
         )
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=ARTIST_INFO_COLS)
 
@@ -136,7 +142,9 @@ def _enrich_by_name(names: Sequence[str]) -> pd.DataFrame:
             frames.append(df)
         log.info(
             "Name batch %d–%d: %d resolved.",
-            i + 1, min(i + _NAME_BATCH, len(name_list)), len(df),
+            i + 1,
+            min(i + _NAME_BATCH, len(name_list)),
+            len(df),
         )
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=ARTIST_INFO_COLS)
 
@@ -176,16 +184,13 @@ def _build_track_reverse_index(
                         index[t_lower][mbid] += 1
         log.info(
             "Track reverse index: %d from scrobbles, %d total (with MBDB cache).",
-            n_scrobble, len(index),
+            n_scrobble,
+            len(index),
         )
     else:
         log.info("Track reverse index: %d entries from scrobbles (no MBDB cache).", n_scrobble)
     # Filtering out ambiguous tracks
-    return {
-        t: dict(mbids)
-        for t, mbids in index.items()
-        if len(mbids) <= _AMBIGUITY_LIMIT
-    }
+    return {t: dict(mbids) for t, mbids in index.items() if len(mbids) <= _AMBIGUITY_LIMIT}
 
 
 def _resolve_by_catalogue(
@@ -209,9 +214,11 @@ def _resolve_by_catalogue(
     # Collecting tracks per unresolved artist
     cand_set = set(candidates)
     unres_sc = scrobbles[scrobbles["artist_name"].isin(cand_set)]
-    tracks_by_artist = unres_sc.groupby("artist_name")["track_title"].apply(
-        lambda x: list({t for t in x.dropna().unique() if str(t).strip()})
-    ).to_dict()
+    tracks_by_artist = (
+        unres_sc.groupby("artist_name")["track_title"]
+        .apply(lambda x: list({t for t in x.dropna().unique() if str(t).strip()}))
+        .to_dict()
+    )
     # Attempting resolution
     resolved: list[tuple[str, str]] = []  # (artist_name, mbid)
     for name, tracks in tracks_by_artist.items():
@@ -246,13 +253,15 @@ def _resolve_by_catalogue(
         if mbid not in mbid_to_info:
             continue
         info = mbid_to_info[mbid]
-        rows.append({
-            "artist_name": name,
-            "mbid": mbid,
-            "country": info["country"],
-            "disambiguation_comment": info["disambiguation_comment"],
-            "aliases": info["aliases"],
-        })
+        rows.append(
+            {
+                "artist_name": name,
+                "mbid": mbid,
+                "country": info["country"],
+                "disambiguation_comment": info["disambiguation_comment"],
+                "aliases": info["aliases"],
+            }
+        )
     return pd.DataFrame(rows) if rows else pd.DataFrame(columns=ARTIST_INFO_COLS)
 
 
@@ -279,20 +288,13 @@ def enrich_from_local_mb(*, rebuild: bool = False) -> int:
         Number of artist rows written.
     """
     if not check_local_mb():
-        raise RuntimeError(
-            f"Cannot reach local MB mirror (container: {MB_CONTAINER}). "
-            "Is musicbrainz-docker running?"
-        )
+        raise RuntimeError(f"Cannot reach local MB mirror (container: {MB_CONTAINER}). Is musicbrainz-docker running?")
     scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         log.warning("No scrobbles found — nothing to enrich.")
         return 0
     # Getting unique (artist_name, artist_mbid) pairs
-    pairs = (
-        scrobbles[["artist_name", "artist_mbid"]]
-        .drop_duplicates(subset=["artist_name"])
-        .copy()
-    )
+    pairs = scrobbles[["artist_name", "artist_mbid"]].drop_duplicates(subset=["artist_name"]).copy()
     # Filtering out already-known artists (unless rebuilding)
     if not rebuild:
         known = read_parquet(ARTIST_INFO_PQ)
@@ -316,29 +318,26 @@ def enrich_from_local_mb(*, rebuild: bool = False) -> int:
         if not mbid_results.empty:
             # Mapping MB rows back to every scrobble artist_name that
             # shares the same MBID (preserving the scrobble-level name).
-            mbid_to_names = (
-                with_mbid.groupby("artist_mbid")["artist_name"]
-                .apply(list)
-                .to_dict()
-            )
+            mbid_to_names = with_mbid.groupby("artist_mbid")["artist_name"].apply(list).to_dict()
             expanded: list[dict] = []
             for _, mb_row in mbid_results.iterrows():
-                scrobble_names = mbid_to_names.get(
-                    mb_row["mbid"], [mb_row["artist_name"]]
-                )
+                scrobble_names = mbid_to_names.get(mb_row["mbid"], [mb_row["artist_name"]])
                 for sname in scrobble_names:
-                    expanded.append({
-                        "artist_name": sname,
-                        "mbid": mb_row["mbid"],
-                        "country": mb_row["country"],
-                        "disambiguation_comment": mb_row["disambiguation_comment"],
-                        "aliases": mb_row["aliases"],
-                    })
+                    expanded.append(
+                        {
+                            "artist_name": sname,
+                            "mbid": mb_row["mbid"],
+                            "country": mb_row["country"],
+                            "disambiguation_comment": mb_row["disambiguation_comment"],
+                            "aliases": mb_row["aliases"],
+                        }
+                    )
             result_frames.append(pd.DataFrame(expanded))
             found_mbids = set(mbid_results["mbid"])
             log.info(
                 "Tier 1 resolved %d unique MBIDs → %d artist rows.",
-                len(found_mbids), len(expanded),
+                len(found_mbids),
+                len(expanded),
             )
         else:
             found_mbids = set()
@@ -354,9 +353,7 @@ def enrich_from_local_mb(*, rebuild: bool = False) -> int:
             result_frames.append(name_results)
             log.info("Tier 2 resolved %d artists.", len(name_results))
         # Tracking still-unresolved names for Tier 3
-        resolved_names = (
-            set(name_results["artist_name"]) if not name_results.empty else set()
-        )
+        resolved_names = set(name_results["artist_name"]) if not name_results.empty else set()
         unresolved = without_mbid[~without_mbid["artist_name"].isin(resolved_names)]
     else:
         unresolved = pd.DataFrame(columns=without_mbid.columns)
@@ -365,7 +362,9 @@ def enrich_from_local_mb(*, rebuild: bool = False) -> int:
         log.info("Tier 3: attempting catalogue-based resolution for %d artists.", len(unresolved))
         track_index = _build_track_reverse_index(scrobbles)
         catalogue_results = _resolve_by_catalogue(
-            unresolved["artist_name"].tolist(), scrobbles, track_index,
+            unresolved["artist_name"].tolist(),
+            scrobbles,
+            track_index,
         )
         if not catalogue_results.empty:
             result_frames.append(catalogue_results)
@@ -374,13 +373,15 @@ def enrich_from_local_mb(*, rebuild: bool = False) -> int:
             unresolved = unresolved[~unresolved["artist_name"].isin(resolved_by_cat)]
     # Stub rows for artists with no match at all
     if not unresolved.empty:
-        stubs = pd.DataFrame({
-            "artist_name": unresolved["artist_name"].values,
-            "mbid": "",
-            "country": "",
-            "disambiguation_comment": "",
-            "aliases": "",
-        })
+        stubs = pd.DataFrame(
+            {
+                "artist_name": unresolved["artist_name"].values,
+                "mbid": "",
+                "country": "",
+                "disambiguation_comment": "",
+                "aliases": "",
+            }
+        )
         result_frames.append(stubs)
         log.info("Created %d stub rows for unresolved artists.", len(stubs))
     if not result_frames:

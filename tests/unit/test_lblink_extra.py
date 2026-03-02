@@ -1,6 +1,7 @@
 """
 Additional unit tests for HTTP.lblink — LBClient facade and _cli helper.
 """
+
 from unittest.mock import patch, MagicMock
 import pytest
 from HTTP.lblink import LBClient, _RequestsBackend, _cli
@@ -151,6 +152,7 @@ class TestFetchScrobblesSince:
     def test_single_page(self, mock_sess_cls):
         """Fetches a single page of listens and normalises columns."""
         from HTTP.lblink import fetch_scrobbles_since
+
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
             "payload": {
@@ -189,6 +191,7 @@ class TestFetchScrobblesSince:
     def test_empty_result(self, mock_sess_cls):
         """Returns empty DataFrame with correct columns when no listens found."""
         from HTTP.lblink import fetch_scrobbles_since
+
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"payload": {"listens": []}}
         mock_resp.raise_for_status = MagicMock()
@@ -201,6 +204,7 @@ class TestFetchScrobblesSince:
     def test_with_since_parameter(self, mock_sess_cls):
         """Passes min_ts to the API when since is provided."""
         from HTTP.lblink import fetch_scrobbles_since
+
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
             "payload": {
@@ -229,6 +233,7 @@ class TestFetchScrobblesSince:
     def test_progress_callback_invoked(self, mock_sess_cls):
         """Invokes progress callback during and after fetch."""
         from HTTP.lblink import fetch_scrobbles_since
+
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
             "payload": {
@@ -255,6 +260,7 @@ class TestFetchScrobblesSince:
     def test_missing_additional_info(self, mock_sess_cls):
         """Handles listens with no additional_info gracefully."""
         from HTTP.lblink import fetch_scrobbles_since
+
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
             "payload": {

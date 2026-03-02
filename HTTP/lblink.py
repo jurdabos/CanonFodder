@@ -10,6 +10,7 @@ Typical use (library):
     for listen in listens:
         print(listen["track_metadata"]["track_name"])
 """
+
 from __future__ import annotations
 import logging
 import os
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import pandas as pd
 import requests
+
 try:
     import pylistenbrainz  # type: ignore
 except ModuleNotFoundError:  # ↳ keep running without it
@@ -66,12 +68,12 @@ class _RequestsBackend:
 
     # --------------- public-ish helpers ---------------- #
     def get_listens(
-            self,
-            username: str,
-            *,
-            min_ts: int | None = None,
-            max_ts: int | None = None,
-            count: int | None = None,
+        self,
+        username: str,
+        *,
+        min_ts: int | None = None,
+        max_ts: int | None = None,
+        count: int | None = None,
     ) -> List[Dict[str, Any]]:
         params = {
             "min_ts": min_ts,
@@ -86,11 +88,11 @@ class _RequestsBackend:
         return resp.json()["payload"]["listens"]
 
     def lookup_metadata(
-            self,
-            track_name: str,
-            artist_name: str,
-            *,
-            incs: str | None = None,
+        self,
+        track_name: str,
+        artist_name: str,
+        *,
+        incs: str | None = None,
     ) -> Dict[str, Any]:
         params = {
             "recording_name": track_name,
@@ -130,8 +132,7 @@ class LBClient:
                 logger.debug("Using `pylistenbrainz` backend.")
             except TypeError as exc:  # Signature mismatch? → fall back.
                 logger.warning(
-                    "pylistenbrainz instantiation failed (%s) – "
-                    "falling back to plain HTTP backend.",
+                    "pylistenbrainz instantiation failed (%s) – falling back to plain HTTP backend.",
                     exc,
                 )
                 self._client = _RequestsBackend()
@@ -143,12 +144,12 @@ class LBClient:
 
     # ---------- public API for CanonFodder code ---------------- #
     def get_listens(
-            self,
-            username: str,
-            *,
-            min_ts: int | None = None,
-            max_ts: int | None = None,
-            count: int | None = None,
+        self,
+        username: str,
+        *,
+        min_ts: int | None = None,
+        max_ts: int | None = None,
+        count: int | None = None,
     ) -> List[Dict[str, Any]]:
         if self._backend == "pylb":
             listens_raw = self._client.get_listens(
@@ -170,11 +171,11 @@ class LBClient:
         return self._client.get_listens(username, min_ts=min_ts, max_ts=max_ts, count=count)
 
     def lookup_metadata(
-            self,
-            track_name: str,
-            artist_name: str,
-            *,
-            incs: str | None = None,
+        self,
+        track_name: str,
+        artist_name: str,
+        *,
+        incs: str | None = None,
     ) -> Dict[str, Any]:
         if self._backend == "pylb":
             return self._client.lookup_metadata(
@@ -202,12 +203,14 @@ def export_listens_to_parquet(listens: List[Dict[str, Any]], output_path: str) -
     data = []
     for entry in listens:
         md = entry["track_metadata"]
-        data.append({
-            "Artist": md.get("artist_name", ""),
-            "Album": md.get("release_name", ""),
-            "Song": md.get("track_name", ""),
-            "Datetime": entry.get("listened_at", 0)
-        })
+        data.append(
+            {
+                "Artist": md.get("artist_name", ""),
+                "Album": md.get("release_name", ""),
+                "Song": md.get("track_name", ""),
+                "Datetime": entry.get("listened_at", 0),
+            }
+        )
     df = pd.DataFrame(data)
     logger.info("Exporting %d scrobbles to %s", len(df), output_path)
     df.to_parquet(output_path, compression="zstd", index=False)
@@ -218,9 +221,9 @@ def export_listens_to_parquet(listens: List[Dict[str, Any]], output_path: str) -
 # Paginated fetcher — canonical ingestion path for c9r                       #
 # --------------------------------------------------------------------------- #
 def fetch_scrobbles_since(
-        username: str,
-        since: int | None = None,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    username: str,
+    since: int | None = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> pd.DataFrame:
     """
     Fetches ListenBrainz listens after *since* (Unix timestamp, exclusive).
@@ -261,13 +264,15 @@ def fetch_scrobbles_since(
         mapping = md.get("mbid_mapping") or {}
         additional = md.get("additional_info") or {}
         mbids = mapping.get("artist_mbids") or additional.get("artist_mbids") or []
-        rows.append({
-            "Artist": md.get("artist_name", ""),
-            "Song": md.get("track_name", ""),
-            "Album": md.get("release_name", ""),
-            "uts": listen.get("listened_at", 0),
-            "artist_mbid": mbids[0] if mbids else None,
-        })
+        rows.append(
+            {
+                "Artist": md.get("artist_name", ""),
+                "Song": md.get("track_name", ""),
+                "Album": md.get("release_name", ""),
+                "uts": listen.get("listened_at", 0),
+                "artist_mbid": mbids[0] if mbids else None,
+            }
+        )
     if progress_callback:
         progress_callback(page, page, f"Fetched {len(rows)} listens from ListenBrainz")
     return pd.DataFrame(rows, columns=["Artist", "Song", "Album", "uts", "artist_mbid"])
@@ -278,6 +283,7 @@ def fetch_scrobbles_since(
 # --------------------------------------------------------------------------- #
 def _cli() -> None:
     import argparse
+
     parser = argparse.ArgumentParser(description="Quick ListenBrainz helper")
     parser.add_argument("--user", required=True, help="MusicBrainz user ID")
     parser.add_argument("--count", type=int, default=5, help="number of listens to fetch")

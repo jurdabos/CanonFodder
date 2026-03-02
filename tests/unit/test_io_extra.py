@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.io edge cases not covered by test_io.py.
 """
+
 from collections import Counter
 import pandas as pd
 import pytest
@@ -12,33 +13,39 @@ class TestNormaliseScrobbleDfEdgeCases:
 
     def test_timestamp_column(self):
         """Handles a 'Timestamp' column instead of 'uts'."""
-        raw = pd.DataFrame({
-            "artist_name": ["X"],
-            "album_title": ["A"],
-            "track_title": ["T"],
-            "Timestamp": pd.to_datetime(["2024-06-01 12:00:00"], utc=True),
-        })
+        raw = pd.DataFrame(
+            {
+                "artist_name": ["X"],
+                "album_title": ["A"],
+                "track_title": ["T"],
+                "Timestamp": pd.to_datetime(["2024-06-01 12:00:00"], utc=True),
+            }
+        )
         result = normalise_scrobble_df(raw)
         assert "play_time" in result.columns
         assert pd.notna(result["play_time"].iloc[0])
 
     def test_missing_artist_mbid_column(self):
         """Adds artist_mbid as None when column is absent."""
-        raw = pd.DataFrame({
-            "artist_name": ["X"],
-            "album_title": ["A"],
-            "track_title": ["T"],
-            "uts": [1705348800],
-        })
+        raw = pd.DataFrame(
+            {
+                "artist_name": ["X"],
+                "album_title": ["A"],
+                "track_title": ["T"],
+                "uts": [1705348800],
+            }
+        )
         result = normalise_scrobble_df(raw)
         assert "artist_mbid" in result.columns
 
     def test_missing_columns_filled(self):
         """Fills missing optional columns with None."""
-        raw = pd.DataFrame({
-            "Artist": ["X"],
-            "uts": [1705348800],
-        })
+        raw = pd.DataFrame(
+            {
+                "Artist": ["X"],
+                "uts": [1705348800],
+            }
+        )
         result = normalise_scrobble_df(raw)
         assert "album_title" in result.columns
         assert "track_title" in result.columns
@@ -76,13 +83,15 @@ class TestRegisterCustomPalette:
 
     def test_registers_palette(self):
         """Registers a known palette and returns hex colours."""
-        palettes = [{
-            "paletteName": "test_pal",
-            "colors": [
-                {"hex": "FF0000", "position": 0},
-                {"hex": "#00FF00", "position": 1},
-            ],
-        }]
+        palettes = [
+            {
+                "paletteName": "test_pal",
+                "colors": [
+                    {"hex": "FF0000", "position": 0},
+                    {"hex": "#00FF00", "position": 1},
+                ],
+            }
+        ]
         colours = register_custom_palette("test_pal", palettes)
         assert len(colours) == 2
         assert colours[0] == "#FF0000"

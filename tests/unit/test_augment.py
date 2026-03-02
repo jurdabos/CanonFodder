@@ -2,6 +2,7 @@
 Tests for the MBDB gold standard augmentation pipeline:
 corefunc/canon/augment.py and the augment path in corefunc/canon/model.py.
 """
+
 from __future__ import annotations
 from unittest.mock import patch
 import pandas as pd
@@ -48,6 +49,7 @@ class TestExtractPositivePairs:
         """Returns a DataFrame with variant_a, variant_b, to_link, source columns."""
         mock_csv.return_value = _alias_df(5)
         from corefunc.canon.augment import extract_positive_pairs
+
         result = extract_positive_pairs(limit=5)
         assert list(result.columns) == ["variant_a", "variant_b", "to_link", "source"]
         assert len(result) == 5
@@ -57,6 +59,7 @@ class TestExtractPositivePairs:
         """All rows have to_link=True."""
         mock_csv.return_value = _alias_df(3)
         from corefunc.canon.augment import extract_positive_pairs
+
         result = extract_positive_pairs(limit=3)
         assert result["to_link"].all()
         assert (result["source"] == "mb_alias").all()
@@ -64,10 +67,13 @@ class TestExtractPositivePairs:
     @patch("corefunc.canon.augment._psql_csv")
     def test_maps_alias_and_canonical_correctly(self, mock_csv):
         """Maps alias to variant_a and canonical to variant_b."""
-        mock_csv.return_value = pd.DataFrame([
-            {"canonical": "The Beatles", "alias": "Beatles"},
-        ])
+        mock_csv.return_value = pd.DataFrame(
+            [
+                {"canonical": "The Beatles", "alias": "Beatles"},
+            ]
+        )
         from corefunc.canon.augment import extract_positive_pairs
+
         result = extract_positive_pairs(limit=1)
         assert result.iloc[0]["variant_a"] == "Beatles"
         assert result.iloc[0]["variant_b"] == "The Beatles"
@@ -77,6 +83,7 @@ class TestExtractPositivePairs:
         """Returns empty DataFrame with correct columns when MBDB returns nothing."""
         mock_csv.return_value = pd.DataFrame()
         from corefunc.canon.augment import extract_positive_pairs
+
         result = extract_positive_pairs(limit=5)
         assert result.empty
         assert "variant_a" in result.columns
@@ -91,11 +98,14 @@ class TestExtractNegativePairs:
     def test_combines_exact_and_fuzzy(self, mock_csv, mock_hard):
         """Combines Phase A exact negatives with Phase B hard negatives."""
         mock_csv.return_value = _exact_neg_df(3)
-        mock_hard.return_value = pd.DataFrame([
-            {"variant_a": "Foo", "variant_b": "Foe", "to_link": False, "source": "mb_neg_fuzzy"},
-            {"variant_a": "Bar", "variant_b": "Baz", "to_link": False, "source": "mb_neg_fuzzy"},
-        ])
+        mock_hard.return_value = pd.DataFrame(
+            [
+                {"variant_a": "Foo", "variant_b": "Foe", "to_link": False, "source": "mb_neg_fuzzy"},
+                {"variant_a": "Bar", "variant_b": "Baz", "to_link": False, "source": "mb_neg_fuzzy"},
+            ]
+        )
         from corefunc.canon.augment import extract_negative_pairs
+
         result = extract_negative_pairs(limit=10, similarity_floor=60)
         assert len(result) == 5
         assert (result["to_link"] == False).all()  # noqa: E712
@@ -112,6 +122,7 @@ class TestExtractNegativePairs:
             columns=["variant_a", "variant_b", "to_link", "source"],
         )
         from corefunc.canon.augment import extract_negative_pairs
+
         result = extract_negative_pairs(limit=5, similarity_floor=60)
         assert len(result) == 5
         assert (result["source"] == "mb_neg_exact").all()
@@ -121,6 +132,7 @@ class TestExtractNegativePairs:
         """Returns empty DataFrame when MBDB has no same-name pairs."""
         mock_csv.return_value = pd.DataFrame()
         from corefunc.canon.augment import extract_negative_pairs
+
         result = extract_negative_pairs(limit=5, similarity_floor=60)
         assert result.empty
 
@@ -151,6 +163,7 @@ class TestGenerateHardNegatives:
         ]
         mock_csv.return_value = pd.DataFrame(pool)
         from corefunc.canon.augment import _generate_hard_negatives
+
         result = _generate_hard_negatives(limit=10, similarity_floor=60, neg_limit=10)
         assert not result.empty
         assert (result["to_link"] == False).all()  # noqa: E712
@@ -161,6 +174,7 @@ class TestGenerateHardNegatives:
         """Returns empty when the name pool is too small."""
         mock_csv.return_value = pd.DataFrame({"name": ["A", "B"], "mbid": ["m1", "m2"]})
         from corefunc.canon.augment import _generate_hard_negatives
+
         result = _generate_hard_negatives(limit=10, similarity_floor=60, neg_limit=10)
         assert result.empty
 
@@ -171,12 +185,21 @@ class TestGenerateHardNegatives:
         pool = [
             {"name": n, "mbid": same_mbid}
             for n in [
-                "Beatles", "The Beatles", "Beethovens", "Radiohead", "Radioheads",
-                "Coldplay", "Coldploy", "Metallica", "Megadeth", "Nirvana",
+                "Beatles",
+                "The Beatles",
+                "Beethovens",
+                "Radiohead",
+                "Radioheads",
+                "Coldplay",
+                "Coldploy",
+                "Metallica",
+                "Megadeth",
+                "Nirvana",
             ]
         ]
         mock_csv.return_value = pd.DataFrame(pool)
         from corefunc.canon.augment import _generate_hard_negatives
+
         result = _generate_hard_negatives(limit=10, similarity_floor=60, neg_limit=10)
         assert result.empty
 
@@ -190,14 +213,19 @@ class TestAugmentGoldStandard:
     @patch("corefunc.canon.augment.check_local_mb", return_value=True)
     def test_writes_gs_mb_parquet(self, mock_check, mock_pos, mock_neg, tmp_pq):
         """Writes gs_mb.parquet with combined positive and negative pairs."""
-        mock_pos.return_value = pd.DataFrame([
-            {"variant_a": "A", "variant_b": "B", "to_link": True, "source": "mb_alias"},
-        ])
-        mock_neg.return_value = pd.DataFrame([
-            {"variant_a": "C", "variant_b": "D", "to_link": False, "source": "mb_neg_fuzzy"},
-        ])
+        mock_pos.return_value = pd.DataFrame(
+            [
+                {"variant_a": "A", "variant_b": "B", "to_link": True, "source": "mb_alias"},
+            ]
+        )
+        mock_neg.return_value = pd.DataFrame(
+            [
+                {"variant_a": "C", "variant_b": "D", "to_link": False, "source": "mb_neg_fuzzy"},
+            ]
+        )
         with patch("corefunc.canon.augment.GS_MB_PQ", tmp_pq["gs_mb"]):
             from corefunc.canon.augment import augment_gold_standard
+
             n = augment_gold_standard(pos_limit=1, neg_limit=1)
             assert n == 2
             df = pd.read_parquet(tmp_pq["gs_mb"])
@@ -208,6 +236,7 @@ class TestAugmentGoldStandard:
     def test_raises_when_mbdb_unreachable(self, mock_check):
         """Raises RuntimeError when local MB mirror is unreachable."""
         from corefunc.canon.augment import augment_gold_standard
+
         with pytest.raises(RuntimeError, match="Cannot reach"):
             augment_gold_standard()
 
@@ -220,17 +249,23 @@ class TestBuildGoldStandardAugmented:
     def test_merges_mb_pairs(self, mock_read, tmp_pq):
         """Includes MB pairs alongside AVC pairs when augment=True."""
         # Building a minimal AVC DataFrame
-        avc_df = pd.DataFrame([{
-            "artist_variants": "Beatles{The Beatles",
-            "canonical_name": "The Beatles",
-            "to_link": True,
-            "comment": "",
-        }])
+        avc_df = pd.DataFrame(
+            [
+                {
+                    "artist_variants": "Beatles{The Beatles",
+                    "canonical_name": "The Beatles",
+                    "to_link": True,
+                    "comment": "",
+                }
+            ]
+        )
         # Building a minimal gs_mb DataFrame
-        mb_df = pd.DataFrame([
-            {"variant_a": "Foo", "variant_b": "Foobar", "to_link": True, "source": "mb_alias"},
-            {"variant_a": "Bar", "variant_b": "Baz", "to_link": False, "source": "mb_neg_fuzzy"},
-        ])
+        mb_df = pd.DataFrame(
+            [
+                {"variant_a": "Foo", "variant_b": "Foobar", "to_link": True, "source": "mb_alias"},
+                {"variant_a": "Bar", "variant_b": "Baz", "to_link": False, "source": "mb_neg_fuzzy"},
+            ]
+        )
         mb_df.to_parquet(tmp_pq["gs_mb"], index=False)
 
         def side_effect(path):
@@ -243,6 +278,7 @@ class TestBuildGoldStandardAugmented:
 
         mock_read.side_effect = side_effect
         from corefunc.canon.model import _build_gold_standard
+
         with patch("corefunc.canon.model.GS_MB_PQ", tmp_pq["gs_mb"]):
             gs = _build_gold_standard(augment=True)
             # AVC expands 1 pair + 2 MB pairs = 3 total
@@ -253,14 +289,19 @@ class TestBuildGoldStandardAugmented:
     @patch("corefunc.canon.model.read_parquet")
     def test_no_merge_when_augment_false(self, mock_read):
         """Does not load gs_mb.parquet when augment=False."""
-        avc_df = pd.DataFrame([{
-            "artist_variants": "Beatles{The Beatles",
-            "canonical_name": "The Beatles",
-            "to_link": True,
-            "comment": "",
-        }])
+        avc_df = pd.DataFrame(
+            [
+                {
+                    "artist_variants": "Beatles{The Beatles",
+                    "canonical_name": "The Beatles",
+                    "to_link": True,
+                    "comment": "",
+                }
+            ]
+        )
         mock_read.return_value = avc_df
         from corefunc.canon.model import _build_gold_standard
+
         gs = _build_gold_standard(augment=False)
         # Only the AVC pair
         assert len(gs) == 1

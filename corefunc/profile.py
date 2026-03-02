@@ -4,6 +4,7 @@ Provides text-oriented data profiling functions for CLI output.
 Extracts analytical insights from scrobble and artist_info Parquet stores
 using DuckDB queries and RapidFuzz for fuzzy name matching.
 """
+
 from __future__ import annotations
 import calendar
 import logging
@@ -147,6 +148,7 @@ def variant_candidates(
     dicts), combined_count, similarity_score.
     """
     from rapidfuzz import fuzz, process
+
     if not scrobble_data_exists():
         return []
     con = _con()
@@ -189,11 +191,13 @@ def variant_candidates(
                 {"name": name, "plays": int(counts[name])},
                 {"name": match_name, "plays": int(counts[match_name])},
             ]
-            clusters.append({
-                "variants": sorted(variants, key=lambda v: v["plays"], reverse=True),
-                "combined_count": int(counts[name]) + int(counts[match_name]),
-                "similarity": round(score, 1),
-            })
+            clusters.append(
+                {
+                    "variants": sorted(variants, key=lambda v: v["plays"], reverse=True),
+                    "combined_count": int(counts[name]) + int(counts[match_name]),
+                    "similarity": round(score, 1),
+                }
+            )
     # Sorting by combined count descending to highlight highest-impact merges
     clusters.sort(key=lambda c: c["combined_count"], reverse=True)
     return clusters
@@ -287,13 +291,17 @@ def trusted_companions(*, start_year: int = 2006, end_year: int = 2025) -> dict:
     con = _con()
     try:
         # Getting unique years in the range
-        years = con.execute(f"""
+        years = (
+            con.execute(f"""
             SELECT DISTINCT EXTRACT(YEAR FROM play_time)::INT AS year
             FROM {scrobble_duckdb_from()}
             WHERE play_time IS NOT NULL
               AND EXTRACT(YEAR FROM play_time) BETWEEN {start_year} AND {end_year}
             ORDER BY year
-        """).df()["year"].tolist()
+        """)
+            .df()["year"]
+            .tolist()
+        )
         if not years:
             return {"years": [], "companions": []}
         num_years = len(years)
@@ -332,13 +340,15 @@ def trusted_companions(*, start_year: int = 2006, end_year: int = 2025) -> dict:
         plays = group["plays"].tolist()
         std = float(group["plays"].std())
         total = int(group["plays"].sum())
-        companions.append({
-            "name": artist,
-            "total_plays": total,
-            "std_dev": round(std, 1),
-            "mean_per_year": round(total / num_years, 1),
-            "yearly_plays": dict(zip(group["year"].astype(int).tolist(), [int(p) for p in plays])),
-        })
+        companions.append(
+            {
+                "name": artist,
+                "total_plays": total,
+                "std_dev": round(std, 1),
+                "mean_per_year": round(total / num_years, 1),
+                "yearly_plays": dict(zip(group["year"].astype(int).tolist(), [int(p) for p in plays])),
+            }
+        )
     # Sorting by standard deviation (most consistent first)
     companions.sort(key=lambda c: c["std_dev"])
     return {
@@ -420,25 +430,29 @@ def monthly_summary() -> dict:
     for m in range(1, 13):
         chunk = df[df["month"] == m]
         if chunk.empty:
-            months.append({
+            months.append(
+                {
+                    "month": m,
+                    "name": calendar.month_name[m],
+                    "total": 0,
+                    "mean": 0.0,
+                    "min": 0,
+                    "max": 0,
+                    "year_count": 0,
+                }
+            )
+            continue
+        months.append(
+            {
                 "month": m,
                 "name": calendar.month_name[m],
-                "total": 0,
-                "mean": 0.0,
-                "min": 0,
-                "max": 0,
-                "year_count": 0,
-            })
-            continue
-        months.append({
-            "month": m,
-            "name": calendar.month_name[m],
-            "total": int(chunk["scrobble_count"].sum()),
-            "mean": round(float(chunk["scrobble_count"].mean()), 1),
-            "min": int(chunk["scrobble_count"].min()),
-            "max": int(chunk["scrobble_count"].max()),
-            "year_count": len(chunk),
-        })
+                "total": int(chunk["scrobble_count"].sum()),
+                "mean": round(float(chunk["scrobble_count"].mean()), 1),
+                "min": int(chunk["scrobble_count"].min()),
+                "max": int(chunk["scrobble_count"].max()),
+                "year_count": len(chunk),
+            }
+        )
     # Identifying strongest / weakest by mean
     active = [m for m in months if m["year_count"] > 0]
     strongest = max(active, key=lambda m: m["mean"]) if active else None
@@ -565,12 +579,14 @@ def listening_clock_profile() -> dict:
         for _, row in hourly_df.iterrows():
             h = int(row["hour"])
             cnt = int(row["scrobble_count"])
-            hours.append({
-                "hour": h,
-                "label": f"{h:02d}:00",
-                "count": cnt,
-                "pct": round(100.0 * cnt / hourly_total, 1) if hourly_total else 0.0,
-            })
+            hours.append(
+                {
+                    "hour": h,
+                    "label": f"{h:02d}:00",
+                    "count": cnt,
+                    "pct": round(100.0 * cnt / hourly_total, 1) if hourly_total else 0.0,
+                }
+            )
     peak_hour = max(hours, key=lambda h: h["count"]) if hours else None
     quiet_hour = min(hours, key=lambda h: h["count"]) if hours else None
     # Weekly breakdown
@@ -580,12 +596,14 @@ def listening_clock_profile() -> dict:
         for _, row in weekly_df.iterrows():
             wd = int(row["weekday"])
             cnt = int(row["scrobble_count"])
-            weekdays.append({
-                "weekday": wd,
-                "name": _WEEKDAY_NAMES[wd] if wd < 7 else "?",
-                "count": cnt,
-                "pct": round(100.0 * cnt / weekly_total, 1) if weekly_total else 0.0,
-            })
+            weekdays.append(
+                {
+                    "weekday": wd,
+                    "name": _WEEKDAY_NAMES[wd] if wd < 7 else "?",
+                    "count": cnt,
+                    "pct": round(100.0 * cnt / weekly_total, 1) if weekly_total else 0.0,
+                }
+            )
     peak_day = max(weekdays, key=lambda d: d["count"]) if weekdays else None
     quiet_day = min(weekdays, key=lambda d: d["count"]) if weekdays else None
     return {
@@ -607,6 +625,7 @@ def population_vs_scrobbles(top_n: int = 20) -> dict:
     Returns ranked lists by absolute scrobble count and per-capita rate.
     """
     import pypopulation
+
     stats_df = artist_country_stats()
     if stats_df.empty:
         return {"error": "No enriched country data available."}
@@ -631,14 +650,16 @@ def population_vs_scrobbles(top_n: int = 20) -> dict:
             continue
         plays = int(row["play_count"])
         per_million = round(plays / (pop / 1_000_000), 2)
-        rows.append({
-            "country": cc,
-            "name": name_map.get(cc, ""),
-            "play_count": plays,
-            "artist_count": int(row["artist_count"]),
-            "population": pop,
-            "per_million": per_million,
-        })
+        rows.append(
+            {
+                "country": cc,
+                "name": name_map.get(cc, ""),
+                "play_count": plays,
+                "artist_count": int(row["artist_count"]),
+                "population": pop,
+                "per_million": per_million,
+            }
+        )
     if not rows:
         return {"error": "No population data matched."}
     by_absolute = sorted(rows, key=lambda r: r["play_count"], reverse=True)[:top_n]
@@ -677,12 +698,14 @@ def user_country_profile(top_n: int = 10) -> dict:
     for _, row in df.head(top_n).iterrows():
         cc = row["country_code"]
         cnt = int(row["scrobble_count"])
-        rows.append({
-            "country": cc,
-            "name": name_map.get(cc, ""),
-            "scrobble_count": cnt,
-            "pct": round(100.0 * cnt / grand_total, 2) if grand_total else 0.0,
-        })
+        rows.append(
+            {
+                "country": cc,
+                "name": name_map.get(cc, ""),
+                "scrobble_count": cnt,
+                "pct": round(100.0 * cnt / grand_total, 2) if grand_total else 0.0,
+            }
+        )
     return {
         "countries": rows,
         "total_scrobbles_matched": grand_total,
@@ -756,20 +779,24 @@ def user_country_medal_profile(
         top_counts = dict(zip(filtered["country_code"], filtered["scrobble_count"].astype(int)))
     else:
         top_codes = counts_df.head(ucn)["country_code"].tolist()
-        top_counts = dict(zip(
-            counts_df.head(ucn)["country_code"],
-            counts_df.head(ucn)["scrobble_count"].astype(int),
-        ))
+        top_counts = dict(
+            zip(
+                counts_df.head(ucn)["country_code"],
+                counts_df.head(ucn)["scrobble_count"].astype(int),
+            )
+        )
     name_map = _country_name_map()
     entities = user_country_top_entities(top_n=top_n)
     countries: list[dict] = []
     for cc in top_codes:
-        countries.append({
-            "country": cc,
-            "name": name_map.get(cc, ""),
-            "scrobble_count": top_counts.get(cc, 0),
-            "artists": _df_to_medal_entries(entities["artists"], cc, "artists"),
-            "albums": _df_to_medal_entries(entities["albums"], cc, "albums"),
-            "tracks": _df_to_medal_entries(entities["tracks"], cc, "tracks"),
-        })
+        countries.append(
+            {
+                "country": cc,
+                "name": name_map.get(cc, ""),
+                "scrobble_count": top_counts.get(cc, 0),
+                "artists": _df_to_medal_entries(entities["artists"], cc, "artists"),
+                "albums": _df_to_medal_entries(entities["albums"], cc, "albums"),
+                "tracks": _df_to_medal_entries(entities["tracks"], cc, "tracks"),
+            }
+        )
     return {"countries": countries, "top_n": top_n, "ucn": len(top_codes)}

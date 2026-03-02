@@ -1,12 +1,15 @@
 """Provides data-cleaning helpers over Parquet files."""
+
 from __future__ import annotations
 import logging
 import re
 import pandas as pd
 from helpers.io import (
     ARTIST_INFO_PQ,
-    read_parquet, dump_parquet,
-    read_scrobble_df, dump_scrobble_df,
+    read_parquet,
+    dump_parquet,
+    read_scrobble_df,
+    dump_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
@@ -18,13 +21,33 @@ _SCROBBLE_TEXT_COLS = ["artist_name", "album_title", "track_title"]
 _ARTIST_INFO_TEXT_COLS = ["artist_name", "disambiguation_comment", "aliases"]
 # CP1252 bytes 0x80–0x9F → proper Unicode (0x81/0x8D/0x8F/0x90/0x9D undefined)
 _CP1252_C1: dict[int, str] = {
-    0x80: "\u20AC", 0x82: "\u201A", 0x83: "\u0192", 0x84: "\u201E",
-    0x85: "\u2026", 0x86: "\u2020", 0x87: "\u2021", 0x88: "\u02C6",
-    0x89: "\u2030", 0x8A: "\u0160", 0x8B: "\u2039", 0x8C: "\u0152",
-    0x8E: "\u017D", 0x91: "\u2018", 0x92: "\u2019", 0x93: "\u201C",
-    0x94: "\u201D", 0x95: "\u2022", 0x96: "\u2013", 0x97: "\u2014",
-    0x98: "\u02DC", 0x99: "\u2122", 0x9A: "\u0161", 0x9B: "\u203A",
-    0x9C: "\u0153", 0x9E: "\u017E", 0x9F: "\u0178",
+    0x80: "\u20ac",
+    0x82: "\u201a",
+    0x83: "\u0192",
+    0x84: "\u201e",
+    0x85: "\u2026",
+    0x86: "\u2020",
+    0x87: "\u2021",
+    0x88: "\u02c6",
+    0x89: "\u2030",
+    0x8A: "\u0160",
+    0x8B: "\u2039",
+    0x8C: "\u0152",
+    0x8E: "\u017d",
+    0x91: "\u2018",
+    0x92: "\u2019",
+    0x93: "\u201c",
+    0x94: "\u201d",
+    0x95: "\u2022",
+    0x96: "\u2013",
+    0x97: "\u2014",
+    0x98: "\u02dc",
+    0x99: "\u2122",
+    0x9A: "\u0161",
+    0x9B: "\u203a",
+    0x9C: "\u0153",
+    0x9E: "\u017e",
+    0x9F: "\u0178",
 }
 # Reverse: CP1252-decoded Unicode chars → original byte values
 _CP1252_REVERSE: dict[str, int] = {v: k for k, v in _CP1252_C1.items()}
@@ -93,10 +116,7 @@ def _repair_text(text: str) -> str:
     except (ValueError, UnicodeDecodeError):
         pass
     # Strategy 5: char-level CP1252 map; stripping unmappable C1 characters
-    return "".join(
-        _CP1252_C1.get(ord(ch), "") if 0x80 <= ord(ch) <= 0x9F else ch
-        for ch in text
-    )
+    return "".join(_CP1252_C1.get(ord(ch), "") if 0x80 <= ord(ch) <= 0x9F else ch for ch in text)
 
 
 def _fix_df_encoding(df: pd.DataFrame, text_cols: list[str]) -> tuple[pd.DataFrame, int]:

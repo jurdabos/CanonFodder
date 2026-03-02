@@ -4,6 +4,7 @@ the result to avc.parquet in the canonical schema.
 
 Intended as a one-time migration helper.
 """
+
 from __future__ import annotations
 import logging
 import re
@@ -83,7 +84,7 @@ def seed_avc_from_sql(sql_path: str | Path) -> int:
     m = re.search(r"INSERT INTO.*?VALUES\s*", text, re.IGNORECASE | re.DOTALL)
     if not m:
         raise ValueError("No INSERT INTO … VALUES found in the SQL file.")
-    values_text = text[m.end():]
+    values_text = text[m.end() :]
     # Finding all tuples
     tuples = _TUPLE_RE.findall(values_text)
     if not tuples:
@@ -105,14 +106,16 @@ def seed_avc_from_sql(sql_path: str | Path) -> int:
             stamp = pd.Timestamp(datetime.strptime(ts_raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc))
         else:
             stamp = pd.Timestamp(datetime.now(timezone.utc))
-        rows.append({
-            "artist_variants_hash": fields[0],
-            "artist_variants_text": fields[1],
-            "canonical_name": fields[3] or "",
-            "to_link": to_link,
-            "comment": fields[4] or "",
-            "stamp": stamp,
-        })
+        rows.append(
+            {
+                "artist_variants_hash": fields[0],
+                "artist_variants_text": fields[1],
+                "canonical_name": fields[3] or "",
+                "to_link": to_link,
+                "comment": fields[4] or "",
+                "stamp": stamp,
+            }
+        )
     df = pd.DataFrame(rows)
     # Enforcing correct dtypes
     df["to_link"] = df["to_link"].astype("boolean")

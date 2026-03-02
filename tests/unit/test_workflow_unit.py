@@ -1,6 +1,7 @@
 """
 Unit tests for corefunc.workflow (data-gathering orchestration).
 """
+
 import pandas as pd
 import pytest
 from unittest.mock import patch
@@ -17,6 +18,7 @@ class TestRunDataGatheringWorkflow:
         """Fetches full history when full=True, ignoring existing timestamp."""
         mock_fetch.return_value = pd.DataFrame({"a": [1]})
         from corefunc.workflow import run_data_gathering_workflow
+
         n = run_data_gathering_workflow("user1", full=True, source="lastfm")
         assert n == 5
         mock_fetch.assert_called_once_with("user1", None)
@@ -30,6 +32,7 @@ class TestRunDataGatheringWorkflow:
         """Uses last timestamp for incremental fetch."""
         mock_fetch.return_value = pd.DataFrame({"a": [1]})
         from corefunc.workflow import run_data_gathering_workflow
+
         n = run_data_gathering_workflow("user1")
         assert n == 3
         mock_fetch.assert_called_once_with("user1", 1700000000)
@@ -40,6 +43,7 @@ class TestRunDataGatheringWorkflow:
         """Returns 0 when API returns empty DataFrame."""
         mock_fetch.return_value = pd.DataFrame()
         from corefunc.workflow import run_data_gathering_workflow
+
         n = run_data_gathering_workflow("user1")
         assert n == 0
 
@@ -50,6 +54,7 @@ class TestRunDataGatheringWorkflow:
         """Uses ListenBrainz path when source is not lastfm."""
         mock_lb.return_value = pd.DataFrame({"a": [1]})
         from corefunc.workflow import run_data_gathering_workflow
+
         n = run_data_gathering_workflow("lbuser", source="listenbrainz")
         assert n == 4
         mock_lb.assert_called_once()
@@ -59,6 +64,7 @@ class TestRunDataGatheringWorkflow:
     def test_api_error_propagates(self, mock_ts, mock_fetch):
         """Raises when the API call fails."""
         from corefunc.workflow import run_data_gathering_workflow
+
         with pytest.raises(ConnectionError):
             run_data_gathering_workflow("user1")
 
@@ -70,6 +76,7 @@ class TestRunDataGatheringWorkflow:
         """Country sync failure is logged but does not abort."""
         mock_fetch.return_value = pd.DataFrame({"a": [1]})
         from corefunc.workflow import run_data_gathering_workflow
+
         n = run_data_gathering_workflow("user1", source="lastfm")
         assert n == 2
 
@@ -80,6 +87,7 @@ class TestGetDevice:
     def test_cpu_fallback(self):
         """Falls back to cpu when xgboost GPU probe raises."""
         import helpers.device as dev
+
         dev._CACHED_DEVICE = None
         with patch("helpers.device.xgb", create=True) as mock_xgb:
             mock_xgb.DMatrix.side_effect = Exception("no GPU")
@@ -89,12 +97,15 @@ class TestGetDevice:
                 try:
                     import xgboost as xgb
                     import numpy as np
+
                     dtrain = xgb.DMatrix(
-                        np.array([[1, 2]], dtype=np.float32), label=[0],
+                        np.array([[1, 2]], dtype=np.float32),
+                        label=[0],
                     )
                     xgb.train(
                         {"device": "cuda", "max_depth": 1, "verbosity": 0},
-                        dtrain, num_boost_round=1,
+                        dtrain,
+                        num_boost_round=1,
                     )
                     dev._CACHED_DEVICE = "cuda"
                 except Exception:
@@ -104,12 +115,14 @@ class TestGetDevice:
     def test_cache_returns_same(self):
         """Returns cached value on subsequent calls."""
         import helpers.device as dev
+
         dev._CACHED_DEVICE = "cpu"
         assert dev.get_device() == "cpu"
 
     def test_reset_cache(self):
         """Clears the cached device."""
         import helpers.device as dev
+
         dev._CACHED_DEVICE = "cpu"
         dev.reset_cache()
         assert dev._CACHED_DEVICE is None

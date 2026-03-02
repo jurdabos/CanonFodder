@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.cluster (fuzzy scoring, clustering utilities).
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -27,7 +28,14 @@ class TestFuzzyScores:
     def test_returns_six_keys(self):
         """Returns exactly the 6 expected scoring keys."""
         scores = fuzzy_scores("abc", "xyz")
-        assert set(scores.keys()) == {"ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio", "WRatio", "QRatio"}
+        assert set(scores.keys()) == {
+            "ratio",
+            "partial_ratio",
+            "token_sort_ratio",
+            "token_set_ratio",
+            "WRatio",
+            "QRatio",
+        }
 
     def test_similar_strings_score_high(self):
         """Closely related strings score above 0.7."""
@@ -111,13 +119,17 @@ class TestDbscanWithAnchors:
 
     def test_finds_eps(self):
         """Finds a valid eps that satisfies anchor constraints."""
-        dist = np.array([
-            [0.0, 0.1, 0.9],
-            [0.1, 0.0, 0.9],
-            [0.9, 0.9, 0.0],
-        ])
+        dist = np.array(
+            [
+                [0.0, 0.1, 0.9],
+                [0.1, 0.0, 0.9],
+                [0.9, 0.9, 0.0],
+            ]
+        )
         eps, labels = dbscan_with_anchors(
-            ["A", "B", "C"], dist, [[0, 1]],
+            ["A", "B", "C"],
+            dist,
+            [[0, 1]],
             eps_range=np.arange(0.05, 1.0, 0.05),
         )
         assert labels[0] == labels[1]
@@ -125,14 +137,18 @@ class TestDbscanWithAnchors:
 
     def test_raises_when_impossible(self):
         """Raises RuntimeError when no eps satisfies all anchors."""
-        dist = np.array([
-            [0.0, 0.9, 0.1],
-            [0.9, 0.0, 0.9],
-            [0.1, 0.9, 0.0],
-        ])
+        dist = np.array(
+            [
+                [0.0, 0.9, 0.1],
+                [0.9, 0.0, 0.9],
+                [0.1, 0.9, 0.0],
+            ]
+        )
         with pytest.raises(RuntimeError, match="No ε"):
             dbscan_with_anchors(
-                ["A", "B", "C"], dist, [[0, 1]],
+                ["A", "B", "C"],
+                dist,
+                [[0, 1]],
                 eps_range=np.arange(0.05, 0.5, 0.05),
             )
 
@@ -143,6 +159,7 @@ class TestClfProba:
     def test_returns_float(self):
         """Returns a probability float for a simple trained model."""
         from sklearn.linear_model import LogisticRegression
+
         X = np.array([[1, 1, 1, 1, 1, 1], [0, 0, 0, 0, 0, 0]] * 10)
         y = np.array([1, 0] * 10)
         clf = LogisticRegression().fit(X, y)

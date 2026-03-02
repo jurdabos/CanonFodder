@@ -1,6 +1,7 @@
 """
 Unit tests for the Click CLI (main.py).
 """
+
 import pandas as pd
 import pytest
 from click.testing import CliRunner
@@ -62,6 +63,7 @@ class TestPurgeCommand:
     def test_purge_all(self, runner, populated_pq):
         """Deletes all Parquet files when --all is given."""
         from helpers.io import PQ_DIR
+
         assert any(PQ_DIR.glob("*.parquet"))
         result = runner.invoke(cli, ["purge", "--all", "--yes"])
         assert result.exit_code == 0
@@ -76,6 +78,7 @@ class TestPurgeCommand:
     def test_purge_all_aborts_on_no(self, runner, populated_pq):
         """Aborts when user declines the --all confirmation."""
         from helpers.io import PQ_DIR
+
         before = len(list(PQ_DIR.glob("*.parquet")))
         result = runner.invoke(cli, ["purge", "--all"], input="n\n")
         assert result.exit_code != 0
@@ -90,6 +93,7 @@ class TestPurgeCommand:
     def test_purge_interactive_select_all(self, runner, populated_pq):
         """Deletes all files when user confirms each one interactively."""
         from helpers.io import PQ_DIR
+
         count = len(list(PQ_DIR.glob("*.parquet")))
         result = runner.invoke(cli, ["purge"], input="y\n" * count)
         assert result.exit_code == 0
@@ -99,6 +103,7 @@ class TestPurgeCommand:
     def test_purge_interactive_skip_all(self, runner, populated_pq):
         """Skips all files when user declines each one interactively."""
         from helpers.io import PQ_DIR
+
         count = len(list(PQ_DIR.glob("*.parquet")))
         result = runner.invoke(cli, ["purge"], input="n\n" * count)
         assert result.exit_code == 0
@@ -108,6 +113,7 @@ class TestPurgeCommand:
     def test_purge_interactive_partial(self, runner, populated_pq):
         """Deletes only the files the user confirms."""
         from helpers.io import PQ_DIR
+
         count = len(list(PQ_DIR.glob("*.parquet")))
         assert count >= 2, "Need at least 2 files for partial test"
         # Confirming first, skipping the rest
@@ -252,29 +258,34 @@ class TestSourceHelpers:
     def test_normalise_lb(self):
         """Normalises 'lb' to 'listenbrainz'."""
         from main import _normalise_source
+
         assert _normalise_source("lb") == "listenbrainz"
         assert _normalise_source("LB") == "listenbrainz"
 
     def test_normalise_lastfm(self):
         """Keeps 'lastfm' unchanged."""
         from main import _normalise_source
+
         assert _normalise_source("lastfm") == "lastfm"
 
     def test_resolve_user_explicit(self):
         """Returns the user when explicitly provided."""
         from main import _resolve_user
+
         assert _resolve_user("lastfm", "myuser") == "myuser"
 
     @patch.dict("os.environ", {"LASTFM_USER": "envuser"}, clear=False)
     def test_resolve_user_from_env_lastfm(self):
         """Falls back to LASTFM_USER env var."""
         from main import _resolve_user
+
         assert _resolve_user("lastfm", None) == "envuser"
 
     @patch.dict("os.environ", {"LB_USER": "lbenvuser"}, clear=False)
     def test_resolve_user_from_env_lb(self):
         """Falls back to LB_USER env var for listenbrainz."""
         from main import _resolve_user
+
         assert _resolve_user("listenbrainz", None) == "lbenvuser"
 
     @patch.dict("os.environ", {}, clear=True)
@@ -282,6 +293,7 @@ class TestSourceHelpers:
         """Raises UsageError when neither flag nor env var is set."""
         import click
         from main import _resolve_user
+
         with pytest.raises(click.UsageError, match="--user is required"):
             _resolve_user("lastfm", None)
 
@@ -367,26 +379,30 @@ class TestQaGroup:
 
     def test_qa_show_with_data(self, runner, tmp_pq_dir):
         """Displays report rows with source/target in src= field."""
-        df = pd.DataFrame([{
-            "timestamp": "2026-02-24T12:00:00",
-            "source": "listenbrainz",
-            "target": "scrobble",
-            "row_count": 500,
-            "passed": True,
-            "schema_ok": True,
-            "artist_null_pct": 0.0,
-            "track_null_pct": 0.0,
-            "album_null_pct": 5.0,
-            "mbid_fill_rate": 80.0,
-            "mbid_valid_rate": 99.0,
-            "duplicate_count": 2,
-            "duplicate_pct": 0.4,
-            "ts_before_min": 0,
-            "ts_after_now": 0,
-            "bad_char_rows": 0,
-            "fetched": None,
-            "stored": 500,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "timestamp": "2026-02-24T12:00:00",
+                    "source": "listenbrainz",
+                    "target": "scrobble",
+                    "row_count": 500,
+                    "passed": True,
+                    "schema_ok": True,
+                    "artist_null_pct": 0.0,
+                    "track_null_pct": 0.0,
+                    "album_null_pct": 5.0,
+                    "mbid_fill_rate": 80.0,
+                    "mbid_valid_rate": 99.0,
+                    "duplicate_count": 2,
+                    "duplicate_pct": 0.4,
+                    "ts_before_min": 0,
+                    "ts_after_now": 0,
+                    "bad_char_rows": 0,
+                    "fetched": None,
+                    "stored": 500,
+                }
+            ]
+        )
         df.to_parquet(tmp_pq_dir / "qa_report.parquet", index=False)
         result = runner.invoke(cli, ["qa", "show"])
         assert result.exit_code == 0
@@ -396,26 +412,30 @@ class TestQaGroup:
 
     def test_qa_show_target_only(self, runner, tmp_pq_dir):
         """Shows only target when source is absent."""
-        df = pd.DataFrame([{
-            "timestamp": "2026-02-24T14:00:00",
-            "source": None,
-            "target": "artist_info",
-            "row_count": 100,
-            "passed": True,
-            "schema_ok": True,
-            "artist_null_pct": 0.0,
-            "track_null_pct": 0.0,
-            "album_null_pct": 0.0,
-            "mbid_fill_rate": 90.0,
-            "mbid_valid_rate": 100.0,
-            "duplicate_count": 0,
-            "duplicate_pct": 0.0,
-            "ts_before_min": 0,
-            "ts_after_now": 0,
-            "bad_char_rows": 0,
-            "fetched": None,
-            "stored": 100,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "timestamp": "2026-02-24T14:00:00",
+                    "source": None,
+                    "target": "artist_info",
+                    "row_count": 100,
+                    "passed": True,
+                    "schema_ok": True,
+                    "artist_null_pct": 0.0,
+                    "track_null_pct": 0.0,
+                    "album_null_pct": 0.0,
+                    "mbid_fill_rate": 90.0,
+                    "mbid_valid_rate": 100.0,
+                    "duplicate_count": 0,
+                    "duplicate_pct": 0.0,
+                    "ts_before_min": 0,
+                    "ts_after_now": 0,
+                    "bad_char_rows": 0,
+                    "fetched": None,
+                    "stored": 100,
+                }
+            ]
+        )
         df.to_parquet(tmp_pq_dir / "qa_report.parquet", index=False)
         result = runner.invoke(cli, ["qa", "show"])
         assert result.exit_code == 0
@@ -425,22 +445,50 @@ class TestQaGroup:
 
     def test_qa_show_fail_only(self, runner, tmp_pq_dir):
         """Filters to failed reports when --fail-only is set."""
-        df = pd.DataFrame([
-            {"timestamp": "2026-02-24T12:00:00", "source": "lastfm",
-             "target": "scrobble", "row_count": 500, "passed": True,
-             "schema_ok": True, "artist_null_pct": 0.0, "track_null_pct": 0.0,
-             "album_null_pct": 0.0, "mbid_fill_rate": 80.0,
-             "mbid_valid_rate": 99.0, "duplicate_count": 0, "duplicate_pct": 0.0,
-             "ts_before_min": 0, "ts_after_now": 0, "bad_char_rows": 0,
-             "fetched": None, "stored": 500},
-            {"timestamp": "2026-02-24T13:00:00", "source": "listenbrainz",
-             "target": "scrobble", "row_count": 600, "passed": False,
-             "schema_ok": False, "artist_null_pct": 10.0, "track_null_pct": 0.0,
-             "album_null_pct": 0.0, "mbid_fill_rate": 50.0,
-             "mbid_valid_rate": 80.0, "duplicate_count": 50, "duplicate_pct": 8.3,
-             "ts_before_min": 0, "ts_after_now": 0, "bad_char_rows": 3,
-             "fetched": None, "stored": 600},
-        ])
+        df = pd.DataFrame(
+            [
+                {
+                    "timestamp": "2026-02-24T12:00:00",
+                    "source": "lastfm",
+                    "target": "scrobble",
+                    "row_count": 500,
+                    "passed": True,
+                    "schema_ok": True,
+                    "artist_null_pct": 0.0,
+                    "track_null_pct": 0.0,
+                    "album_null_pct": 0.0,
+                    "mbid_fill_rate": 80.0,
+                    "mbid_valid_rate": 99.0,
+                    "duplicate_count": 0,
+                    "duplicate_pct": 0.0,
+                    "ts_before_min": 0,
+                    "ts_after_now": 0,
+                    "bad_char_rows": 0,
+                    "fetched": None,
+                    "stored": 500,
+                },
+                {
+                    "timestamp": "2026-02-24T13:00:00",
+                    "source": "listenbrainz",
+                    "target": "scrobble",
+                    "row_count": 600,
+                    "passed": False,
+                    "schema_ok": False,
+                    "artist_null_pct": 10.0,
+                    "track_null_pct": 0.0,
+                    "album_null_pct": 0.0,
+                    "mbid_fill_rate": 50.0,
+                    "mbid_valid_rate": 80.0,
+                    "duplicate_count": 50,
+                    "duplicate_pct": 8.3,
+                    "ts_before_min": 0,
+                    "ts_after_now": 0,
+                    "bad_char_rows": 3,
+                    "fetched": None,
+                    "stored": 600,
+                },
+            ]
+        )
         df.to_parquet(tmp_pq_dir / "qa_report.parquet", index=False)
         result = runner.invoke(cli, ["qa", "show", "--fail-only"])
         assert result.exit_code == 0
@@ -455,22 +503,26 @@ class TestParseRankRanges:
     def test_single_range(self):
         """Parses a single (start, end) tuple."""
         from main import _parse_rank_ranges
+
         assert _parse_rank_ranges("(1, 5)") == [(1, 5)]
 
     def test_multiple_ranges(self):
         """Parses multiple ranges and sorts them."""
         from main import _parse_rank_ranges
+
         assert _parse_rank_ranges("(27, 29), (1, 5)") == [(1, 5), (27, 29)]
 
     def test_no_spaces(self):
         """Handles input without spaces."""
         from main import _parse_rank_ranges
+
         assert _parse_rank_ranges("(1,5),(27,29)") == [(1, 5), (27, 29)]
 
     def test_invalid_string_raises(self):
         """Raises BadParameter for unparseable input."""
         import click
         from main import _parse_rank_ranges
+
         with pytest.raises(click.BadParameter, match="Cannot parse"):
             _parse_rank_ranges("nonsense")
 
@@ -478,6 +530,7 @@ class TestParseRankRanges:
         """Raises BadParameter when start is 0."""
         import click
         from main import _parse_rank_ranges
+
         with pytest.raises(click.BadParameter, match="Invalid range"):
             _parse_rank_ranges("(0, 5)")
 
@@ -485,6 +538,7 @@ class TestParseRankRanges:
         """Raises BadParameter when start > end."""
         import click
         from main import _parse_rank_ranges
+
         with pytest.raises(click.BadParameter, match="Invalid range"):
             _parse_rank_ranges("(10, 3)")
 
@@ -495,6 +549,7 @@ class TestProfileTopCustom:
     def test_custom_single_range(self, runner, tmp_pq_dir):
         """Displays only the requested rank range."""
         from tests.unit.test_profile import _write_fixtures
+
         _write_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "top", "--custom", "(1, 2)"])
         assert result.exit_code == 0
@@ -505,6 +560,7 @@ class TestProfileTopCustom:
     def test_custom_multi_range_has_ellipsis(self, runner, tmp_pq_dir):
         """Prints '...' between discontinuous ranges."""
         from tests.unit.test_profile import _write_fixtures
+
         _write_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "top", "--custom", "(1, 2), (4, 5)"])
         assert result.exit_code == 0
@@ -528,6 +584,7 @@ class TestProfilePopulation:
     def test_population_with_data(self, runner, tmp_pq_dir):
         """Displays absolute and per-capita rankings."""
         from tests.unit.test_profile import _write_fixtures
+
         _write_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "population", "-n", "5"])
         assert result.exit_code == 0
@@ -538,6 +595,7 @@ class TestProfilePopulation:
     def test_population_shows_country_codes(self, runner, tmp_pq_dir):
         """Output includes country codes from the data."""
         from tests.unit.test_profile import _write_fixtures
+
         _write_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "population", "-n", "10"])
         assert result.exit_code == 0
@@ -557,6 +615,7 @@ class TestProfileWhere:
     def test_where_with_data(self, runner, tmp_pq_dir):
         """Displays user-country scrobble breakdown."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "where", "-n", "5"])
         assert result.exit_code == 0
@@ -566,6 +625,7 @@ class TestProfileWhere:
     def test_where_shows_percentages(self, runner, tmp_pq_dir):
         """Output includes percentage values."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "where", "-n", "5"])
         assert result.exit_code == 0
@@ -584,6 +644,7 @@ class TestProfileUc:
     def test_uc_with_data(self, runner, tmp_pq_dir):
         """Displays medal tables with Artists, Albums, Tracks headers."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "-n", "2", "--ucn", "2"])
         assert result.exit_code == 0
@@ -594,6 +655,7 @@ class TestProfileUc:
     def test_uc_shows_medals(self, runner, tmp_pq_dir):
         """Output includes medal labels like GOLD, SILVER."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "-n", "3", "--ucn", "1"])
         assert result.exit_code == 0
@@ -602,6 +664,7 @@ class TestProfileUc:
     def test_uc_respects_ucn(self, runner, tmp_pq_dir):
         """With --ucn 1, only one country section appears."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "--ucn", "1"])
         assert result.exit_code == 0
@@ -610,6 +673,7 @@ class TestProfileUc:
     def test_uc_filter_by_country_codes(self, runner, tmp_pq_dir):
         """The -c flag restricts output to the given countries."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "-n", "2", "-c", "HU"])
         assert result.exit_code == 0
@@ -619,6 +683,7 @@ class TestProfileUc:
     def test_uc_filter_parenthesised(self, runner, tmp_pq_dir):
         """The -c flag accepts parenthesised, comma-separated codes."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "-c", "(DE, HU)"])
         assert result.exit_code == 0
@@ -629,6 +694,7 @@ class TestProfileUc:
     def test_uc_show_single_category(self, runner, tmp_pq_dir):
         """The -s flag limits output to one category."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "--ucn", "1", "-s", "artist"])
         assert result.exit_code == 0
@@ -639,6 +705,7 @@ class TestProfileUc:
     def test_uc_show_two_categories(self, runner, tmp_pq_dir):
         """The -s flag accepts a pair of categories."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "--ucn", "1", "-s", "(album, track)"])
         assert result.exit_code == 0
@@ -649,6 +716,7 @@ class TestProfileUc:
     def test_uc_show_default_all(self, runner, tmp_pq_dir):
         """Without -s, all three categories are shown."""
         from tests.unit.test_profile import _write_uc_fixtures
+
         _write_uc_fixtures(tmp_pq_dir)
         result = runner.invoke(cli, ["profile", "uc", "--ucn", "1"])
         assert result.exit_code == 0

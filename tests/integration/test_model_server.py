@@ -1,6 +1,7 @@
 """
 Integration tests for corefunc.model_server (FastAPI).
 """
+
 import pytest
 from unittest.mock import MagicMock
 import numpy as np
@@ -31,6 +32,7 @@ class TestPredictEndpoint:
     def test_predict_without_model(self, client):
         """Returns 503 when model is not loaded."""
         import corefunc.model_server as srv
+
         srv._model = None
         resp = client.post("/predict", json={"data": {"ratio": 90.0}})
         assert resp.status_code == 503
@@ -38,6 +40,7 @@ class TestPredictEndpoint:
     def test_predict_with_model(self, client):
         """Returns prediction when model is available."""
         import corefunc.model_server as srv
+
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([1])
         mock_model.predict_proba.return_value = np.array([[0.2, 0.8]])
@@ -60,6 +63,7 @@ class TestPredictBatchEndpoint:
     def test_batch_prediction(self, client):
         """Returns batch results when model is available."""
         import corefunc.model_server as srv
+
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([0])
         mock_model.predict_proba.return_value = np.array([[0.7, 0.3]])

@@ -1,6 +1,7 @@
 """
 Tests for corefunc.qa — post-ingestion scrobble quality checks.
 """
+
 import pandas as pd
 from corefunc.qa import (
     _check_duplicates,
@@ -20,13 +21,15 @@ from corefunc.qa import (
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def _good_df(n: int = 5) -> pd.DataFrame:
     """Builds a minimal valid scrobble DataFrame with *n* rows."""
-    return pd.DataFrame({
-        "artist_name": [f"Artist {i}" for i in range(n)],
-        "album_title": [f"Album {i}" for i in range(n)],
-        "track_title": [f"Track {i}" for i in range(n)],
-        "artist_mbid": ["a4074512-87e0-4820-b609-0c4a18142a70"] * n,
-        "play_time": pd.date_range("2024-06-01", periods=n, freq="5min", tz="UTC"),
-    })
+    return pd.DataFrame(
+        {
+            "artist_name": [f"Artist {i}" for i in range(n)],
+            "album_title": [f"Album {i}" for i in range(n)],
+            "track_title": [f"Track {i}" for i in range(n)],
+            "artist_mbid": ["a4074512-87e0-4820-b609-0c4a18142a70"] * n,
+            "play_time": pd.date_range("2024-06-01", periods=n, freq="5min", tz="UTC"),
+        }
+    )
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
@@ -208,9 +211,9 @@ class TestCheckEncoding:
     def test_non_latin_ok(self):
         """Does not flag valid non-Latin scripts."""
         df = _good_df(3)
-        df.loc[0, "artist_name"] = "אריק איינשטיין"   # Hebrew
+        df.loc[0, "artist_name"] = "אריק איינשטיין"  # Hebrew
         df.loc[1, "artist_name"] = "Σωκράτης Μάλαμας"  # Greek
-        df.loc[2, "artist_name"] = "ลุลา"               # Thai
+        df.loc[2, "artist_name"] = "ลุลา"  # Thai
         result = _check_encoding(df)
         assert result["pass"] is True
 
@@ -321,28 +324,37 @@ class TestQaArtistInfo:
     def test_enrichment_rates(self, tmp_pq_dir):
         """Reports correct real-fill enrichment rates."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "artist_name": ["A", "B", "C", "D"],
-            "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", "", ""],
-            "country": ["DE", None, "US", ""],
-            "disambiguation_comment": ["rock", "None", "", None],
-            "aliases": ["a1,a2", "", "None", None],
-        })
+
+        df = pd.DataFrame(
+            {
+                "artist_name": ["A", "B", "C", "D"],
+                "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee", "", ""],
+                "country": ["DE", None, "US", ""],
+                "disambiguation_comment": ["rock", "None", "", None],
+                "aliases": ["a1,a2", "", "None", None],
+            }
+        )
         df.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         result = qa_artist_info()
         enr = result["enrichment"]
-        assert enr["country"]["filled"] == 2      # "DE", "US"
+        assert enr["country"]["filled"] == 2  # "DE", "US"
         assert enr["country"]["fill_rate"] == 50.0
         assert enr["disambiguation"]["filled"] == 1  # "rock" only
-        assert enr["aliases"]["filled"] == 1        # "a1,a2" only
+        assert enr["aliases"]["filled"] == 1  # "a1,a2" only
 
     def test_enrichment_persisted(self, tmp_pq_dir):
         """Verifies enrichment fill rates are written to qa_report.parquet."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "artist_name": ["A"], "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
-            "country": ["GB"], "disambiguation_comment": ["punk"], "aliases": ["alias1"],
-        })
+
+        df = pd.DataFrame(
+            {
+                "artist_name": ["A"],
+                "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+                "country": ["GB"],
+                "disambiguation_comment": ["punk"],
+                "aliases": ["alias1"],
+            }
+        )
         df.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         qa_artist_info()
         report_df = pd.read_parquet(io_mod.QA_REPORT_PQ)
@@ -364,12 +376,15 @@ class TestQaGsMb:
     def test_pass_on_good_data(self, tmp_pq_dir):
         """Returns a passing report for clean sample data."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "variant_a": ["Björk", "The Beatles", "Radiohead"],
-            "variant_b": ["Bjork", "Beatles, The", "Radio Head"],
-            "to_link": [True, True, False],
-            "source": ["mb_alias", "mb_alias", "mb_neg_fuzzy"],
-        })
+
+        df = pd.DataFrame(
+            {
+                "variant_a": ["Björk", "The Beatles", "Radiohead"],
+                "variant_b": ["Bjork", "Beatles, The", "Radio Head"],
+                "to_link": [True, True, False],
+                "source": ["mb_alias", "mb_alias", "mb_neg_fuzzy"],
+            }
+        )
         df.to_parquet(io_mod.GS_MB_PQ, index=False)
         result = qa_gs_mb()
         assert result["passed"] is True
@@ -379,12 +394,15 @@ class TestQaGsMb:
     def test_label_distribution(self, tmp_pq_dir):
         """Reports correct positive/negative/null counts."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "variant_a": ["A", "B", "C", "D"],
-            "variant_b": ["A2", "B2", "C2", "D2"],
-            "to_link": [True, True, False, None],
-            "source": ["mb_alias", "mb_alias", "mb_neg_exact", "mb_neg_fuzzy"],
-        })
+
+        df = pd.DataFrame(
+            {
+                "variant_a": ["A", "B", "C", "D"],
+                "variant_b": ["A2", "B2", "C2", "D2"],
+                "to_link": [True, True, False, None],
+                "source": ["mb_alias", "mb_alias", "mb_neg_exact", "mb_neg_fuzzy"],
+            }
+        )
         df.to_parquet(io_mod.GS_MB_PQ, index=False)
         result = qa_gs_mb()
         dist = result["label_distribution"]
@@ -395,12 +413,15 @@ class TestQaGsMb:
     def test_source_breakdown(self, tmp_pq_dir):
         """Reports correct per-source row counts."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "variant_a": ["A", "B", "C"],
-            "variant_b": ["A2", "B2", "C2"],
-            "to_link": [True, False, False],
-            "source": ["mb_alias", "mb_neg_exact", "mb_neg_exact"],
-        })
+
+        df = pd.DataFrame(
+            {
+                "variant_a": ["A", "B", "C"],
+                "variant_b": ["A2", "B2", "C2"],
+                "to_link": [True, False, False],
+                "source": ["mb_alias", "mb_neg_exact", "mb_neg_exact"],
+            }
+        )
         df.to_parquet(io_mod.GS_MB_PQ, index=False)
         result = qa_gs_mb()
         assert result["source_breakdown"]["mb_alias"] == 1
@@ -409,12 +430,15 @@ class TestQaGsMb:
     def test_duplicates_detected(self, tmp_pq_dir):
         """Detects duplicate (variant_a, variant_b) pairs."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "variant_a": ["A", "A", "B"],
-            "variant_b": ["A2", "A2", "B2"],
-            "to_link": [True, True, False],
-            "source": ["mb_alias", "mb_alias", "mb_neg_fuzzy"],
-        })
+
+        df = pd.DataFrame(
+            {
+                "variant_a": ["A", "A", "B"],
+                "variant_b": ["A2", "A2", "B2"],
+                "to_link": [True, True, False],
+                "source": ["mb_alias", "mb_alias", "mb_neg_fuzzy"],
+            }
+        )
         df.to_parquet(io_mod.GS_MB_PQ, index=False)
         result = qa_gs_mb()
         assert result["duplicates"]["duplicate_count"] == 1
@@ -422,12 +446,15 @@ class TestQaGsMb:
     def test_report_persisted(self, tmp_pq_dir):
         """Verifies that a row was appended to qa_report.parquet."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "variant_a": ["A"],
-            "variant_b": ["A2"],
-            "to_link": [True],
-            "source": ["mb_alias"],
-        })
+
+        df = pd.DataFrame(
+            {
+                "variant_a": ["A"],
+                "variant_b": ["A2"],
+                "to_link": [True],
+                "source": ["mb_alias"],
+            }
+        )
         df.to_parquet(io_mod.GS_MB_PQ, index=False)
         qa_gs_mb()
         report_df = pd.read_parquet(io_mod.QA_REPORT_PQ)

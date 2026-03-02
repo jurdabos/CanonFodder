@@ -1,6 +1,7 @@
 """
 Tests for corefunc.profile — data profiling functions.
 """
+
 import pandas as pd
 from corefunc.profile import (
     country_breakdown,
@@ -30,42 +31,53 @@ def _scrobble_df(years=(2023, 2024, 2025)) -> pd.DataFrame:
             # Varying play counts: Bohren & has more, Bohren und has fewer
             count = 10 if artist.startswith("Bohren &") else 5 if artist.startswith("Bohren und") else 8
             for j in range(count):
-                rows.append({
-                    "artist_name": artist,
-                    "album_title": album,
-                    "track_title": f"{track} #{j}",
-                    "artist_mbid": mbid,
-                    "play_time": pd.Timestamp(f"{year}-06-{(i * 5 + j + 1) % 28 + 1:02d} 20:00", tz="UTC"),
-                })
+                rows.append(
+                    {
+                        "artist_name": artist,
+                        "album_title": album,
+                        "track_title": f"{track} #{j}",
+                        "artist_mbid": mbid,
+                        "play_time": pd.Timestamp(f"{year}-06-{(i * 5 + j + 1) % 28 + 1:02d} 20:00", tz="UTC"),
+                    }
+                )
     return pd.DataFrame(rows)
 
 
 def _artist_info_df() -> pd.DataFrame:
     """Builds an artist_info DataFrame matching the scrobble artists."""
-    return pd.DataFrame({
-        "artist_name": [
-            "Bohren & der Club of Gore", "Bohren und der Club of Gore",
-            "Autechre", "Radiohead", "Secret Chiefs 3",
-        ],
-        "mbid": [
-            "a4074512-87e0-4820-b609-0c4a18142a70", "a4074512-87e0-4820-b609-0c4a18142a70",
-            "410c9baf-5469-44f6-9852-826524b80c61", "a74b1b7f-71a5-4011-9441-d0b5e4122711",
-            "b5f3a039-10fa-44d6-99f2-27aeb5e5bfd0",
-        ],
-        "country": ["DE", "DE", "GB", "GB", "US"],
-        "disambiguation_comment": ["", "", "", "", ""],
-        "aliases": ["", "", "", "", ""],
-    })
+    return pd.DataFrame(
+        {
+            "artist_name": [
+                "Bohren & der Club of Gore",
+                "Bohren und der Club of Gore",
+                "Autechre",
+                "Radiohead",
+                "Secret Chiefs 3",
+            ],
+            "mbid": [
+                "a4074512-87e0-4820-b609-0c4a18142a70",
+                "a4074512-87e0-4820-b609-0c4a18142a70",
+                "410c9baf-5469-44f6-9852-826524b80c61",
+                "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+                "b5f3a039-10fa-44d6-99f2-27aeb5e5bfd0",
+            ],
+            "country": ["DE", "DE", "GB", "GB", "US"],
+            "disambiguation_comment": ["", "", "", "", ""],
+            "aliases": ["", "", "", "", ""],
+        }
+    )
 
 
 def _country_codes_df() -> pd.DataFrame:
     """Builds a minimal c.parquet with ISO-2 to English name mapping."""
-    return pd.DataFrame({
-        "ISO-2": ["DE", "GB", "US"],
-        "ISO-3": ["DEU", "GBR", "USA"],
-        "en_name": ["Germany", "United Kingdom", "United States"],
-        "hu_name": ["Németország", "Egyesült Királyság", "Egyesült Államok"],
-    })
+    return pd.DataFrame(
+        {
+            "ISO-2": ["DE", "GB", "US"],
+            "ISO-3": ["DEU", "GBR", "USA"],
+            "en_name": ["Germany", "United Kingdom", "United States"],
+            "hu_name": ["Németország", "Egyesült Királyság", "Egyesült Államok"],
+        }
+    )
 
 
 def _write_fixtures(pq_dir, years=(2023, 2024, 2025)):
@@ -198,21 +210,26 @@ class TestTopArtistsProfile:
         _write_fixtures(tmp_pq_dir)
         # Overwriting artist_info to simulate post-propagation state
         import helpers.io as io_mod
-        ai = pd.DataFrame({
-            "artist_name": [
-                "Bohren & der Club of Gore",
-                "Autechre", "Radiohead", "Secret Chiefs 3",
-            ],
-            "mbid": [
-                "a4074512-87e0-4820-b609-0c4a18142a70",
-                "410c9baf-5469-44f6-9852-826524b80c61",
-                "a74b1b7f-71a5-4011-9441-d0b5e4122711",
-                "b5f3a039-10fa-44d6-99f2-27aeb5e5bfd0",
-            ],
-            "country": ["DE", "GB", "GB", "US"],
-            "disambiguation_comment": ["", "", "", ""],
-            "aliases": ["Bohren und der Club of Gore", "", "", ""],
-        })
+
+        ai = pd.DataFrame(
+            {
+                "artist_name": [
+                    "Bohren & der Club of Gore",
+                    "Autechre",
+                    "Radiohead",
+                    "Secret Chiefs 3",
+                ],
+                "mbid": [
+                    "a4074512-87e0-4820-b609-0c4a18142a70",
+                    "410c9baf-5469-44f6-9852-826524b80c61",
+                    "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+                    "b5f3a039-10fa-44d6-99f2-27aeb5e5bfd0",
+                ],
+                "country": ["DE", "GB", "GB", "US"],
+                "disambiguation_comment": ["", "", "", ""],
+                "aliases": ["Bohren und der Club of Gore", "", "", ""],
+            }
+        )
         ai.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         result = top_artists_profile(n=5, canonize=True)
         assert "canon_top" in result
@@ -311,11 +328,13 @@ def _write_uc_fixtures(pq_dir, years=(2023, 2024, 2025)):
     _scrobble_df(years).to_parquet(pq_dir / "scrobble.parquet", index=False)
     _artist_info_df().to_parquet(pq_dir / "artist_info.parquet", index=False)
     _country_codes_df().to_parquet(pq_dir / "c.parquet", index=False)
-    uc = pd.DataFrame({
-        "country_code": ["DE", "HU"],
-        "start_date": pd.to_datetime(["2022-01-01", "2024-01-01"]).date,
-        "end_date": [pd.Timestamp("2023-12-31").date(), None],
-    })
+    uc = pd.DataFrame(
+        {
+            "country_code": ["DE", "HU"],
+            "start_date": pd.to_datetime(["2022-01-01", "2024-01-01"]).date,
+            "end_date": [pd.Timestamp("2023-12-31").date(), None],
+        }
+    )
     uc.to_parquet(pq_dir / "uc.parquet", index=False)
     return pq_dir
 

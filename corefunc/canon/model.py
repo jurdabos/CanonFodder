@@ -6,6 +6,7 @@ Functions
 train_model()   – loads avc.parquet, computes fuzzy features, trains, saves.
 evaluate()      – computes classification report + AUC on a held-out set.
 """
+
 from __future__ import annotations
 import json
 import logging
@@ -96,7 +97,11 @@ def train_model(
     X = gs[num_cols]
     y = gs[target].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y,
+        X,
+        y,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=y,
     )
     # Defining LightGBM hyperparameters
     lgbm_params = {
@@ -114,18 +119,20 @@ def train_model(
     model = Pipeline([("prep", pre), ("clf", clf)])
     with experiment.start_run(run_name=run_name):
         # Logging training parameters
-        experiment.log_params({
-            "test_size": test_size,
-            "random_state": random_state,
-            "augment": augment,
-            "n_features": len(num_cols),
-            "n_total_pairs": len(X),
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "pos_train": int(y_train.sum()),
-            "neg_train": int((y_train == 0).sum()),
-            **{k: v for k, v in lgbm_params.items() if k != "n_jobs"},
-        })
+        experiment.log_params(
+            {
+                "test_size": test_size,
+                "random_state": random_state,
+                "augment": augment,
+                "n_features": len(num_cols),
+                "n_total_pairs": len(X),
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "pos_train": int(y_train.sum()),
+                "neg_train": int((y_train == 0).sum()),
+                **{k: v for k, v in lgbm_params.items() if k != "n_jobs"},
+            }
+        )
         model.fit(X_train, y_train)
         # Evaluating on the held-out set
         metrics = evaluate(model, X_test, y_test)

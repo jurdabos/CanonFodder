@@ -7,6 +7,7 @@ Tier C — Character-level: fine-grained character and n-gram features.
 
 The single entry point is ``compute_pair_features(a, b) -> dict``.
 """
+
 from __future__ import annotations
 import logging
 import unicodedata
@@ -84,9 +85,7 @@ def _kendall_tau_displacement(tokens_a: list[str], tokens_b: list[str]) -> float
         return 0.0
     # Counting discordant pairs
     n = len(order_in_b)
-    discordant = sum(
-        1 for i, j in combinations(range(n), 2) if order_in_b[i] > order_in_b[j]
-    )
+    discordant = sum(1 for i, j in combinations(range(n), 2) if order_in_b[i] > order_in_b[j])
     max_pairs = n * (n - 1) / 2
     return discordant / max_pairs if max_pairs > 0 else 0.0
 
@@ -112,7 +111,7 @@ def _token_features(a: str, b: str) -> dict[str, float]:
 def _char_ngrams(s: str, n: int) -> set[str]:
     """Returns the set of character n-grams for a lowercased string."""
     s = s.lower()
-    return {s[i:i + n] for i in range(len(s) - n + 1)} if len(s) >= n else set()
+    return {s[i : i + n] for i in range(len(s) - n + 1)} if len(s) >= n else set()
 
 
 def _shared_prefix_len(a: str, b: str) -> int:
@@ -156,6 +155,7 @@ def _unicode_script(ch: str) -> str:
 
 def _script_mismatch_flag(a: str, b: str) -> int:
     """Returns 1 if the dominant scripts of a and b differ, else 0."""
+
     def dominant_script(s: str) -> str:
         """Finds the most common script in a string."""
         scripts: dict[str, int] = {}
@@ -166,6 +166,7 @@ def _script_mismatch_flag(a: str, b: str) -> int:
         if not scripts:
             return "LATIN"
         return max(scripts, key=scripts.get)  # type: ignore[arg-type]
+
     return int(dominant_script(a) != dominant_script(b))
 
 
@@ -213,4 +214,5 @@ def fuzzy_scores(a: str, b: str) -> dict[str, float]:
     Delegates to helpers.cluster.fuzzy_scores (canonical location).
     """
     from helpers.cluster import fuzzy_scores as _legacy
+
     return _legacy(a, b)

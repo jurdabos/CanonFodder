@@ -30,6 +30,7 @@ MB_USERNAME=my_mb_username
 MB_PASSWORD=my_mb_password
 ```
 """
+
 from __future__ import annotations
 import logging
 import os
@@ -40,10 +41,12 @@ from typing import Any, Dict
 import musicbrainzngs as mb
 import pandas as pd
 from dotenv import load_dotenv
+
 load_dotenv()
 from HTTP.client import USER_AGENT as DEFAULT_UA  # noqa: E402
 from helpers.io import ARTIST_INFO_PQ, read_parquet, append_to_parquet  # noqa: E402
 from tenacity import retry, stop_after_attempt, wait_exponential  # noqa: E402
+
 _RETRY = retry(
     reraise=True,
     stop=stop_after_attempt(8),
@@ -182,13 +185,17 @@ def _cache_artist(data: Dict[str, Any]) -> None:
         aliases = [a.get("alias") if isinstance(a, dict) else a for a in data["alias-list"]]
     aliases = [str(a) for a in aliases if a]
     aliases_str = "{".join(aliases)
-    row = pd.DataFrame([{
-        "artist_name": artist_name,
-        "mbid": data.get("id") or "",
-        "country": data.get("country") or "",
-        "disambiguation_comment": data.get("disambiguation") or "",
-        "aliases": aliases_str,
-    }])
+    row = pd.DataFrame(
+        [
+            {
+                "artist_name": artist_name,
+                "mbid": data.get("id") or "",
+                "country": data.get("country") or "",
+                "disambiguation_comment": data.get("disambiguation") or "",
+                "aliases": aliases_str,
+            }
+        ]
+    )
     append_to_parquet(row, ARTIST_INFO_PQ, dedup_cols=["artist_name"])
     LOGGER.debug(f"Cached {artist_name} with {len(aliases)} aliases")
 
@@ -208,10 +215,7 @@ def add_alias(mbid: str, alias: str, *, sort_name: str | None = None) -> None:
     """
     init()
     mb.add_artist_alias(  # type: ignore[attr-defined]
-        gid=mbid,
-        alias=alias,
-        sort_name=sort_name or alias,
-        locale=None, primary=None
+        gid=mbid, alias=alias, sort_name=sort_name or alias, locale=None, primary=None
     )
 
 
@@ -279,12 +283,12 @@ def lookup_mb_for(artist_name: str) -> str | None:
 
 @_rate_limited
 def search_artist(
-        artist: str | None = None,
-        alias: str | None = None,
-        primary_alias: str | None = None,
-        country: str | None = None,
-        *,
-        limit: int = 10,
+    artist: str | None = None,
+    alias: str | None = None,
+    primary_alias: str | None = None,
+    country: str | None = None,
+    *,
+    limit: int = 10,
 ) -> list[dict]:
     """
     Search for artists in MusicBrainz.
@@ -324,15 +328,12 @@ def search_artist(
         params["limit"] = limit
 
         # Use a more robust search with additional parameters
-        result = _mb_call(
-            mb.search_artists,
-            **params
-        )["artist-list"]
+        result = _mb_call(mb.search_artists, **params)["artist-list"]
         LOGGER.info(f"Found {len(result)} results for '{artist}'")
         if result:
             first_result = result[0]
             LOGGER.debug(f"Top match: {first_result.get('name')} ({first_result.get('id')})")
-            if 'disambiguation' in first_result:
+            if "disambiguation" in first_result:
                 LOGGER.debug(f"Disambiguation: {first_result.get('disambiguation')}")
         return result
     except Exception as e:
@@ -471,7 +472,7 @@ def get_complete_artist_info(artist_identifier: str = None, **kwargs) -> dict[st
                         "id": row["mbid"] or None,
                         "name": row["artist_name"],
                         "country": row["country"] or None,
-                    "aliases": str(row["aliases"]).split("{") if row["aliases"] else [],
+                        "aliases": str(row["aliases"]).split("{") if row["aliases"] else [],
                         "disambiguation": row["disambiguation_comment"] or None,
                     }
         # ── Remote calls ──────────────────────────────────────────────────
@@ -483,7 +484,13 @@ def get_complete_artist_info(artist_identifier: str = None, **kwargs) -> dict[st
                 if found_mbid is None:
                     LOGGER.warning(f"No MusicBrainz ID found for {artist_identifier}")
                     _cache_artist({"name": artist_identifier})
-                    return {"id": None, "name": artist_identifier, "country": None, "aliases": [], "disambiguation": None}
+                    return {
+                        "id": None,
+                        "name": artist_identifier,
+                        "country": None,
+                        "aliases": [],
+                        "disambiguation": None,
+                    }
                 data = lookup_artist(found_mbid, with_aliases=True)
             return data
         except Exception as exc:
@@ -492,14 +499,18 @@ def get_complete_artist_info(artist_identifier: str = None, **kwargs) -> dict[st
             return {
                 "id": artist_identifier if is_mbid else None,
                 "name": artist_identifier if not is_mbid else "Unknown Artist",
-                "country": None, "aliases": [], "disambiguation": None,
+                "country": None,
+                "aliases": [],
+                "disambiguation": None,
             }
     except Exception as exc:
         LOGGER.error(f"Unexpected error in get_complete_artist_info: {exc}")
         return {
             "id": None,
             "name": str(artist_identifier) if artist_identifier else "Unknown Artist",
-            "country": None, "aliases": [], "disambiguation": None,
+            "country": None,
+            "aliases": [],
+            "disambiguation": None,
         }
 
 
@@ -514,9 +525,14 @@ if __name__ == "__main__":
     parser.add_argument("--artist", required=True, help="search term")
     args = parser.parse_args()
     for cand in search_artist(args.artist):
-        print(json.dumps({
-            "name": cand.get("name"),
-            "id": cand.get("id"),
-            "country": cand.get("country"),
-            "disambig": cand.get("disambiguation"),
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "name": cand.get("name"),
+                    "id": cand.get("id"),
+                    "country": cand.get("country"),
+                    "disambig": cand.get("disambiguation"),
+                },
+                ensure_ascii=False,
+            )
+        )

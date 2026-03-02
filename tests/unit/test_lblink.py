@@ -1,6 +1,7 @@
 """
 Unit tests for HTTP.lblink (ListenBrainz helper).
 """
+
 from unittest.mock import patch, MagicMock
 import pandas as pd
 from HTTP.lblink import export_listens_to_parquet, _load_token, _RequestsBackend

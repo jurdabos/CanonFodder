@@ -1,6 +1,7 @@
 """
 Additional unit tests for HTTP.lfAPI — higher-level functions with mocking.
 """
+
 from unittest.mock import patch, MagicMock
 import pandas as pd
 import pytest
@@ -112,13 +113,15 @@ class TestEnrichArtistMbids:
     @patch("HTTP.lfAPI.read_scrobble_df")
     def test_enriches_missing_mbids(self, mock_read, mock_req, mock_dump, mock_sleep):
         """Enriches artists missing MBIDs via Last.fm API."""
-        df = pd.DataFrame({
-            "artist_name": ["A", "B"],
-            "album_title": ["Al1", "Al2"],
-            "track_title": ["T1", "T2"],
-            "artist_mbid": [None, "existing-mbid"],
-            "play_time": pd.to_datetime(["2024-01-01", "2024-01-02"], utc=True),
-        })
+        df = pd.DataFrame(
+            {
+                "artist_name": ["A", "B"],
+                "album_title": ["Al1", "Al2"],
+                "track_title": ["T1", "T2"],
+                "artist_mbid": [None, "existing-mbid"],
+                "play_time": pd.to_datetime(["2024-01-01", "2024-01-02"], utc=True),
+            }
+        )
         mock_read.return_value = df
         mock_req.return_value = {"artist": {"name": "A", "mbid": "new-mbid"}}
         result = enrich_artist_mbids()

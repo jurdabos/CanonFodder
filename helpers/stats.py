@@ -4,6 +4,7 @@ Supplies statistical and ML-related utility functions for c9r.
 All DB-dependent functions have been removed in the v0.6 migration.
 Only pure-computation helpers remain.
 """
+
 from __future__ import annotations
 import logging
 import re
@@ -17,6 +18,7 @@ log = logging.getLogger(__name__)
 def cramers_v(x: pd.Series, y: pd.Series) -> float:
     """Returns Cramér's V between two categorical pandas Series."""
     from scipy import stats
+
     contingency_table = pd.crosstab(x, y)
     chi2 = stats.chi2_contingency(contingency_table)[0]
     n = contingency_table.sum().sum()
@@ -87,13 +89,15 @@ def length_stats(input_text: str) -> pd.Series:
         return pd.Series({"sig_len": 0, "n_variants": 0, "avg_name_len": 0.0, "max_name_len": 0, "var_len": 0.0})
     parts = re.split(r"{", input_text)
     lens = [len(p.strip()) for p in parts if p.strip()]
-    return pd.Series({
-        "sig_len": sum(lens),
-        "n_variants": len(lens),
-        "avg_name_len": np.mean(lens),
-        "max_name_len": np.max(lens),
-        "var_len": np.std(lens),
-    })
+    return pd.Series(
+        {
+            "sig_len": sum(lens),
+            "n_variants": len(lens),
+            "avg_name_len": np.mean(lens),
+            "max_name_len": np.max(lens),
+            "var_len": np.std(lens),
+        }
+    )
 
 
 def missing_value_ratio(col: pd.Series) -> float:
@@ -114,6 +118,7 @@ def show_cm_and_report(y_true, y_pred, title: str = "") -> None:
 def variance_testing(dframe: pd.DataFrame, varthresh: float):
     """Applies sklearn.VarianceThreshold and returns (variance_df, selected_cols)."""
     from sklearn.feature_selection import VarianceThreshold
+
     selector = VarianceThreshold(threshold=varthresh)
     selector.fit_transform(dframe)
     variance_df = pd.DataFrame({"features": dframe.columns, "variances": selector.variances_})

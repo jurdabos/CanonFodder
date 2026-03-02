@@ -1,6 +1,7 @@
 """
 Unit tests for HTTP.lfAPI pagination and higher-level fetch helpers.
 """
+
 from unittest.mock import patch, MagicMock
 import pandas as pd
 import pytest
@@ -23,8 +24,12 @@ class TestGetRecentTracksWithProgress:
         mock_req.return_value = {
             "recenttracks": {
                 "track": [
-                    {"artist": {"#text": "A", "mbid": ""}, "name": "T1",
-                     "album": {"#text": "Al"}, "date": {"uts": "100"}},
+                    {
+                        "artist": {"#text": "A", "mbid": ""},
+                        "name": "T1",
+                        "album": {"#text": "Al"},
+                        "date": {"uts": "100"},
+                    },
                 ],
                 "@attr": {"totalPages": "1", "total": "1"},
             },
@@ -76,8 +81,7 @@ class TestFetchRecent:
     def test_returns_dataframe(self, mock_fetch):
         """Returns a normalised DataFrame."""
         mock_fetch.return_value = [
-            {"artist": {"#text": "A", "mbid": ""}, "album": {"#text": "Al"},
-             "name": "T1", "date": {"uts": "100"}},
+            {"artist": {"#text": "A", "mbid": ""}, "album": {"#text": "Al"}, "name": "T1", "date": {"uts": "100"}},
         ]
         df = fetch_recent(limit=10)
         assert isinstance(df, pd.DataFrame)
@@ -98,8 +102,7 @@ class TestFetchRecentTracksAllPages:
     def test_returns_cleaned_df(self, mock_fetch):
         """Returns a DataFrame after _clean_track processing."""
         mock_fetch.return_value = [
-            {"artist": {"#text": "A", "mbid": ""}, "album": {"#text": "Al"},
-             "name": "T1", "date": {"uts": "100"}},
+            {"artist": {"#text": "A", "mbid": ""}, "album": {"#text": "Al"}, "name": "T1", "date": {"uts": "100"}},
         ]
         df = fetch_recent_tracks_all_pages("user1")
         assert isinstance(df, pd.DataFrame)

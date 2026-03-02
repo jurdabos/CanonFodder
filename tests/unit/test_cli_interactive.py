@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.cli interactive and pure helper functions.
 """
+
 import pandas as pd
 from helpers.cli import _apply_canonical, _overlaps, _remember_artist_variant
 
@@ -22,26 +23,32 @@ class TestOverlaps:
 
     def test_no_overlap(self):
         """Returns False for non-overlapping intervals."""
-        df = pd.DataFrame({
-            "start_date": [pd.Timestamp("2020-01-01")],
-            "end_date": [pd.Timestamp("2020-06-01")],
-        })
+        df = pd.DataFrame(
+            {
+                "start_date": [pd.Timestamp("2020-01-01")],
+                "end_date": [pd.Timestamp("2020-06-01")],
+            }
+        )
         assert _overlaps(df, pd.Timestamp("2021-01-01"), pd.Timestamp("2021-12-31")) is False
 
     def test_overlap_detected(self):
         """Returns True when intervals overlap."""
-        df = pd.DataFrame({
-            "start_date": [pd.Timestamp("2020-01-01")],
-            "end_date": [pd.Timestamp("2020-12-31")],
-        })
+        df = pd.DataFrame(
+            {
+                "start_date": [pd.Timestamp("2020-01-01")],
+                "end_date": [pd.Timestamp("2020-12-31")],
+            }
+        )
         assert _overlaps(df, pd.Timestamp("2020-06-01"), pd.Timestamp("2021-06-01")) is True
 
     def test_open_ended_overlap(self):
         """Returns True when existing interval has no end date."""
-        df = pd.DataFrame({
-            "start_date": [pd.Timestamp("2020-01-01")],
-            "end_date": [pd.NaT],
-        })
+        df = pd.DataFrame(
+            {
+                "start_date": [pd.Timestamp("2020-01-01")],
+                "end_date": [pd.NaT],
+            }
+        )
         assert _overlaps(df, pd.Timestamp("2022-01-01"), None) is True
 
 
@@ -51,6 +58,7 @@ class TestRememberArtistVariant:
     def test_writes_to_avc(self, tmp_pq_dir):
         """Writes a decision row to avc.parquet."""
         import helpers.io as io_mod
+
         _remember_artist_variant("Beatles{The Beatles", "The Beatles", True, "obvious")
         df = pd.read_parquet(io_mod.AVC_PQ)
         assert len(df) == 1

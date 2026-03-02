@@ -4,6 +4,7 @@ Unit tests for corefunc.model_server (FastAPI model serving layer).
 Tests all functions directly without going through the HTTP transport,
 so the httpx optional dependency is not required.
 """
+
 from unittest.mock import MagicMock
 import numpy as np
 import pytest
@@ -54,7 +55,8 @@ class TestStartup:
     def test_handles_missing_model_gracefully(self, monkeypatch):
         """Leaves _model as None when the pickle file is absent."""
         monkeypatch.setattr(
-            srv, "load_model",
+            srv,
+            "load_model",
             MagicMock(side_effect=FileNotFoundError("not found")),
         )
         srv._startup()

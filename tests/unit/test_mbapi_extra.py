@@ -1,6 +1,7 @@
 """
 Additional unit tests for HTTP.mbAPI — higher-level functions with mocking.
 """
+
 from unittest.mock import patch
 import pandas as pd
 import pytest
@@ -115,13 +116,15 @@ class TestGetCompleteArtistInfo:
     @patch("HTTP.mbAPI.init")
     def test_cache_hit(self, mock_init, mock_lookup, mock_read):
         """Returns cached data without calling remote API."""
-        cached = pd.DataFrame({
-            "artist_name": ["Test"],
-            "mbid": ["abc-123"],
-            "country": ["DE"],
-            "disambiguation_comment": ["rock"],
-            "aliases": ["Alt1,Alt2"],
-        })
+        cached = pd.DataFrame(
+            {
+                "artist_name": ["Test"],
+                "mbid": ["abc-123"],
+                "country": ["DE"],
+                "disambiguation_comment": ["rock"],
+                "aliases": ["Alt1,Alt2"],
+            }
+        )
         mock_read.return_value = cached
         result = get_complete_artist_info("Test")
         assert result["name"] == "Test"
@@ -151,7 +154,9 @@ class TestRateLimited:
 
     def test_rate_limited_returns_result(self):
         """Decorated function returns its result."""
+
         @_rate_limited
         def dummy():
             return 42
+
         assert dummy() == 42

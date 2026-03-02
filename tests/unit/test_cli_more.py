@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.cli interactive functions with mocked prompts.
 """
+
 from unittest.mock import patch, MagicMock
 import pandas as pd
 from helpers.cli import (
@@ -108,16 +109,21 @@ class TestUnifyArtistNamesCli:
     def test_auto_applies_previous_link(self, tmp_pq_dir):
         """Automatically applies a previous 'link' decision from avc.parquet."""
         import helpers.io as io_mod
+
         # Pre-loading a decision into avc.parquet
         sig = make_signature(["Beatles", "The Beatles"])
-        avc = pd.DataFrame([{
-            "artist_variants_hash": "test",
-            "artist_variants_text": sig,
-            "canonical_name": "The Beatles",
-            "to_link": True,
-            "comment": "",
-            "stamp": "2024-01-01",
-        }])
+        avc = pd.DataFrame(
+            [
+                {
+                    "artist_variants_hash": "test",
+                    "artist_variants_text": sig,
+                    "canonical_name": "The Beatles",
+                    "to_link": True,
+                    "comment": "",
+                    "stamp": "2024-01-01",
+                }
+            ]
+        )
         avc.to_parquet(io_mod.AVC_PQ, index=False)
         data = pd.DataFrame({"Artist": ["Beatles", "The Beatles", "Radiohead"]})
         artcounts = pd.DataFrame({"Artist": ["Beatles", "The Beatles", "Radiohead"], "Count": [5, 10, 20]})
@@ -128,15 +134,20 @@ class TestUnifyArtistNamesCli:
     def test_auto_skips_previous_skip(self, tmp_pq_dir):
         """Skips a group that was previously marked as skip."""
         import helpers.io as io_mod
+
         sig = make_signature(["Alpha", "Beta"])
-        avc = pd.DataFrame([{
-            "artist_variants_hash": "test",
-            "artist_variants_text": sig,
-            "canonical_name": "__SKIP__",
-            "to_link": False,
-            "comment": "",
-            "stamp": "2024-01-01",
-        }])
+        avc = pd.DataFrame(
+            [
+                {
+                    "artist_variants_hash": "test",
+                    "artist_variants_text": sig,
+                    "canonical_name": "__SKIP__",
+                    "to_link": False,
+                    "comment": "",
+                    "stamp": "2024-01-01",
+                }
+            ]
+        )
         avc.to_parquet(io_mod.AVC_PQ, index=False)
         data = pd.DataFrame({"Artist": ["Alpha", "Beta", "Gamma"]})
         artcounts = pd.DataFrame({"Artist": ["Alpha", "Beta", "Gamma"], "Count": [5, 10, 20]})
@@ -154,8 +165,7 @@ class TestVerifyCommas:
         """Prints diagnostic output for a CSV file."""
         csv = tmp_path / "test.csv"
         csv.write_text(
-            "Artist,Album,Song\n"
-            "\"Emerson, Lake & Palmer\",\"Grey Tickles, Black Pressure\",\"A Song\"\n",
+            'Artist,Album,Song\n"Emerson, Lake & Palmer","Grey Tickles, Black Pressure","A Song"\n',
             encoding="utf-8",
         )
         verify_commas(csv)

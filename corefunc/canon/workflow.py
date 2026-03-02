@@ -10,6 +10,7 @@ list_mlflow_runs  – queries MLflow for trained model runs.
 load_run_model    – loads a sklearn Pipeline from an MLflow run.
 discover_candidates – scans scrobble data for new variant candidates.
 """
+
 from __future__ import annotations
 import hashlib
 import json
@@ -19,9 +20,15 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 from helpers.io import (
-    ALIAS_SEP, AVC_PQ, PQ_DIR, ARTIST_INFO_PQ,
-    read_parquet, dump_parquet, append_to_parquet,
-    scrobble_data_exists, scrobble_duckdb_from,
+    ALIAS_SEP,
+    AVC_PQ,
+    PQ_DIR,
+    ARTIST_INFO_PQ,
+    read_parquet,
+    dump_parquet,
+    append_to_parquet,
+    scrobble_data_exists,
+    scrobble_duckdb_from,
 )
 
 log = logging.getLogger(__name__)
@@ -75,13 +82,15 @@ def avc_summary(
         else:
             link_display = "✗"
         stamp_str = str(r["stamp"])[:10] if r["stamp"] is not None else ""
-        rows.append({
-            "idx": i,
-            "to_link_display": link_display,
-            "canonical_name": r["canonical_name"] or "",
-            "stamp": stamp_str,
-            "artist_variants_text": r["artist_variants_text"] or "",
-        })
+        rows.append(
+            {
+                "idx": i,
+                "to_link_display": link_display,
+                "canonical_name": r["canonical_name"] or "",
+                "stamp": stamp_str,
+                "artist_variants_text": r["artist_variants_text"] or "",
+            }
+        )
     return rows
 
 
@@ -133,7 +142,9 @@ def propagate_avc() -> dict:
             continue
         canon_idx = canon_mask.idxmax()
         existing_aliases_raw = ai.at[canon_idx, "aliases"] or ""
-        existing_aliases = {a.strip() for a in str(existing_aliases_raw).split(ALIAS_SEP) if a.strip() and a.strip() != "None"}
+        existing_aliases = {
+            a.strip() for a in str(existing_aliases_raw).split(ALIAS_SEP) if a.strip() and a.strip() != "None"
+        }
         new_aliases = set()
         for v in non_canonical:
             if v not in existing_aliases and v != canonical:
@@ -207,6 +218,7 @@ def list_mlflow_runs(experiment_name: str = "c9r-record-linkage") -> list[dict]:
     """
     import mlflow
     from helpers.experiment import TRACKING_URI
+
     mlflow.set_tracking_uri(TRACKING_URI)
     exp = mlflow.get_experiment_by_name(experiment_name)
     if exp is None:
@@ -223,15 +235,17 @@ def list_mlflow_runs(experiment_name: str = "c9r-record-linkage") -> list[dict]:
         # Skipping nested fold runs
         if str(r.get("tags.mlflow.runName", "")).startswith("fold"):
             continue
-        result.append({
-            "run_id": r["run_id"],
-            "run_name": r.get("tags.mlflow.runName", ""),
-            "start_time": str(r["start_time"])[:19],
-            "precision": round(r.get("metrics.precision", 0), 4),
-            "recall": round(r.get("metrics.recall", 0), 4),
-            "f1": round(r.get("metrics.f1", 0), 4),
-            "auc": round(r.get("metrics.auc", 0), 4),
-        })
+        result.append(
+            {
+                "run_id": r["run_id"],
+                "run_name": r.get("tags.mlflow.runName", ""),
+                "start_time": str(r["start_time"])[:19],
+                "precision": round(r.get("metrics.precision", 0), 4),
+                "recall": round(r.get("metrics.recall", 0), 4),
+                "f1": round(r.get("metrics.f1", 0), 4),
+                "auc": round(r.get("metrics.auc", 0), 4),
+            }
+        )
     return result
 
 
@@ -239,6 +253,7 @@ def load_run_model(run_id: str):
     """Loads the sklearn Pipeline logged in the given MLflow run."""
     import mlflow
     from helpers.experiment import TRACKING_URI
+
     mlflow.set_tracking_uri(TRACKING_URI)
     return mlflow.sklearn.load_model(f"runs:/{run_id}/model")
 
@@ -322,6 +337,7 @@ def discover_candidates(
     """
     from rapidfuzz import fuzz, process
     from helpers.inference import compute_inference_features, load_model
+
     if model is None:
         model = load_model()
     if not scrobble_data_exists():
@@ -358,7 +374,11 @@ def discover_candidates(
     n_scored = 0
     for name in candidates:
         matches = process.extract(
-            name, all_names, scorer=fuzz.WRatio, score_cutoff=wratio_cutoff, limit=10,
+            name,
+            all_names,
+            scorer=fuzz.WRatio,
+            score_cutoff=wratio_cutoff,
+            limit=10,
         )
         for match_name, _score, _ in matches:
             if match_name == name:
@@ -374,13 +394,15 @@ def discover_candidates(
                 prob = float(model.predict_proba(vec)[0, 1])
                 n_scored += 1
                 # Logging every prediction for drift detection
-                prediction_log.append({
-                    "timestamp": now_ts,
-                    "variant_a": name,
-                    "variant_b": match_name,
-                    "probability": prob,
-                    "features_json": json.dumps(feats, allow_nan=False),
-                })
+                prediction_log.append(
+                    {
+                        "timestamp": now_ts,
+                        "variant_a": name,
+                        "variant_b": match_name,
+                        "probability": prob,
+                        "features_json": json.dumps(feats, allow_nan=False),
+                    }
+                )
                 if prob >= proba_threshold:
                     positive_pairs.append((name, match_name, prob))
             except Exception:
@@ -436,13 +458,18 @@ def discover_candidates(
         # Computing the maximum pairwise probability for this group
         max_prob = 0.0
         from itertools import combinations
+
         for ma, mb in combinations(sorted(members), 2):
             p = pair_probs.get(frozenset((ma, mb)), 0.0)
             max_prob = max(max_prob, p)
-        new_candidates.append({
-            "signature": sig, "variants": sorted(members),
-            "hash": h, "max_prob": round(max_prob, 4),
-        })
+        new_candidates.append(
+            {
+                "signature": sig,
+                "variants": sorted(members),
+                "hash": h,
+                "max_prob": round(max_prob, 4),
+            }
+        )
     # Sorting by descending probability
     new_candidates.sort(key=lambda c: c["max_prob"], reverse=True)
     return new_candidates
@@ -461,14 +488,16 @@ def write_new_candidates(candidates: list[dict]) -> int:
     now = pd.Timestamp(datetime.now(timezone.utc))
     for c in candidates:
         prob_comment = f"p={c['max_prob']:.4f}" if "max_prob" in c else ""
-        rows.append({
-            "artist_variants_hash": c["hash"],
-            "artist_variants_text": c["signature"],
-            "canonical_name": "",
-            "to_link": pd.NA,
-            "comment": prob_comment,
-            "stamp": now,
-        })
+        rows.append(
+            {
+                "artist_variants_hash": c["hash"],
+                "artist_variants_text": c["signature"],
+                "canonical_name": "",
+                "to_link": pd.NA,
+                "comment": prob_comment,
+                "stamp": now,
+            }
+        )
     df = pd.DataFrame(rows)
     df["to_link"] = df["to_link"].astype("boolean")
     df["stamp"] = pd.to_datetime(df["stamp"], utc=True)

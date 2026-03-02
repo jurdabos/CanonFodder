@@ -5,6 +5,7 @@ Each managed table has a registered schema version.  Writers embed
 ``c9r_table`` and ``c9r_schema_version`` in Parquet key-value metadata
 so readers can detect stale files and apply migrations.
 """
+
 from __future__ import annotations
 import logging
 from pathlib import Path
@@ -15,39 +16,49 @@ import pyarrow.parquet as pq
 logger = logging.getLogger(__name__)
 
 # ── PyArrow schema definitions ────────────────────────────────────────────────
-SCROBBLE_SCHEMA = pa.schema([
-    ("artist_name", pa.string()),
-    ("album_title", pa.string()),
-    ("track_title", pa.string()),
-    ("artist_mbid", pa.string()),
-    ("play_time", pa.timestamp("us", tz="UTC")),
-])
-ARTIST_INFO_SCHEMA = pa.schema([
-    ("artist_name", pa.string()),
-    ("mbid", pa.string()),
-    ("country", pa.string()),
-    ("disambiguation_comment", pa.string()),
-    ("aliases", pa.string()),
-])
-AVC_SCHEMA = pa.schema([
-    ("artist_variants_hash", pa.string()),
-    ("artist_variants_text", pa.string()),
-    ("canonical_name", pa.string()),
-    ("to_link", pa.bool_()),
-    ("comment", pa.string()),
-    ("stamp", pa.timestamp("us", tz="UTC")),
-])
-UC_SCHEMA = pa.schema([
-    ("country_code", pa.string()),
-    ("start_date", pa.date32()),
-    ("end_date", pa.date32()),
-])
-GS_MB_SCHEMA = pa.schema([
-    ("variant_a", pa.string()),
-    ("variant_b", pa.string()),
-    ("to_link", pa.bool_()),
-    ("source", pa.string()),
-])
+SCROBBLE_SCHEMA = pa.schema(
+    [
+        ("artist_name", pa.string()),
+        ("album_title", pa.string()),
+        ("track_title", pa.string()),
+        ("artist_mbid", pa.string()),
+        ("play_time", pa.timestamp("us", tz="UTC")),
+    ]
+)
+ARTIST_INFO_SCHEMA = pa.schema(
+    [
+        ("artist_name", pa.string()),
+        ("mbid", pa.string()),
+        ("country", pa.string()),
+        ("disambiguation_comment", pa.string()),
+        ("aliases", pa.string()),
+    ]
+)
+AVC_SCHEMA = pa.schema(
+    [
+        ("artist_variants_hash", pa.string()),
+        ("artist_variants_text", pa.string()),
+        ("canonical_name", pa.string()),
+        ("to_link", pa.bool_()),
+        ("comment", pa.string()),
+        ("stamp", pa.timestamp("us", tz="UTC")),
+    ]
+)
+UC_SCHEMA = pa.schema(
+    [
+        ("country_code", pa.string()),
+        ("start_date", pa.date32()),
+        ("end_date", pa.date32()),
+    ]
+)
+GS_MB_SCHEMA = pa.schema(
+    [
+        ("variant_a", pa.string()),
+        ("variant_b", pa.string()),
+        ("to_link", pa.bool_()),
+        ("source", pa.string()),
+    ]
+)
 
 # ── Schema registry ───────────────────────────────────────────────────────────
 SCHEMA_REGISTRY: dict[str, dict[str, Any]] = {
@@ -207,9 +218,11 @@ _MIGRATIONS: dict[tuple[str, int, int], Callable[[Path], None]] = {}
 
 def register_migration(table: str, from_ver: int, to_ver: int):
     """Decorator that registers a migration function for *(table, from→to)*."""
+
     def decorator(fn: Callable[[Path], None]) -> Callable[[Path], None]:
         _MIGRATIONS[(table, from_ver, to_ver)] = fn
         return fn
+
     return decorator
 
 
@@ -282,9 +295,7 @@ def migrate_file(path: Path) -> int:
         next_v = v + 1
         fn = _MIGRATIONS.get((tbl_name, v, next_v))
         if fn is None:
-            raise RuntimeError(
-                f"No migration registered for {tbl_name} v{v} → v{next_v}"
-            )
+            raise RuntimeError(f"No migration registered for {tbl_name} v{v} → v{next_v}")
         logger.info("Migrating %s v%d → v%d …", tbl_name, v, next_v)
         fn(path)
         v = next_v
@@ -297,6 +308,7 @@ def migrate_all(pq_dir: Path) -> dict[str, str]:
     Returns a dict mapping relative file name → result string.
     """
     from helpers.io import SCROBBLE_PQ, SCROBBLE_PQ_DIR
+
     results: dict[str, str] = {}
     # Handling partitioned scrobble directory
     if SCROBBLE_PQ_DIR.exists() and any(SCROBBLE_PQ_DIR.rglob("*.parquet")):

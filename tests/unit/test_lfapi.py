@@ -1,6 +1,7 @@
 """
 Unit tests for HTTP.lfAPI (Last.fm API helpers).
 """
+
 import pandas as pd
 from HTTP.lfAPI import (
     _clean_track,
@@ -80,6 +81,7 @@ class TestIso2ForEnName:
     def test_exact_match(self, tmp_pq_dir):
         """Finds exact (case-insensitive) match."""
         import helpers.io as io_mod
+
         df = pd.DataFrame({"ISO2": ["DE", "US"], "en_name": ["Germany", "United States"]})
         df.to_parquet(io_mod.C_PQ, index=False)
         assert iso2_for_en_name("germany") == "DE"
@@ -87,6 +89,7 @@ class TestIso2ForEnName:
     def test_fuzzy_match(self, tmp_pq_dir):
         """Finds a close match within edit distance 1."""
         import helpers.io as io_mod
+
         df = pd.DataFrame({"ISO2": ["HU"], "en_name": ["Hungary"]})
         df.to_parquet(io_mod.C_PQ, index=False)
         assert iso2_for_en_name("Xungabc") is None  # edit distance >1 → no match
@@ -95,6 +98,7 @@ class TestIso2ForEnName:
     def test_no_match(self, tmp_pq_dir):
         """Returns None when nothing matches."""
         import helpers.io as io_mod
+
         df = pd.DataFrame({"ISO2": ["DE"], "en_name": ["Germany"]})
         df.to_parquet(io_mod.C_PQ, index=False)
         assert iso2_for_en_name("Narnia") is None
@@ -108,6 +112,7 @@ class TestUpdateUserCountry:
         changed = _update_user_country("HU")
         assert changed is True
         import helpers.io as io_mod
+
         df = pd.read_parquet(io_mod.UC_PQ)
         assert len(df) == 1
         assert df.iloc[0]["country_code"] == "HU"
@@ -116,6 +121,7 @@ class TestUpdateUserCountry:
         """Returns False when the country hasn't changed."""
         import helpers.io as io_mod
         from datetime import date
+
         today = str(date.today())
         existing = pd.DataFrame([{"country_code": "HU", "start_date": today, "end_date": None}])
         existing.to_parquet(io_mod.UC_PQ, index=False)
@@ -124,6 +130,7 @@ class TestUpdateUserCountry:
     def test_adds_new_row_on_change(self, tmp_pq_dir):
         """Adds a new row and closes the old one when country changes."""
         import helpers.io as io_mod
+
         existing = pd.DataFrame([{"country_code": "HU", "start_date": "2020-01-01", "end_date": None}])
         existing.to_parquet(io_mod.UC_PQ, index=False)
         changed = _update_user_country("DE")

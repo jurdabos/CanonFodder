@@ -1,6 +1,7 @@
 """
 Unit tests for HTTP.client (resilient HTTP GET helper).
 """
+
 from unittest.mock import patch, MagicMock
 import requests
 from HTTP.client import make_request, USER_AGENT

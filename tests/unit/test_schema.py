@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.schema (versioned Parquet schema management).
 """
+
 import logging
 import pandas as pd
 import pyarrow as pa
@@ -22,8 +23,9 @@ class TestStampAndRead:
 
     def test_stamp_and_read_roundtrip(self, tmp_path):
         """Stamps an Arrow table, writes it, reads version back."""
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         table = pa.Table.from_pandas(df, preserve_index=False)
         stamped = stamp_metadata(table, "artist_info")
         path = tmp_path / "artist_info.parquet"
@@ -72,8 +74,9 @@ class TestValidateSchema:
 
     def test_stamped_file_ok(self, tmp_path):
         """A properly stamped v1 file validates as 'ok'."""
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         table = stamp_metadata(pa.Table.from_pandas(df, preserve_index=False), "artist_info")
         path = tmp_path / "artist_info.parquet"
         pq.write_table(table, path)
@@ -85,8 +88,9 @@ class TestValidateSchema:
 
     def test_legacy_file_needs_migration(self, tmp_path):
         """An un-stamped file with correct columns reports 'needs-migration'."""
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         path = tmp_path / "artist_info.parquet"
         df.to_parquet(path, index=False)
         info = validate_schema(path)
@@ -108,8 +112,9 @@ class TestMigrateFile:
 
     def test_migrate_v0_to_v1(self, tmp_path):
         """Migrates an un-stamped artist_info file to v1."""
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         path = tmp_path / "artist_info.parquet"
         df.to_parquet(path, index=False)
         result_ver = migrate_file(path)
@@ -121,8 +126,9 @@ class TestMigrateFile:
 
     def test_migrate_already_current(self, tmp_path):
         """No-op when file is already at current version."""
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         table = stamp_metadata(pa.Table.from_pandas(df, preserve_index=False), "artist_info")
         path = tmp_path / "artist_info.parquet"
         pq.write_table(table, path)
@@ -134,11 +140,15 @@ class TestMigrateFile:
         scrobble_dir = tmp_path / "scrobble"
         year_dir = scrobble_dir / "year=2024"
         year_dir.mkdir(parents=True)
-        df = pd.DataFrame({
-            "artist_name": ["A"], "album_title": ["Al"], "track_title": ["T"],
-            "artist_mbid": [None],
-            "play_time": pd.to_datetime(["2024-06-01"], utc=True),
-        })
+        df = pd.DataFrame(
+            {
+                "artist_name": ["A"],
+                "album_title": ["Al"],
+                "track_title": ["T"],
+                "artist_mbid": [None],
+                "play_time": pd.to_datetime(["2024-06-01"], utc=True),
+            }
+        )
         part = year_dir / "part.parquet"
         df.to_parquet(part, index=False)
         result_ver = migrate_file(scrobble_dir)
@@ -157,8 +167,10 @@ class TestDumpParquetStamps:
         """Writing via dump_parquet embeds c9r version metadata."""
         import helpers.io as io_mod
         from helpers.io import dump_parquet
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         dump_parquet(df, io_mod.ARTIST_INFO_PQ)
         tbl_name, ver = read_file_version(io_mod.ARTIST_INFO_PQ)
         assert tbl_name == "artist_info"
@@ -172,8 +184,10 @@ class TestReadParquetVersionChecks:
     def test_warns_on_stale_version(self, tmp_pq_dir, caplog):
         """Logs a warning when file version < current."""
         import helpers.io as io_mod
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         # Writing without stamp (v0)
         df.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         with caplog.at_level(logging.WARNING, logger="helpers.io"):
@@ -184,8 +198,10 @@ class TestReadParquetVersionChecks:
     def test_raises_on_future_version(self, tmp_pq_dir):
         """Raises RuntimeError when file version > current."""
         import helpers.io as io_mod
-        df = pd.DataFrame({"artist_name": ["A"], "mbid": ["x"], "country": ["DE"],
-                           "disambiguation_comment": [""], "aliases": [""]})
+
+        df = pd.DataFrame(
+            {"artist_name": ["A"], "mbid": ["x"], "country": ["DE"], "disambiguation_comment": [""], "aliases": [""]}
+        )
         # Writing with a fake future version
         table = pa.Table.from_pandas(df, preserve_index=False)
         meta = {b"c9r_table": b"artist_info", b"c9r_schema_version": b"999"}

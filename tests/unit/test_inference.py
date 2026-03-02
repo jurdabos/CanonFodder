@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.inference (inference-time feature engineering).
 """
+
 import pickle
 from pathlib import Path
 import pandas as pd
@@ -21,6 +22,7 @@ from helpers.inference import (
 
 class _FakePipeline:
     """Picklable stub standing in for a fitted sklearn Pipeline."""
+
     feature_names_in_ = ["feat_a", "feat_b", "feat_c"]
 
 
@@ -208,28 +210,42 @@ class TestComputeCatalogueFeatures:
 
     def test_unknown_names_return_zeros(self, monkeypatch):
         """Returns zeros when neither name exists in the cache."""
-        monkeypatch.setattr(inf_mod, "_catalogue_cache", {
-            "albums": {}, "tracks": {},
-        })
+        monkeypatch.setattr(
+            inf_mod,
+            "_catalogue_cache",
+            {
+                "albums": {},
+                "tracks": {},
+            },
+        )
         feats = inf_mod._compute_catalogue_features("Unknown_A", "Unknown_B")
         assert feats["disco_min_album_count"] == 0
         assert feats["melo_min_track_count"] == 0
 
     def test_known_names_with_overlap(self, monkeypatch):
         """Returns positive features when artists share catalogue entries."""
-        monkeypatch.setattr(inf_mod, "_catalogue_cache", {
-            "albums": {"A": ["Album1", "Album2"], "B": ["Album1"]},
-            "tracks": {"A": ["Track1"], "B": ["Track1", "Track2"]},
-        })
+        monkeypatch.setattr(
+            inf_mod,
+            "_catalogue_cache",
+            {
+                "albums": {"A": ["Album1", "Album2"], "B": ["Album1"]},
+                "tracks": {"A": ["Track1"], "B": ["Track1", "Track2"]},
+            },
+        )
         feats = inf_mod._compute_catalogue_features("A", "B")
         assert feats["disco_has_fuzzy_album_match"] == 1.0
         assert feats["melo_has_fuzzy_track_match"] == 1.0
 
     def test_returns_ten_features(self, monkeypatch):
         """Returns exactly 10 catalogue features (5 disco + 5 melo)."""
-        monkeypatch.setattr(inf_mod, "_catalogue_cache", {
-            "albums": {}, "tracks": {},
-        })
+        monkeypatch.setattr(
+            inf_mod,
+            "_catalogue_cache",
+            {
+                "albums": {},
+                "tracks": {},
+            },
+        )
         feats = inf_mod._compute_catalogue_features("X", "Y")
         assert len(feats) == 10
         disco = [k for k in feats if k.startswith("disco_")]
@@ -239,9 +255,14 @@ class TestComputeCatalogueFeatures:
 
     def test_one_known_one_unknown(self, monkeypatch):
         """Returns zeros when only one name has catalogue data."""
-        monkeypatch.setattr(inf_mod, "_catalogue_cache", {
-            "albums": {"A": ["Album1"]}, "tracks": {"A": ["Track1"]},
-        })
+        monkeypatch.setattr(
+            inf_mod,
+            "_catalogue_cache",
+            {
+                "albums": {"A": ["Album1"]},
+                "tracks": {"A": ["Track1"]},
+            },
+        )
         feats = inf_mod._compute_catalogue_features("A", "Z")
         assert feats["disco_exact_album_jaccard"] == 0.0
         assert feats["melo_exact_track_jaccard"] == 0.0
@@ -254,9 +275,12 @@ class TestComputeInteractionFeatures:
     def test_six_scores_produce_30_features(self):
         """Returns C(6,2)*2 = 30 interaction features for 6 similarity scores."""
         base = {
-            "ratio": 0.8, "partial_ratio": 0.9,
-            "token_sort_ratio": 0.7, "token_set_ratio": 0.85,
-            "WRatio": 0.75, "QRatio": 0.65,
+            "ratio": 0.8,
+            "partial_ratio": 0.9,
+            "token_sort_ratio": 0.7,
+            "token_set_ratio": 0.85,
+            "WRatio": 0.75,
+            "QRatio": 0.65,
         }
         feats = _compute_interaction_features(base)
         assert len(feats) == 30
@@ -291,9 +315,12 @@ class TestComputeInteractionFeatures:
     def test_feature_names_are_unique(self):
         """Produces unique column names for all 30 features."""
         base = {
-            "ratio": 0.1, "partial_ratio": 0.2,
-            "token_sort_ratio": 0.3, "token_set_ratio": 0.4,
-            "WRatio": 0.5, "QRatio": 0.6,
+            "ratio": 0.1,
+            "partial_ratio": 0.2,
+            "token_sort_ratio": 0.3,
+            "token_set_ratio": 0.4,
+            "WRatio": 0.5,
+            "QRatio": 0.6,
         }
         feats = _compute_interaction_features(base)
         assert len(feats) == len(set(feats.keys()))
@@ -306,7 +333,8 @@ class TestComputeInferenceFeatures:
     def test_returns_dict_of_numerics(self, monkeypatch):
         """Returns a flat dict with numeric values."""
         monkeypatch.setattr(
-            inf_mod, "_compute_catalogue_features",
+            inf_mod,
+            "_compute_catalogue_features",
             lambda a, b: {f"cat_{i}": 0.0 for i in range(10)},
         )
         feats = compute_inference_features("Bohren", "Bohren")
@@ -316,7 +344,8 @@ class TestComputeInferenceFeatures:
     def test_none_inputs_handled(self, monkeypatch):
         """Handles None inputs without raising."""
         monkeypatch.setattr(
-            inf_mod, "_compute_catalogue_features",
+            inf_mod,
+            "_compute_catalogue_features",
             lambda a, b: {},
         )
         feats = compute_inference_features(None, None)
@@ -326,7 +355,8 @@ class TestComputeInferenceFeatures:
     def test_empty_string_inputs(self, monkeypatch):
         """Handles empty string inputs without raising."""
         monkeypatch.setattr(
-            inf_mod, "_compute_catalogue_features",
+            inf_mod,
+            "_compute_catalogue_features",
             lambda a, b: {},
         )
         feats = compute_inference_features("", "")
@@ -335,7 +365,8 @@ class TestComputeInferenceFeatures:
     def test_includes_base_features(self, monkeypatch):
         """Includes base pairwise features from compute_pair_features."""
         monkeypatch.setattr(
-            inf_mod, "_compute_catalogue_features",
+            inf_mod,
+            "_compute_catalogue_features",
             lambda a, b: {},
         )
         feats = compute_inference_features("Alice", "Bob")
@@ -346,7 +377,8 @@ class TestComputeInferenceFeatures:
     def test_includes_interaction_features(self, monkeypatch):
         """Includes interaction (diff/product) features."""
         monkeypatch.setattr(
-            inf_mod, "_compute_catalogue_features",
+            inf_mod,
+            "_compute_catalogue_features",
             lambda a, b: {},
         )
         feats = compute_inference_features("Alice", "Bob")
@@ -357,7 +389,8 @@ class TestComputeInferenceFeatures:
         """Includes catalogue features when provided."""
         mock_cat = {"disco_fuzzy_album_ratio": 0.5, "melo_fuzzy_track_ratio": 0.3}
         monkeypatch.setattr(
-            inf_mod, "_compute_catalogue_features",
+            inf_mod,
+            "_compute_catalogue_features",
             lambda a, b: mock_cat,
         )
         feats = compute_inference_features("X", "Y")
@@ -367,7 +400,8 @@ class TestComputeInferenceFeatures:
     def test_approximate_feature_count(self, monkeypatch):
         """Returns approximately 63 features (23 base + 30 interaction + 10 catalogue)."""
         monkeypatch.setattr(
-            inf_mod, "_compute_catalogue_features",
+            inf_mod,
+            "_compute_catalogue_features",
             lambda a, b: {f"cat_{i}": 0.0 for i in range(10)},
         )
         feats = compute_inference_features("Foo", "Bar")
@@ -447,12 +481,14 @@ class TestLoadCatalogueCache:
     def test_scrobble_only_fallback(self, monkeypatch):
         """Builds lookups from scrobble data when disco file is absent."""
         monkeypatch.setattr(inf_mod, "SOLO_DISCO_PQ", Path("/tmp/nonexistent.parquet"))
-        scrobbles = pd.DataFrame({
-            "artist_name": ["ArtistA", "ArtistA", "ArtistB"],
-            "album_title": ["Album1", "Album2", "Album3"],
-            "track_title": ["Track1", "Track2", "Track3"],
-            "artist_mbid": [None, None, None],
-        })
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["ArtistA", "ArtistA", "ArtistB"],
+                "album_title": ["Album1", "Album2", "Album3"],
+                "track_title": ["Track1", "Track2", "Track3"],
+                "artist_mbid": [None, None, None],
+            }
+        )
         monkeypatch.setattr(inf_mod, "read_scrobble_df", lambda: scrobbles)
         albums, tracks = inf_mod._load_catalogue_cache()
         assert "ArtistA" in albums
@@ -464,19 +500,23 @@ class TestLoadCatalogueCache:
         """Uses disco data when the artist has a matching MBID in the disco file."""
         disco_path = tmp_path / "disco.parquet"
         proper_mbid = "a4074512-87e0-4820-b609-0c4a18142a70"
-        disco_df = pd.DataFrame({
-            "mbid": [proper_mbid],
-            "albums_str": ["DiscoAlbum1{DiscoAlbum2"],
-            "tracks_str": ["DiscoTrack1{DiscoTrack2"],
-        })
+        disco_df = pd.DataFrame(
+            {
+                "mbid": [proper_mbid],
+                "albums_str": ["DiscoAlbum1{DiscoAlbum2"],
+                "tracks_str": ["DiscoTrack1{DiscoTrack2"],
+            }
+        )
         disco_df.to_parquet(disco_path, index=False)
         monkeypatch.setattr(inf_mod, "SOLO_DISCO_PQ", disco_path)
-        scrobbles = pd.DataFrame({
-            "artist_name": ["ArtistA"],
-            "album_title": ["ScrobbleAlbum"],
-            "track_title": ["ScrobbleTrack"],
-            "artist_mbid": [proper_mbid],
-        })
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["ArtistA"],
+                "album_title": ["ScrobbleAlbum"],
+                "track_title": ["ScrobbleTrack"],
+                "artist_mbid": [proper_mbid],
+            }
+        )
         monkeypatch.setattr(inf_mod, "read_scrobble_df", lambda: scrobbles)
         albums, tracks = inf_mod._load_catalogue_cache()
         # Disco data should take precedence
@@ -486,19 +526,23 @@ class TestLoadCatalogueCache:
     def test_scrobble_fallback_when_no_mbid(self, monkeypatch, tmp_path):
         """Falls back to scrobble data when artist has no MBID."""
         disco_path = tmp_path / "disco.parquet"
-        disco_df = pd.DataFrame({
-            "mbid": ["some-other-mbid-that-wont-match-00"],
-            "albums_str": ["DiscoAlbum"],
-            "tracks_str": ["DiscoTrack"],
-        })
+        disco_df = pd.DataFrame(
+            {
+                "mbid": ["some-other-mbid-that-wont-match-00"],
+                "albums_str": ["DiscoAlbum"],
+                "tracks_str": ["DiscoTrack"],
+            }
+        )
         disco_df.to_parquet(disco_path, index=False)
         monkeypatch.setattr(inf_mod, "SOLO_DISCO_PQ", disco_path)
-        scrobbles = pd.DataFrame({
-            "artist_name": ["NoMbidArtist"],
-            "album_title": ["FallbackAlbum"],
-            "track_title": ["FallbackTrack"],
-            "artist_mbid": [None],
-        })
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["NoMbidArtist"],
+                "album_title": ["FallbackAlbum"],
+                "track_title": ["FallbackTrack"],
+                "artist_mbid": [None],
+            }
+        )
         monkeypatch.setattr(inf_mod, "read_scrobble_df", lambda: scrobbles)
         albums, tracks = inf_mod._load_catalogue_cache()
         assert albums["NoMbidArtist"] == ["FallbackAlbum"]
@@ -507,12 +551,14 @@ class TestLoadCatalogueCache:
     def test_blank_album_titles_excluded(self, monkeypatch):
         """Excludes blank and whitespace-only album titles from lookups."""
         monkeypatch.setattr(inf_mod, "SOLO_DISCO_PQ", Path("/tmp/nonexistent.parquet"))
-        scrobbles = pd.DataFrame({
-            "artist_name": ["A", "A", "A"],
-            "album_title": ["Good Album", "", "   "],
-            "track_title": ["T1", "T2", "T3"],
-            "artist_mbid": [None, None, None],
-        })
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["A", "A", "A"],
+                "album_title": ["Good Album", "", "   "],
+                "track_title": ["T1", "T2", "T3"],
+                "artist_mbid": [None, None, None],
+            }
+        )
         monkeypatch.setattr(inf_mod, "read_scrobble_df", lambda: scrobbles)
         albums, _ = inf_mod._load_catalogue_cache()
         assert albums["A"] == ["Good Album"]

@@ -1,6 +1,7 @@
 """
 Tests for helpers.experiment — MLflow tracking wrapper.
 """
+
 import numpy as np
 from unittest.mock import patch, MagicMock
 
@@ -15,6 +16,7 @@ class TestInitAndBasicOps:
         mock_exp.experiment_id = "42"
         mock_mlflow.set_experiment.return_value = mock_exp
         from helpers.experiment import init_experiment
+
         eid = init_experiment("test-exp")
         mock_mlflow.set_tracking_uri.assert_called_once()
         mock_mlflow.set_experiment.assert_called_once_with("test-exp")
@@ -24,6 +26,7 @@ class TestInitAndBasicOps:
     def test_start_run(self, mock_mlflow):
         """Delegates to mlflow.start_run."""
         from helpers.experiment import start_run
+
         start_run(run_name="test", nested=True)
         mock_mlflow.start_run.assert_called_once_with(run_name="test", nested=True)
 
@@ -31,6 +34,7 @@ class TestInitAndBasicOps:
     def test_log_params(self, mock_mlflow):
         """Delegates to mlflow.log_params."""
         from helpers.experiment import log_params
+
         log_params({"a": 1, "b": "x"})
         mock_mlflow.log_params.assert_called_once_with({"a": 1, "b": "x"})
 
@@ -38,6 +42,7 @@ class TestInitAndBasicOps:
     def test_log_metrics(self, mock_mlflow):
         """Delegates to mlflow.log_metrics."""
         from helpers.experiment import log_metrics
+
         log_metrics({"f1": 0.85}, step=3)
         mock_mlflow.log_metrics.assert_called_once_with({"f1": 0.85}, step=3)
 
@@ -45,6 +50,7 @@ class TestInitAndBasicOps:
     def test_log_artifact(self, mock_mlflow):
         """Delegates to mlflow.log_artifact."""
         from helpers.experiment import log_artifact
+
         log_artifact("/tmp/file.txt")
         mock_mlflow.log_artifact.assert_called_once_with("/tmp/file.txt")
 
@@ -52,6 +58,7 @@ class TestInitAndBasicOps:
     def test_log_model(self, mock_mlflow):
         """Delegates to mlflow.sklearn.log_model."""
         from helpers.experiment import log_model
+
         model = MagicMock()
         log_model(model, artifact_path="my_model")
         mock_mlflow.sklearn.log_model.assert_called_once_with(model, name="my_model")
@@ -60,6 +67,7 @@ class TestInitAndBasicOps:
     def test_log_cv_fold(self, mock_mlflow):
         """Creates a nested run for a CV fold."""
         from helpers.experiment import log_cv_fold
+
         mock_mlflow.start_run.return_value.__enter__ = MagicMock()
         mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
         log_cv_fold(2, {"f1": 0.9}, run_name_prefix="xgb_fold")
@@ -79,6 +87,7 @@ class TestConfusionMatrix:
         mock_subplots.return_value = (mock_fig, mock_ax)
         with patch("helpers.experiment.PROJECT_ROOT", tmp_path):
             from helpers.experiment import log_confusion_matrix
+
             (tmp_path / "ML").mkdir()
             log_confusion_matrix([0, 1, 1, 0], [0, 1, 0, 0])
         mock_fig.savefig.assert_called_once()
@@ -101,6 +110,7 @@ class TestFeatureImportance:
         with patch("helpers.experiment.PROJECT_ROOT", tmp_path):
             (tmp_path / "ML").mkdir()
             from helpers.experiment import log_feature_importance
+
             log_feature_importance(model, ["feat_a", "feat_b"], top_n=2)
         mock_fig.savefig.assert_called_once()
 
@@ -120,6 +130,7 @@ class TestFeatureImportance:
         with patch("helpers.experiment.PROJECT_ROOT", tmp_path):
             (tmp_path / "ML").mkdir()
             from helpers.experiment import log_feature_importance
+
             log_feature_importance(model, ["a", "b"])
         mock_fig.savefig.assert_called_once()
 
@@ -128,6 +139,7 @@ class TestFeatureImportance:
         """Skips when model has no feature_importances_."""
         model = MagicMock(spec=[])
         from helpers.experiment import log_feature_importance
+
         log_feature_importance(model, ["a"])
         mock_mlflow.log_artifact.assert_not_called()
 
@@ -139,6 +151,7 @@ class TestGetShapEstimator:
         """Extracts tree-based sub-estimator from VotingClassifier."""
         from sklearn.ensemble import VotingClassifier
         from helpers.experiment import _get_shap_estimator
+
         sub = MagicMock()
         sub.feature_importances_ = np.array([0.5])
         vc = VotingClassifier(estimators=[("a", sub)])
@@ -151,10 +164,12 @@ class TestGetShapEstimator:
         from sklearn.ensemble import StackingClassifier
         from sklearn.linear_model import LogisticRegression
         from helpers.experiment import _get_shap_estimator
+
         sub = MagicMock()
         sub.feature_importances_ = np.array([0.5])
         sc = StackingClassifier(
-            estimators=[("a", sub)], final_estimator=LogisticRegression(),
+            estimators=[("a", sub)],
+            final_estimator=LogisticRegression(),
         )
         sc.estimators_ = [sub]
         result = _get_shap_estimator(sc)
@@ -164,6 +179,7 @@ class TestGetShapEstimator:
         """Extracts first estimator from BaggingClassifier."""
         from sklearn.ensemble import BaggingClassifier
         from helpers.experiment import _get_shap_estimator
+
         sub = MagicMock()
         bc = BaggingClassifier()
         bc.estimators_ = [sub]
@@ -174,6 +190,7 @@ class TestGetShapEstimator:
         """Returns None when BaggingClassifier has no fitted estimators."""
         from sklearn.ensemble import BaggingClassifier
         from helpers.experiment import _get_shap_estimator
+
         bc = BaggingClassifier()
         bc.estimators_ = []
         assert _get_shap_estimator(bc) is None
@@ -182,6 +199,7 @@ class TestGetShapEstimator:
         """Returns None when no sub-estimator has feature_importances_."""
         from sklearn.ensemble import VotingClassifier
         from helpers.experiment import _get_shap_estimator
+
         sub = MagicMock(spec=[])  # no feature_importances_
         vc = VotingClassifier(estimators=[("a", sub)])
         vc.estimators_ = [sub]
@@ -190,6 +208,7 @@ class TestGetShapEstimator:
     def test_cuda_deep_copies_to_cpu(self):
         """Deep-copies CUDA XGBoost to CPU."""
         from helpers.experiment import _get_shap_estimator
+
         model = MagicMock()
         model.device = "cuda:0"
         model.feature_importances_ = np.array([0.5])
@@ -206,6 +225,7 @@ class TestLogShapSummary:
     def test_shap_summary_pipeline(self, _mock_tight, mock_figure, mock_mlflow, tmp_path):
         """Runs SHAP on a Pipeline model with mocked shap module."""
         import pandas as pd
+
         mock_shap = MagicMock()
         mock_explainer = MagicMock()
         mock_explainer.shap_values.return_value = np.array([[0.1, 0.2]])
@@ -221,6 +241,7 @@ class TestLogShapSummary:
             with patch("helpers.experiment.PROJECT_ROOT", tmp_path):
                 (tmp_path / "ML").mkdir()
                 from helpers.experiment import log_shap_summary
+
                 log_shap_summary(model, X, ["a", "b"])
 
     @patch("helpers.experiment.mlflow")
@@ -228,5 +249,6 @@ class TestLogShapSummary:
         """Skips gracefully when shap is not installed."""
         with patch.dict("sys.modules", {"shap": None}):
             from helpers.experiment import log_shap_summary
+
             # This should not raise
             log_shap_summary(MagicMock(), np.array([[1]]), ["a"])

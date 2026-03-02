@@ -1,4 +1,5 @@
 """Unit tests for corefunc.data_cleaning (Parquet-based artist dedup and encoding repair)."""
+
 import pandas as pd
 from corefunc.data_cleaning import (
     _repair_text,
@@ -64,13 +65,16 @@ class TestFixEncoding:
     def test_no_bad_chars(self, tmp_pq_dir):
         """Returns (0, N) when all text is clean."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "artist_name": ["Artist A", "Artist B"],
-            "album_title": ["Album A", "Album B"],
-            "track_title": ["Track A", "Track B"],
-            "artist_mbid": [None, None],
-            "play_time": pd.date_range("2024-06-01", periods=2, freq="5min", tz="UTC"),
-        })
+
+        df = pd.DataFrame(
+            {
+                "artist_name": ["Artist A", "Artist B"],
+                "album_title": ["Album A", "Album B"],
+                "track_title": ["Track A", "Track B"],
+                "artist_mbid": [None, None],
+                "play_time": pd.date_range("2024-06-01", periods=2, freq="5min", tz="UTC"),
+            }
+        )
         df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         results = fix_encoding()
         assert results["scrobble"] == (0, 2)
@@ -78,18 +82,22 @@ class TestFixEncoding:
     def test_repairs_scrobble_bad_chars(self, tmp_pq_dir):
         """Repairs encoding corruption in scrobble data."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "artist_name": ["Good Artist", "Good Artist 2"],
-            "album_title": ["Clean Album", "Clean Album 2"],
-            "track_title": ["Don\x92t Cry", "Clean Track"],
-            "artist_mbid": [None, None],
-            "play_time": pd.date_range("2024-06-01", periods=2, freq="5min", tz="UTC"),
-        })
+
+        df = pd.DataFrame(
+            {
+                "artist_name": ["Good Artist", "Good Artist 2"],
+                "album_title": ["Clean Album", "Clean Album 2"],
+                "track_title": ["Don\x92t Cry", "Clean Track"],
+                "artist_mbid": [None, None],
+                "play_time": pd.date_range("2024-06-01", periods=2, freq="5min", tz="UTC"),
+            }
+        )
         df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         results = fix_encoding()
         assert results["scrobble"] == (1, 2)
         # Verifying the repaired value (dump_scrobble_df writes to partitioned dir)
         from helpers.io import read_scrobble_df
+
         result = read_scrobble_df()
         row = result[result["artist_name"] == "Good Artist"].iloc[0]
         assert row["track_title"] == "Don\u2019t Cry"
@@ -97,13 +105,16 @@ class TestFixEncoding:
     def test_repairs_artist_info_bad_chars(self, tmp_pq_dir):
         """Repairs encoding corruption in artist_info.parquet."""
         import helpers.io as io_mod
-        ai = pd.DataFrame({
-            "artist_name": ["Bj\x94rk", "Clean Artist"],
-            "mbid": ["id-a", "id-b"],
-            "country": ["IS", "US"],
-            "disambiguation_comment": ["Icelandic\x85singer", ""],
-            "aliases": ["", ""],
-        })
+
+        ai = pd.DataFrame(
+            {
+                "artist_name": ["Bj\x94rk", "Clean Artist"],
+                "mbid": ["id-a", "id-b"],
+                "country": ["IS", "US"],
+                "disambiguation_comment": ["Icelandic\x85singer", ""],
+                "aliases": ["", ""],
+            }
+        )
         ai.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         results = fix_encoding()
         assert results["artist_info"][0] >= 1
@@ -126,13 +137,16 @@ class TestCleanArtistInfo:
     def test_no_duplicates(self, tmp_pq_dir):
         """Keeps all rows when there are no duplicate artist_names."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "artist_name": ["A", "B"],
-            "mbid": ["id-a", "id-b"],
-            "country": ["DE", "US"],
-            "disambiguation_comment": ["", ""],
-            "aliases": ["", ""],
-        })
+
+        df = pd.DataFrame(
+            {
+                "artist_name": ["A", "B"],
+                "mbid": ["id-a", "id-b"],
+                "country": ["DE", "US"],
+                "disambiguation_comment": ["", ""],
+                "aliases": ["", ""],
+            }
+        )
         df.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         removed, remaining = clean_artist_info()
         assert removed == 0
@@ -141,13 +155,16 @@ class TestCleanArtistInfo:
     def test_dedup_keeps_most_complete(self, tmp_pq_dir):
         """Keeps the row with the highest completeness score per artist."""
         import helpers.io as io_mod
-        df = pd.DataFrame({
-            "artist_name": ["A", "A"],
-            "mbid": [None, "mbid-1"],
-            "country": [None, "DE"],
-            "disambiguation_comment": [None, "rock band"],
-            "aliases": [None, "alias"],
-        })
+
+        df = pd.DataFrame(
+            {
+                "artist_name": ["A", "A"],
+                "mbid": [None, "mbid-1"],
+                "country": [None, "DE"],
+                "disambiguation_comment": [None, "rock band"],
+                "aliases": [None, "alias"],
+            }
+        )
         df.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         removed, remaining = clean_artist_info()
         assert removed == 1

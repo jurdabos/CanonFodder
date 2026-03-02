@@ -7,6 +7,7 @@ Consolidates the Siamese TCN (Exp 9) and Hybrid TCN + feature floor
 Architecture reference: Bai et al. (2018) "An Empirical Evaluation of
 Generic Convolutional and Recurrent Networks for Sequence Modeling."
 """
+
 from __future__ import annotations
 import logging
 import numpy as np
@@ -53,16 +54,18 @@ N_BASE_FEATURES = 28  # 23 pair features + 5 length stats
 # ═════════════════════════════════════════════════════════════════════════════
 class Chomp1d(nn.Module):
     """Removes trailing padding to maintain causal convolution."""
+
     def __init__(self, chomp_size):
         super().__init__()
         self.chomp_size = chomp_size
 
     def forward(self, x):
-        return x[:, :, :-self.chomp_size].contiguous()
+        return x[:, :, : -self.chomp_size].contiguous()
 
 
 class TemporalBlock(nn.Module):
     """Residual block with two causal dilated convolutions."""
+
     def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2, use_weight_norm=True):
         super().__init__()
         conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size, stride=stride, padding=padding, dilation=dilation)
@@ -79,8 +82,14 @@ class TemporalBlock(nn.Module):
         self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(dropout)
         self.net = nn.Sequential(
-            self.conv1, self.chomp1, self.relu1, self.dropout1,
-            self.conv2, self.chomp2, self.relu2, self.dropout2,
+            self.conv1,
+            self.chomp1,
+            self.relu1,
+            self.dropout1,
+            self.conv2,
+            self.chomp2,
+            self.relu2,
+            self.dropout2,
         )
         self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.relu = nn.ReLU()
@@ -101,17 +110,27 @@ class TemporalBlock(nn.Module):
 
 class TemporalConvNet(nn.Module):
     """Stacks TemporalBlocks with exponentially increasing dilation."""
-    def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2, use_weight_norm=True, use_layer_norm=False):
+
+    def __init__(
+        self, num_inputs, num_channels, kernel_size=2, dropout=0.2, use_weight_norm=True, use_layer_norm=False
+    ):
         super().__init__()
         layers = []
         for i in range(len(num_channels)):
-            dilation_size = 2 ** i
+            dilation_size = 2**i
             in_ch = num_inputs if i == 0 else num_channels[i - 1]
-            layers.append(TemporalBlock(
-                in_ch, num_channels[i], kernel_size, stride=1,
-                dilation=dilation_size, padding=(kernel_size - 1) * dilation_size,
-                dropout=dropout, use_weight_norm=use_weight_norm,
-            ))
+            layers.append(
+                TemporalBlock(
+                    in_ch,
+                    num_channels[i],
+                    kernel_size,
+                    stride=1,
+                    dilation=dilation_size,
+                    padding=(kernel_size - 1) * dilation_size,
+                    dropout=dropout,
+                    use_weight_norm=use_weight_norm,
+                )
+            )
         self.network = nn.Sequential(*layers)
         self.layer_norm = nn.LayerNorm(num_channels[-1]) if use_layer_norm else None
 
@@ -127,6 +146,7 @@ class TemporalConvNet(nn.Module):
 # ═════════════════════════════════════════════════════════════════════════════
 class CharVocab:
     """Maps characters to integer indices with PAD=0 and UNK=1."""
+
     PAD = 0
     UNK = 1
 
@@ -161,6 +181,7 @@ class CharVocab:
 # ═════════════════════════════════════════════════════════════════════════════
 class NamePairDataset(Dataset):
     """Wraps a DataFrame of (variant_a, variant_b, to_link) for the Siamese TCN."""
+
     def __init__(self, df: pd.DataFrame, vocab: CharVocab, max_len: int):
         self.a = df["variant_a"].astype(str).tolist()
         self.b = df["variant_b"].astype(str).tolist()
@@ -180,6 +201,7 @@ class NamePairDataset(Dataset):
 
 class HybridDataset(Dataset):
     """Wraps character sequences and precomputed features for the hybrid model."""
+
     def __init__(self, df: pd.DataFrame, vocab: CharVocab, max_len: int, features: np.ndarray):
         self.a = df["variant_a"].astype(str).tolist()
         self.b = df["variant_b"].astype(str).tolist()
@@ -208,6 +230,7 @@ class SiameseTCN(nn.Module):
     Each name is encoded via character embedding → shared TCN → global pooling.
     Representations are combined and classified through a FC head.
     """
+
     def __init__(self, vocab_size, embed_dim, tcn_channels, kernel_size, tcn_dropout, fc_dropout):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
@@ -246,12 +269,17 @@ class HybridTCN(nn.Module):
     The feature branch has a skip connection to the output, ensuring
     features always contribute directly — a stable signal floor.
     """
+
     def __init__(self, vocab_size, embed_dim, tcn_channels, kernel_size, tcn_dropout, fc_dropout, n_features):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
         self.tcn = TemporalConvNet(
-            embed_dim, tcn_channels, kernel_size=kernel_size,
-            dropout=tcn_dropout, use_weight_norm=False, use_layer_norm=True,
+            embed_dim,
+            tcn_channels,
+            kernel_size=kernel_size,
+            dropout=tcn_dropout,
+            use_weight_norm=False,
+            use_layer_norm=True,
         )
         pool_dim = tcn_channels[-1] * 2
         tcn_combined_dim = pool_dim * 4
@@ -303,7 +331,8 @@ def _assemble_training_data() -> pd.DataFrame:
         raise RuntimeError("gs_mb.parquet not found — run 'c9r canon avc augment' first.")
     positives = gs[gs["to_link"].eq(True)].copy()
     positives["_wr"] = positives.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
     positives = positives[(positives["_wr"] >= WRATIO_LOWER) & (positives["_wr"] < WRATIO_UPPER)]
     positives = positives.drop(columns=["_wr"])
@@ -315,12 +344,14 @@ def _assemble_training_data() -> pd.DataFrame:
     neg_pool = dbscan[dbscan["to_link"].eq(False)]
     negatives = neg_pool.sample(n=min(n_pos, len(neg_pool)), random_state=RANDOM_STATE)
     log.info("Negatives sampled: %d (from %d pool)", len(negatives), len(neg_pool))
-    train = pd.concat([
-        positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-        negatives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-    ], ignore_index=True)
-    log.info("Training set: %d pairs (pos=%d, neg=%d).",
-             len(train), train["to_link"].sum(), (~train["to_link"]).sum())
+    train = pd.concat(
+        [
+            positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+            negatives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+        ],
+        ignore_index=True,
+    )
+    log.info("Training set: %d pairs (pos=%d, neg=%d).", len(train), train["to_link"].sum(), (~train["to_link"]).sum())
     return train
 
 
@@ -439,8 +470,9 @@ def _train_siamese(model, train_loader, val_loader, y_val, pos_weight, *, epochs
         val_auc = roc_auc_score(y_val, val_probs)
         history["val_auc"].append(val_auc)
         if epoch % 5 == 0 or epoch == 1:
-            log.info("Epoch %3d | loss=%.4f | val AUC=%.4f | lr=%.2e",
-                     epoch, avg_loss, val_auc, scheduler.get_last_lr()[0])
+            log.info(
+                "Epoch %3d | loss=%.4f | val AUC=%.4f | lr=%.2e", epoch, avg_loss, val_auc, scheduler.get_last_lr()[0]
+            )
         if val_auc > best_auc:
             best_auc = val_auc
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -511,8 +543,9 @@ def _train_hybrid(model, train_loader, val_loader, y_val, pos_weight, *, epochs,
         val_auc = roc_auc_score(y_val, val_probs)
         history["val_auc"].append(val_auc)
         if epoch % 5 == 0 or epoch == 1:
-            log.info("Epoch %3d | loss=%.4f | val AUC=%.4f | lr=%.2e",
-                     epoch, avg_loss, val_auc, scheduler.get_last_lr()[0])
+            log.info(
+                "Epoch %3d | loss=%.4f | val AUC=%.4f | lr=%.2e", epoch, avg_loss, val_auc, scheduler.get_last_lr()[0]
+            )
         if val_auc > best_auc:
             best_auc = val_auc
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -567,11 +600,15 @@ def run_tcn_training(
     # Assembling data
     train_full = _assemble_training_data()
     test_df = _build_avc_test()
-    log.info("AVC test: %d pairs (pos=%d, neg=%d).",
-             len(test_df), test_df["to_link"].sum(), (~test_df["to_link"]).sum())
+    log.info(
+        "AVC test: %d pairs (pos=%d, neg=%d).", len(test_df), test_df["to_link"].sum(), (~test_df["to_link"]).sum()
+    )
     val_size = 0.2 if model_type == "siamese" else 0.15
     train_df, val_df = train_test_split(
-        train_full, test_size=val_size, stratify=train_full["to_link"], random_state=RANDOM_STATE,
+        train_full,
+        test_size=val_size,
+        stratify=train_full["to_link"],
+        random_state=RANDOM_STATE,
     )
     log.info("Train/val split: %d / %d", len(train_df), len(val_df))
     # Building character vocabulary from training names
@@ -594,13 +631,18 @@ def run_tcn_training(
         test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
         # Building model
         model = SiameseTCN(
-            vocab_size=vocab.size, embed_dim=EMBED_DIM, tcn_channels=TCN_CHANNELS,
-            kernel_size=KERNEL_SIZE, tcn_dropout=TCN_DROPOUT, fc_dropout=FC_DROPOUT,
+            vocab_size=vocab.size,
+            embed_dim=EMBED_DIM,
+            tcn_channels=TCN_CHANNELS,
+            kernel_size=KERNEL_SIZE,
+            tcn_dropout=TCN_DROPOUT,
+            fc_dropout=FC_DROPOUT,
         ).to(device)
         log.info("Model parameters: %s", f"{sum(p.numel() for p in model.parameters()):,}")
         # Training
-        history = _train_siamese(model, train_loader, val_loader, y_val, pos_weight,
-                                 epochs=epochs, lr=lr, patience=patience, device=device)
+        history = _train_siamese(
+            model, train_loader, val_loader, y_val, pos_weight, epochs=epochs, lr=lr, patience=patience, device=device
+        )
         # Evaluating
         test_probs = _predict_siamese(model, test_loader, device)
     else:
@@ -622,14 +664,19 @@ def run_tcn_training(
         test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
         # Building model
         model = HybridTCN(
-            vocab_size=vocab.size, embed_dim=EMBED_DIM, tcn_channels=TCN_CHANNELS,
-            kernel_size=KERNEL_SIZE, tcn_dropout=TCN_DROPOUT, fc_dropout=FC_DROPOUT,
+            vocab_size=vocab.size,
+            embed_dim=EMBED_DIM,
+            tcn_channels=TCN_CHANNELS,
+            kernel_size=KERNEL_SIZE,
+            tcn_dropout=TCN_DROPOUT,
+            fc_dropout=FC_DROPOUT,
             n_features=N_BASE_FEATURES,
         ).to(device)
         log.info("Model parameters: %s", f"{sum(p.numel() for p in model.parameters()):,}")
         # Training
-        history = _train_hybrid(model, train_loader, val_loader, y_val, pos_weight,
-                                epochs=epochs, lr=lr, patience=patience, device=device)
+        history = _train_hybrid(
+            model, train_loader, val_loader, y_val, pos_weight, epochs=epochs, lr=lr, patience=patience, device=device
+        )
         # Evaluating
         test_probs = _predict_hybrid(model, test_loader, device)
     # Evaluating at 3 operating points
@@ -646,45 +693,49 @@ def run_tcn_training(
     experiment.init_experiment()
     parent_name = run_name or f"tcn_{model_type}"
     with experiment.start_run(run_name=parent_name):
-        experiment.log_params({
-            "experiment": experiment_num or 0,
-            "experiment_type": f"tcn_{model_type}",
-            "model_architecture": model_type,
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "lr": lr,
-            "patience": patience,
-            "max_seq_len": MAX_SEQ_LEN,
-            "embed_dim": EMBED_DIM,
-            "tcn_channels": str(TCN_CHANNELS),
-            "kernel_size": KERNEL_SIZE,
-            "tcn_dropout": TCN_DROPOUT,
-            "fc_dropout": FC_DROPOUT,
-            "n_train": len(train_df),
-            "n_val": len(val_df),
-            "n_test": len(test_df),
-            "device": str(device),
-            "random_state": RANDOM_STATE,
-            "vocab_size": vocab.size,
-            "n_params": sum(p.numel() for p in model.parameters()),
-        })
-        experiment.log_metrics({
-            "auc": auc,
-            "default_f1": default_m["f1"],
-            "default_precision": default_m["precision"],
-            "default_recall": default_m["recall"],
-            "opt_threshold": optimal_m["threshold"],
-            "opt_f1": optimal_m["f1"],
-            "opt_precision": optimal_m["precision"],
-            "opt_recall": optimal_m["recall"],
-            "hiprec_threshold": best_hi["threshold"],
-            "hiprec_f1": best_hi["f1"],
-            "hiprec_precision": best_hi["precision"],
-            "hiprec_recall": best_hi["recall"],
-            "best_val_auc": max(history["val_auc"]) if history["val_auc"] else 0.0,
-            "final_train_loss": history["train_loss"][-1] if history["train_loss"] else 0.0,
-            "total_epochs": len(history["train_loss"]),
-        })
+        experiment.log_params(
+            {
+                "experiment": experiment_num or 0,
+                "experiment_type": f"tcn_{model_type}",
+                "model_architecture": model_type,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "lr": lr,
+                "patience": patience,
+                "max_seq_len": MAX_SEQ_LEN,
+                "embed_dim": EMBED_DIM,
+                "tcn_channels": str(TCN_CHANNELS),
+                "kernel_size": KERNEL_SIZE,
+                "tcn_dropout": TCN_DROPOUT,
+                "fc_dropout": FC_DROPOUT,
+                "n_train": len(train_df),
+                "n_val": len(val_df),
+                "n_test": len(test_df),
+                "device": str(device),
+                "random_state": RANDOM_STATE,
+                "vocab_size": vocab.size,
+                "n_params": sum(p.numel() for p in model.parameters()),
+            }
+        )
+        experiment.log_metrics(
+            {
+                "auc": auc,
+                "default_f1": default_m["f1"],
+                "default_precision": default_m["precision"],
+                "default_recall": default_m["recall"],
+                "opt_threshold": optimal_m["threshold"],
+                "opt_f1": optimal_m["f1"],
+                "opt_precision": optimal_m["precision"],
+                "opt_recall": optimal_m["recall"],
+                "hiprec_threshold": best_hi["threshold"],
+                "hiprec_f1": best_hi["f1"],
+                "hiprec_precision": best_hi["precision"],
+                "hiprec_recall": best_hi["recall"],
+                "best_val_auc": max(history["val_auc"]) if history["val_auc"] else 0.0,
+                "final_train_loss": history["train_loss"][-1] if history["train_loss"] else 0.0,
+                "total_epochs": len(history["train_loss"]),
+            }
+        )
     # Printing results
     results = {
         "auc": auc,
@@ -706,15 +757,21 @@ def run_tcn_training(
     print(f"{'=' * 100}")
     print(f"AUC:            {auc:.4f}")
     print(f"Default (0.5):  P={default_m['precision']:.4f}  R={default_m['recall']:.4f}  F1={default_m['f1']:.4f}")
-    print(f"Optimal:        P={optimal_m['precision']:.4f}  R={optimal_m['recall']:.4f}  F1={optimal_m['f1']:.4f}  (thr={opt_thr:.3f})")
-    print(f"High-precision: P={best_hi['precision']:.4f}  R={best_hi['recall']:.4f}  F1={best_hi['f1']:.4f}  (thr={best_hi['threshold']:.3f})")
+    print(
+        f"Optimal:        P={optimal_m['precision']:.4f}  R={optimal_m['recall']:.4f}  F1={optimal_m['f1']:.4f}  (thr={opt_thr:.3f})"
+    )
+    print(
+        f"High-precision: P={best_hi['precision']:.4f}  R={best_hi['recall']:.4f}  F1={best_hi['f1']:.4f}  (thr={best_hi['threshold']:.3f})"
+    )
     print(f"{'=' * 100}")
     y_pred_opt = (test_probs >= opt_thr).astype(int)
     print(f"\n=== {model_label} (optimal thr={opt_thr:.3f}) ===")
     print(classification_report(y_test, y_pred_opt, target_names=["no link", "link"]))
     c9r_score = 0.4 * best_hi["precision"] + 0.3 * best_hi["f1"] + 0.3 * auc
     print(f"c9r score: {c9r_score:.4f}")
-    print(f"\nTraining: {len(history['train_loss'])} epochs, "
-          f"final loss={history['train_loss'][-1]:.4f}, "
-          f"best val AUC={max(history['val_auc']):.4f}")
+    print(
+        f"\nTraining: {len(history['train_loss'])} epochs, "
+        f"final loss={history['train_loss'][-1]:.4f}, "
+        f"best val AUC={max(history['val_auc']):.4f}"
+    )
     return results

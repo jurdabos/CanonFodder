@@ -6,6 +6,7 @@ MLflow parent run.  Each candidate gets its own nested child run with
 stratified k-fold cross-validation, per-fold metrics, and optional
 Optuna-based hyperparameter tuning.
 """
+
 from __future__ import annotations
 import logging
 import warnings
@@ -252,6 +253,7 @@ def run_experiment(
     Returns a dict mapping model_name → held-out test metrics.
     """
     from corefunc.canon.model import _build_gold_standard
+
     experiment.init_experiment()
     device = get_device()
     # Preparing data
@@ -261,12 +263,21 @@ def run_experiment(
     X = gs[num_cols]
     y = gs[target].astype(int).values
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y,
+        X,
+        y,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=y,
     )
     spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
     log.info(
         "Experiment data: %d total (%d train, %d test), %d features, spw=%.2f, device=%s",
-        len(X), len(X_train), len(X_test), len(num_cols), spw, device,
+        len(X),
+        len(X_train),
+        len(X_test),
+        len(num_cols),
+        spw,
+        device,
     )
     catalogue = _build_model_catalogue(spw, device, random_state)
     if models:
@@ -274,22 +285,25 @@ def run_experiment(
     results: dict[str, dict[str, float]] = {}
     parent_run_name = run_name or "experiment_run"
     with experiment.start_run(run_name=parent_run_name):
-        experiment.log_params({
-            "augment": augment,
-            "test_size": test_size,
-            "n_folds": n_folds,
-            "random_state": random_state,
-            "n_features": len(num_cols),
-            "n_total_pairs": len(X),
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "device_probed": device,
-            "model_count": len(catalogue),
-        })
+        experiment.log_params(
+            {
+                "augment": augment,
+                "test_size": test_size,
+                "n_folds": n_folds,
+                "random_state": random_state,
+                "n_features": len(num_cols),
+                "n_total_pairs": len(X),
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "device_probed": device,
+                "model_count": len(catalogue),
+            }
+        )
         for model_name, clf in catalogue.items():
             log.info("─── Training %s ───", model_name)
             with experiment.start_run(run_name=model_name, nested=True):
                 import mlflow
+
                 mlflow.set_tag("model_type", model_name)
                 # Logging model-specific params
                 safe_params = _safe_get_params(clf)
@@ -297,7 +311,10 @@ def run_experiment(
                 experiment.log_params(safe_params)
                 # Cross-validation
                 cv_metrics = _cv_evaluate(
-                    clf, X_train, y_train, num_cols,
+                    clf,
+                    X_train,
+                    y_train,
+                    num_cols,
                     n_folds=n_folds,
                     random_state=random_state,
                     model_name=model_name,
@@ -312,7 +329,10 @@ def run_experiment(
                 pre.set_output(transform="pandas")
                 final_pipeline = Pipeline([("prep", pre), ("clf", clone(clf))])
                 final_pipeline, actual_device = _fit_with_gpu_fallback(
-                    final_pipeline, X_train, y_train, device,
+                    final_pipeline,
+                    X_train,
+                    y_train,
+                    device,
                 )
                 if actual_device != device:
                     experiment.log_params({"device_fallback": actual_device})
@@ -363,7 +383,11 @@ def run_holdout_experiment(
     device = get_device()
     target = "to_link"
     exclude = {"variants", target, "variant_a", "variant_b", "source", "_key"}
-    num_cols = [c for c in train_df.columns if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")]
+    num_cols = [
+        c
+        for c in train_df.columns
+        if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")
+    ]
     X_train = train_df[num_cols]
     y_train = train_df[target].astype(int).values
     X_test = test_df[num_cols]
@@ -371,7 +395,11 @@ def run_holdout_experiment(
     spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
     log.info(
         "Holdout experiment: %d train, %d test, %d features, spw=%.2f, device=%s",
-        len(X_train), len(X_test), len(num_cols), spw, device,
+        len(X_train),
+        len(X_test),
+        len(num_cols),
+        spw,
+        device,
     )
     catalogue = _build_model_catalogue(spw, device, random_state)
     if models:
@@ -379,28 +407,34 @@ def run_holdout_experiment(
     results: dict[str, dict[str, float]] = {}
     parent_run_name = run_name or "holdout_experiment"
     with experiment.start_run(run_name=parent_run_name):
-        experiment.log_params({
-            "experiment_type": "holdout",
-            "n_folds": n_folds,
-            "random_state": random_state,
-            "n_features": len(num_cols),
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "test_source": "avc_hand_curated",
-            "device_probed": device,
-            "model_count": len(catalogue),
-        })
+        experiment.log_params(
+            {
+                "experiment_type": "holdout",
+                "n_folds": n_folds,
+                "random_state": random_state,
+                "n_features": len(num_cols),
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "test_source": "avc_hand_curated",
+                "device_probed": device,
+                "model_count": len(catalogue),
+            }
+        )
         for model_name, clf in catalogue.items():
             log.info("─── Training %s ───", model_name)
             with experiment.start_run(run_name=model_name, nested=True):
                 import mlflow
+
                 mlflow.set_tag("model_type", model_name)
                 safe_params = _safe_get_params(clf)
                 safe_params["device_used"] = device
                 experiment.log_params(safe_params)
                 # Cross-validation on the training set
                 cv_metrics = _cv_evaluate(
-                    clf, X_train, y_train, num_cols,
+                    clf,
+                    X_train,
+                    y_train,
+                    num_cols,
                     n_folds=n_folds,
                     random_state=random_state,
                     model_name=model_name,
@@ -415,7 +449,10 @@ def run_holdout_experiment(
                 pre.set_output(transform="pandas")
                 final_pipeline = Pipeline([("prep", pre), ("clf", clone(clf))])
                 final_pipeline, actual_device = _fit_with_gpu_fallback(
-                    final_pipeline, X_train, y_train, device,
+                    final_pipeline,
+                    X_train,
+                    y_train,
+                    device,
                 )
                 if actual_device != device:
                     experiment.log_params({"device_fallback": actual_device})

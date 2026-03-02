@@ -2,9 +2,11 @@
 Supplies a single helper that performs a GET request with retry and
 back-off while adding CanonFodder’s User-Agent per API documentation requirement.
 """
+
 from __future__ import annotations
 import requests
 from time import sleep
+
 USER_AGENT = "CanonFodder/1.3 (balazs.torda@iu-study.org)"
 
 
@@ -35,12 +37,12 @@ def make_request(
                 return r
             if 500 <= r.status_code < 600:
                 print(f"{url} -> {r.status_code}  retry {attempt}/{max_retries}")
-                sleep(min(2 ** attempt, 120))
+                sleep(min(2**attempt, 120))
                 continue
             # 4xx or other unexpected
             print(f"{url} -> {r.status_code}\n{r.text[:300]}")
             return r
         except requests.RequestException as exc:
             print(f"network error {exc}  retry {attempt}/{max_retries}")
-            sleep(min(2 ** attempt, 120))
+            sleep(min(2**attempt, 120))
     return None

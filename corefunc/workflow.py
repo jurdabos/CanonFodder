@@ -3,6 +3,7 @@ Provides the core data-gathering workflow for c9r.
 
 All persistence goes through helpers.io (Parquet).  No DB dependency.
 """
+
 from __future__ import annotations
 import logging
 from helpers.io import ingest_scrobbles, latest_scrobble_ts
@@ -12,10 +13,10 @@ log = logging.getLogger(__name__)
 
 
 def run_data_gathering_workflow(
-        username: str,
-        *,
-        full: bool = False,
-        source: str = "lastfm",
+    username: str,
+    *,
+    full: bool = False,
+    source: str = "lastfm",
 ) -> int:
     """
     Fetches scrobbles from the chosen source and appends them to scrobble.parquet.
@@ -46,6 +47,7 @@ def run_data_gathering_workflow(
             df = lfAPI.fetch_scrobbles_since(username, since)
         else:
             from HTTP.lblink import fetch_scrobbles_since as lb_fetch
+
             df = lb_fetch(username, since)
     except Exception as exc:
         log.error("API fetch failed: %s", exc)

@@ -11,6 +11,7 @@ Orchestrates:
 
 Retries with exponential back-off are configured per task (FR-10).
 """
+
 from __future__ import annotations
 import logging
 import os
@@ -18,6 +19,7 @@ from datetime import UTC, datetime
 from dotenv import load_dotenv
 from prefect import flow, get_run_logger, task
 from prefect.tasks import exponential_backoff
+
 load_dotenv()
 log = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ def fetch_scrobbles(username: str, *, full: bool = False, source: str = "lastfm"
     """Ingests scrobbles via the workflow helper; returns count."""
     from corefunc.workflow import run_data_gathering_workflow
     from corefunc.qa import qa_lb_ingest
+
     logger = get_run_logger()
     logger.info("Fetching scrobbles for %s from %s", username, source)
     n = run_data_gathering_workflow(username, full=full, source=source)
@@ -48,7 +51,11 @@ def fetch_scrobbles(username: str, *, full: bool = False, source: str = "lastfm"
             else:
                 logger.warning("QA issues detected:")
                 if not report["schema"]["pass"]:
-                    logger.warning("  Schema: missing=%s, unexpected=%s", report["schema"]["missing"], report["schema"]["unexpected"])
+                    logger.warning(
+                        "  Schema: missing=%s, unexpected=%s",
+                        report["schema"]["missing"],
+                        report["schema"]["unexpected"],
+                    )
                 ts = report["timestamps"]
                 for issue in ts.get("issues", []):
                     logger.warning("  Timestamp: %s", issue)
@@ -72,6 +79,7 @@ def fetch_scrobbles(username: str, *, full: bool = False, source: str = "lastfm"
 def enrich_artists() -> int:
     """Looks up country/MBID for unresolved artists; returns count."""
     from corefunc.enrich import enrich_artist_country
+
     logger = get_run_logger()
     n = enrich_artist_country()
     logger.info("Enriched %d artists.", n)
@@ -88,6 +96,7 @@ def enrich_artists() -> int:
 def fix_encoding_task() -> dict[str, tuple[int, int]]:
     """Repairs encoding issues; returns per-file (fixed, total) dict."""
     from corefunc.data_cleaning import fix_encoding
+
     logger = get_run_logger()
     results = fix_encoding()
     for label, (fixed, total) in results.items():
@@ -105,6 +114,7 @@ def fix_encoding_task() -> dict[str, tuple[int, int]]:
 def clean_artists() -> tuple[int, int]:
     """Deduplicates artist_info; returns (removed, remaining)."""
     from corefunc.data_cleaning import clean_artist_info
+
     logger = get_run_logger()
     removed, remaining = clean_artist_info()
     logger.info("Cleaned artist_info: removed=%d, remaining=%d.", removed, remaining)
@@ -124,9 +134,11 @@ def canonise_batch() -> dict[str, int]:
     Exits gracefully when the model pickle is missing.
     """
     from corefunc.canon.workflow import discover_candidates, write_new_candidates
+
     logger = get_run_logger()
     try:
         from helpers.inference import load_model
+
         model = load_model()
     except FileNotFoundError as exc:
         logger.warning("Canonisation skipped — model not available: %s", exc)
@@ -150,6 +162,7 @@ def canonise_batch() -> dict[str, int]:
 def propagate_avc_task() -> dict[str, int]:
     """Propagates decided canonisation to artist_info; returns summary."""
     from corefunc.canon.workflow import propagate_avc
+
     logger = get_run_logger()
     result = propagate_avc()
     logger.info("Propagated AVC: %d updated, %d aliases added.", result["updated"], result["aliases_added"])
@@ -170,6 +183,7 @@ def augment_gs_task() -> dict[str, int]:
     """
     from corefunc.canon.augment import augment_gold_standard
     from corefunc.mb_local import check_local_mb
+
     logger = get_run_logger()
     if not check_local_mb():
         logger.warning("Gold-standard augmentation skipped — local MB mirror unreachable.")
@@ -194,6 +208,7 @@ def retrain_model_task() -> dict[str, int]:
     from corefunc.canon.trainer import run_training
     from corefunc.canon.tuner import save_best_historical_models
     from helpers.io import AVC_PQ, read_parquet
+
     logger = get_run_logger()
     avc = read_parquet(AVC_PQ)
     if avc is None or avc.empty:

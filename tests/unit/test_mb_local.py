@@ -3,6 +3,7 @@ Unit tests for corefunc.mb_local (local MusicBrainz mirror enrichment).
 
 All subprocess calls are mocked so Docker is not required in CI.
 """
+
 from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -112,15 +113,25 @@ class TestEnrichFromLocalMb:
     def test_all_known(self, mock_check, tmp_pq_dir):
         """Returns 0 when all artists are already enriched."""
         import helpers.io as io_mod
-        scrobbles = pd.DataFrame({
-            "artist_name": ["A"], "album_title": ["Al"], "track_title": ["T"],
-            "artist_mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
-            "play_time": pd.to_datetime(["2024-01-01"], utc=True),
-        })
-        artist_info = pd.DataFrame({
-            "artist_name": ["A"], "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
-            "country": ["DE"], "disambiguation_comment": [""], "aliases": [""],
-        })
+
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["A"],
+                "album_title": ["Al"],
+                "track_title": ["T"],
+                "artist_mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+                "play_time": pd.to_datetime(["2024-01-01"], utc=True),
+            }
+        )
+        artist_info = pd.DataFrame(
+            {
+                "artist_name": ["A"],
+                "mbid": ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"],
+                "country": ["DE"],
+                "disambiguation_comment": [""],
+                "aliases": [""],
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         artist_info.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
         assert enrich_from_local_mb() == 0
@@ -131,18 +142,27 @@ class TestEnrichFromLocalMb:
     def test_tier1_mbid_lookup(self, mock_check, mock_mbid, mock_name, tmp_pq_dir):
         """Resolves artists via MBID lookup (Tier 1)."""
         import helpers.io as io_mod
+
         mbid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        scrobbles = pd.DataFrame({
-            "artist_name": ["TestBand"], "album_title": ["Al"], "track_title": ["T"],
-            "artist_mbid": [mbid],
-            "play_time": pd.to_datetime(["2024-01-01"], utc=True),
-        })
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["TestBand"],
+                "album_title": ["Al"],
+                "track_title": ["T"],
+                "artist_mbid": [mbid],
+                "play_time": pd.to_datetime(["2024-01-01"], utc=True),
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
-        mock_mbid.return_value = pd.DataFrame({
-            "artist_name": ["TestBand"], "mbid": [mbid],
-            "country": ["GB"], "disambiguation_comment": ["punk"],
-            "aliases": ["TB,Test Band"],
-        })
+        mock_mbid.return_value = pd.DataFrame(
+            {
+                "artist_name": ["TestBand"],
+                "mbid": [mbid],
+                "country": ["GB"],
+                "disambiguation_comment": ["punk"],
+                "aliases": ["TB,Test Band"],
+            }
+        )
         mock_name.return_value = pd.DataFrame(columns=ARTIST_INFO_COLS)
         n = enrich_from_local_mb(rebuild=True)
         assert n == 1
@@ -157,17 +177,26 @@ class TestEnrichFromLocalMb:
     def test_tier2_name_lookup(self, mock_check, mock_mbid, mock_name, tmp_pq_dir):
         """Resolves artists via name lookup (Tier 2) when no MBID is available."""
         import helpers.io as io_mod
-        scrobbles = pd.DataFrame({
-            "artist_name": ["NoBand"], "album_title": ["Al"], "track_title": ["T"],
-            "artist_mbid": [None],
-            "play_time": pd.to_datetime(["2024-01-01"], utc=True),
-        })
+
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["NoBand"],
+                "album_title": ["Al"],
+                "track_title": ["T"],
+                "artist_mbid": [None],
+                "play_time": pd.to_datetime(["2024-01-01"], utc=True),
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
-        mock_name.return_value = pd.DataFrame({
-            "artist_name": ["NoBand"], "mbid": ["found-mbid-123456789012345678"],
-            "country": ["SE"], "disambiguation_comment": ["metal"],
-            "aliases": [""],
-        })
+        mock_name.return_value = pd.DataFrame(
+            {
+                "artist_name": ["NoBand"],
+                "mbid": ["found-mbid-123456789012345678"],
+                "country": ["SE"],
+                "disambiguation_comment": ["metal"],
+                "aliases": [""],
+            }
+        )
         n = enrich_from_local_mb(rebuild=True)
         assert n == 1
         mock_name.assert_called_once()
@@ -180,11 +209,16 @@ class TestEnrichFromLocalMb:
     def test_stub_rows_for_unresolved(self, mock_check, mock_mbid, mock_name, tmp_pq_dir):
         """Creates stub rows for artists not found in MB at all."""
         import helpers.io as io_mod
-        scrobbles = pd.DataFrame({
-            "artist_name": ["Unknown, Artist"], "album_title": ["Al"], "track_title": ["T"],
-            "artist_mbid": [None],
-            "play_time": pd.to_datetime(["2024-01-01"], utc=True),
-        })
+
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["Unknown, Artist"],
+                "album_title": ["Al"],
+                "track_title": ["T"],
+                "artist_mbid": [None],
+                "play_time": pd.to_datetime(["2024-01-01"], utc=True),
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         mock_name.return_value = pd.DataFrame(columns=ARTIST_INFO_COLS)
         n = enrich_from_local_mb(rebuild=True)
@@ -199,17 +233,27 @@ class TestEnrichFromLocalMb:
     def test_rebuild_overwrites(self, mock_check, mock_mbid, mock_name, tmp_pq_dir):
         """With rebuild=True, overwrites existing artist_info.parquet."""
         import helpers.io as io_mod
+
         # Pre-existing artist_info with one row
-        old = pd.DataFrame({
-            "artist_name": ["OldBand"], "mbid": ["old-mbid"], "country": ["JP"],
-            "disambiguation_comment": [""], "aliases": [""],
-        })
+        old = pd.DataFrame(
+            {
+                "artist_name": ["OldBand"],
+                "mbid": ["old-mbid"],
+                "country": ["JP"],
+                "disambiguation_comment": [""],
+                "aliases": [""],
+            }
+        )
         old.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
-        scrobbles = pd.DataFrame({
-            "artist_name": ["NewBand"], "album_title": ["Al"], "track_title": ["T"],
-            "artist_mbid": [None],
-            "play_time": pd.to_datetime(["2024-01-01"], utc=True),
-        })
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["NewBand"],
+                "album_title": ["Al"],
+                "track_title": ["T"],
+                "artist_mbid": [None],
+                "play_time": pd.to_datetime(["2024-01-01"], utc=True),
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         mock_name.return_value = pd.DataFrame(columns=ARTIST_INFO_COLS)
         enrich_from_local_mb(rebuild=True)

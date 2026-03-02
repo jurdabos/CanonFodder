@@ -5,6 +5,7 @@ All persistence goes through this module.  Parquet files live under PQ_DIR
 (default ``PQ/`` relative to project root) and use zstd compression.
 Application-layer deduplication is performed before every append.
 """
+
 from __future__ import annotations
 import logging
 import os
@@ -95,9 +96,10 @@ def read_parquet(path: Path) -> pd.DataFrame | None:
             )
         if cur and file_ver < cur:
             logger.warning(
-                "%s is at schema v%d (current: v%d) — run "
-                "'c9r schema migrate' to update.",
-                path.name, file_ver, cur,
+                "%s is at schema v%d (current: v%d) — run 'c9r schema migrate' to update.",
+                path.name,
+                file_ver,
+                cur,
             )
     return pd.read_parquet(path)
 
@@ -154,7 +156,9 @@ def append_to_parquet(
         pq.write_table(table, path, compression=compression)
         logger.info(
             "Appended %d rows → %s (total: %d rows)",
-            len(df), path, len(combined),
+            len(df),
+            path,
+            len(combined),
         )
     else:
         if dedup_cols:
@@ -197,10 +201,7 @@ def scrobble_duckdb_from() -> str:
     partitioned layout, or a plain quoted path for the legacy file.
     """
     if SCROBBLE_PQ_DIR.exists() and any(SCROBBLE_PQ_DIR.rglob("*.parquet")):
-        return (
-            f"read_parquet('{SCROBBLE_PQ_DIR.as_posix()}/**/*.parquet',"
-            f" hive_partitioning=true)"
-        )
+        return f"read_parquet('{SCROBBLE_PQ_DIR.as_posix()}/**/*.parquet', hive_partitioning=true)"
     return f"'{SCROBBLE_PQ.as_posix()}'"
 
 
@@ -221,7 +222,8 @@ def dump_scrobble_df(df: pd.DataFrame) -> Path:
         year_dir.mkdir(parents=True, exist_ok=True)
         part_path = year_dir / "part.parquet"
         table = pa.Table.from_pandas(
-            group.drop(columns=["year"]), preserve_index=False,
+            group.drop(columns=["year"]),
+            preserve_index=False,
         )
         table = _stamp_metadata(table, "scrobble")
         pq.write_table(table, part_path, compression="zstd")
@@ -244,7 +246,9 @@ def migrate_scrobble_to_partitioned() -> int:
     dump_scrobble_df(df)
     logger.info(
         "Migrated %d scrobbles from %s → %s",
-        len(df), SCROBBLE_PQ, SCROBBLE_PQ_DIR,
+        len(df),
+        SCROBBLE_PQ,
+        SCROBBLE_PQ_DIR,
     )
     return len(df)
 
@@ -267,12 +271,7 @@ def normalise_scrobble_df(df: pd.DataFrame) -> pd.DataFrame:
     if "artist_mbid" not in df.columns:
         df["artist_mbid"] = None
     else:
-        df["artist_mbid"] = (
-            df["artist_mbid"]
-            .astype(str)
-            .str.strip()
-            .where(lambda s: s.str.match(_UUID_RE))
-        )
+        df["artist_mbid"] = df["artist_mbid"].astype(str).str.strip().where(lambda s: s.str.match(_UUID_RE))
     # Ensuring all expected columns exist
     for col in SCROBBLE_COLS:
         if col not in df.columns:
@@ -327,6 +326,7 @@ def latest_scrobble_ts() -> int | None:
 def register_custom_palette(palette_name: str, palettes: list[dict]) -> list[str]:
     """Registers a custom Seaborn palette from a palettes.json structure."""
     import seaborn as sns
+
     palette = next((p for p in palettes if p["paletteName"] == palette_name), None)
     if not palette:
         raise ValueError(f"Palette {palette_name} not found in the JSON file.")

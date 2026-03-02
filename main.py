@@ -4,6 +4,7 @@ Click-based entry point for c9r (formerly CanonFodder).
 Provides composable CLI command groups: ingest, enrich, canonise, review,
 train, serve, dashboard, purge, flow.
 """
+
 from __future__ import annotations
 import logging
 import math
@@ -12,6 +13,7 @@ import signal
 import sys
 import click
 from dotenv import load_dotenv
+
 load_dotenv()
 log = logging.getLogger("c9r")
 
@@ -47,13 +49,16 @@ def cli(verbose: bool) -> None:
 # ── ingest ─────────────────────────────────────────────────────────────────
 @cli.command()
 @click.option("--user", "-u", default=None, help="Username (env: LASTFM_USER or LB_USER).")
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
+@click.option(
+    "--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE)."
+)
 @click.option("--full", is_flag=True, help="Fetch full history instead of incremental.")
 def ingest(user: str | None, source: str, full: bool) -> None:
     """Fetches scrobbles and appends to scrobble.parquet"""
     source = _normalise_source(source)
     user = _resolve_user(source, user)
     from helpers.io import ingest_scrobbles, latest_scrobble_ts
+
     since = None if full else latest_scrobble_ts()
     click.echo(f"Fetching scrobbles for {user} from {source}" + (f" since uts={since}" if since else " (full)") + " …")
     if source == "lastfm":
@@ -75,7 +80,14 @@ def ingest(user: str | None, source: str, full: bool) -> None:
 @click.option("--country", is_flag=True, default=False, help="Sync user country to uc.parquet (requires --user).")
 @click.option("--rebuild", is_flag=True, help="Rebuild artist_info.parquet from scratch.")
 @click.option("--user", "-u", default=None, help="Username (only for --country; env: LASTFM_USER or LB_USER).")
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (only for --country; env: C9R_SOURCE).")
+@click.option(
+    "--source",
+    "-s",
+    type=_SOURCE_CHOICES,
+    default="lastfm",
+    envvar="C9R_SOURCE",
+    help="Data source (only for --country; env: C9R_SOURCE).",
+)
 def enrich(mbapi: bool, lastfmapi: bool, country: bool, rebuild: bool, user: str | None, source: str) -> None:
     """Enrich scrobble & artist_info with MBIDs and metadata
 
@@ -87,6 +99,7 @@ def enrich(mbapi: bool, lastfmapi: bool, country: bool, rebuild: bool, user: str
     label = {"local": "local MB mirror", "mbapi": "remote MB API", "lastfmapi": "Last.fm + remote MB API"}[backend]
     click.echo(f"Enriching via {label} …")
     from corefunc.enrich import enrich_all
+
     try:
         result = enrich_all(backend=backend, rebuild=rebuild)
         click.echo(
@@ -103,6 +116,7 @@ def enrich(mbapi: bool, lastfmapi: bool, country: bool, rebuild: bool, user: str
         else:
             user = _resolve_user(source, user)
             from HTTP.lfAPI import sync_user_country
+
             try:
                 changed = sync_user_country(user, ask=False)
                 click.echo("Country updated." if changed else "Country already up-to-date.")
@@ -134,6 +148,7 @@ def avc(ctx: click.Context) -> None:
 def avc_show(decided: bool, undecided: bool, last_n: int | None) -> None:
     """Print out the current state of the avc table"""
     from corefunc.canon.workflow import avc_summary
+
     rows = avc_summary(decided_only=decided, undecided_only=undecided, last_n=last_n)
     if not rows:
         click.echo("No avc rows found.")
@@ -143,13 +158,16 @@ def avc_show(decided: bool, undecided: bool, last_n: int | None) -> None:
     click.echo(f"  {'─' * 4}  {'─' * 4}  {'─' * 40}  {'─' * 10}  {'─' * 8}")
     for r in rows:
         cn = r["canonical_name"][:40]
-        click.echo(f"  {r['idx']:>4}  {r['to_link_display']:<4}  {cn:<40}  {r['stamp']:<10}  {r['artist_variants_text']}")
+        click.echo(
+            f"  {r['idx']:>4}  {r['to_link_display']:<4}  {cn:<40}  {r['stamp']:<10}  {r['artist_variants_text']}"
+        )
 
 
 @avc.command("propagate")
 def avc_propagate() -> None:
     """Apply canonisation results to artist_info"""
     from corefunc.canon.workflow import propagate_avc
+
     click.echo("Propagating AVC decisions to artist_info …")
     result = propagate_avc()
     click.echo(f"Done — {result['updated']} row(s) updated, {result['aliases_added']} alias(es) added.")
@@ -160,6 +178,7 @@ def avc_propagate() -> None:
 def avc_seed_cmd(sql_path: str) -> None:
     """Seed avc.parquet from a MySQL dump file"""
     from corefunc.avc_seed import seed_avc_from_sql
+
     click.echo(f"Seeding avc.parquet from {sql_path} …")
     n = seed_avc_from_sql(sql_path)
     click.echo(f"Done — {n} rows written to avc.parquet.")
@@ -172,10 +191,12 @@ def avc_seed_cmd(sql_path: str) -> None:
 def avc_augment(pos_limit: int, neg_limit: int, similarity_floor: int) -> None:
     """Extract training pairs from local MB mirror into gs_mb"""
     from corefunc.canon.augment import augment_gold_standard
+
     click.echo(f"Extracting pairs from MBDB (pos={pos_limit}, neg={neg_limit}, floor={similarity_floor}) …")
     try:
         n = augment_gold_standard(
-            pos_limit=pos_limit, neg_limit=neg_limit,
+            pos_limit=pos_limit,
+            neg_limit=neg_limit,
             similarity_floor=similarity_floor,
         )
         click.echo(f"Done — {n} rows written to gs_mb.parquet.")
@@ -188,15 +209,18 @@ def canon_human() -> None:
     """Tackle undecided artist name variants interactively"""
     import re
     from corefunc.canon.workflow import undecided_rows, update_avc_decision
+
     pending = undecided_rows()
     if pending.empty:
         click.echo("No undecided variant groups — all caught up.")
         return
+
     # Extracting model probabilities from comment field and sorting descending
     def _parse_prob(comment: str) -> float:
         """Extracts probability from 'p=0.XXXX' comment prefix."""
         m = re.match(r"p=(\d+\.\d+)", str(comment or ""))
         return float(m.group(1)) if m else 0.0
+
     pending["_prob"] = pending["comment"].apply(_parse_prob)
     pending = pending.sort_values("_prob", ascending=False).reset_index(drop=True)
     total = len(pending)
@@ -251,6 +275,7 @@ def canon_human() -> None:
 def canon_experiment(run_name: str | None, augment: bool, folds: int, models: str | None) -> None:
     """Run multi-model experiment with CV and MLflow logging"""
     from corefunc.canon.experiment_runner import run_experiment
+
     model_list = [m.strip() for m in models.split(",")] if models else None
     label = " (with MBDB augmentation)" if augment else ""
     click.echo(f"Running multi-model experiment{label}, {folds}-fold CV …")
@@ -274,6 +299,7 @@ def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> 
     """Finds new artist name variant candidates using ML"""
     from corefunc.canon.workflow import discover_candidates, write_new_candidates
     from helpers.inference import load_model, MODEL_PATH
+
     # Loading the persisted LightGBM pipeline
     try:
         model = load_model()
@@ -283,8 +309,11 @@ def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> 
     click.echo(f"Model loaded ({len(model.feature_names_in_)} features).")
     click.echo(f"Scanning for variant candidates (cutoff={cutoff}, threshold={threshold}) …")
     candidates = discover_candidates(
-        model, wratio_cutoff=cutoff, proba_threshold=threshold,
-        min_plays=min_plays, limit=limit,
+        model,
+        wratio_cutoff=cutoff,
+        proba_threshold=threshold,
+        min_plays=min_plays,
+        limit=limit,
     )
     if not candidates:
         click.echo("No new variant candidates found.")
@@ -304,7 +333,8 @@ def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> 
 
 # ── train (command group) ──────────────────────────────────────────────────────────
 _DATA_SOURCE_CHOICES = click.Choice(
-    ["avc", "mbdb", "mbdb-max", "dbscan", "dbscan-capped", "mixed"], case_sensitive=False,
+    ["avc", "mbdb", "mbdb-max", "dbscan", "dbscan-capped", "mixed"],
+    case_sensitive=False,
 )
 _FEATURE_STRATEGY_CHOICES = click.Choice(["standard", "separated"], case_sensitive=False)
 _NEG_MATCHING_CHOICES = click.Choice(["none", "distribution"], case_sensitive=False)
@@ -312,7 +342,8 @@ _SPLIT_CHOICES = click.Choice(["pair", "group"], case_sensitive=False)
 _TEST_SOURCE_CHOICES = click.Choice(["holdout", "avc-full"], case_sensitive=False)
 _FEATURE_CHOICES = click.Choice(["base", "interaction", "full"], case_sensitive=False)
 _CAT_SOURCE_CHOICES = click.Choice(
-    ["none", "scrobble", "mbdb", "unified"], case_sensitive=False,
+    ["none", "scrobble", "mbdb", "unified"],
+    case_sensitive=False,
 )
 _CAT_DESIGN_CHOICES = click.Choice(["proportional", "presence"], case_sensitive=False)
 
@@ -332,20 +363,45 @@ def train(ctx: click.Context) -> None:
 @click.option("--models", default=None, help="Comma-separated model names (default: LightGBM).")
 @click.option("--catalogue/--no-catalogue", default=True, help="Include catalogue features.")
 @click.option("--data-source", type=_DATA_SOURCE_CHOICES, default="avc", help="Training data origin.")
-@click.option("--split", "split_strategy", type=_SPLIT_CHOICES, default="pair", help="Split strategy (pair or group level).")
-@click.option("--test-source", type=_TEST_SOURCE_CHOICES, default="holdout", help="Test data origin (holdout from split, or full AVC).")
-@click.option("--features", type=_FEATURE_CHOICES, default="full", help="Feature tiers: base (23), interaction (53), full (71).")
+@click.option(
+    "--split", "split_strategy", type=_SPLIT_CHOICES, default="pair", help="Split strategy (pair or group level)."
+)
+@click.option(
+    "--test-source",
+    type=_TEST_SOURCE_CHOICES,
+    default="holdout",
+    help="Test data origin (holdout from split, or full AVC).",
+)
+@click.option(
+    "--features", type=_FEATURE_CHOICES, default="full", help="Feature tiers: base (23), interaction (53), full (71)."
+)
 @click.option("--catalogue-source", type=_CAT_SOURCE_CHOICES, default="unified", help="Catalogue data origin.")
 @click.option("--catalogue-design", type=_CAT_DESIGN_CHOICES, default="proportional", help="Catalogue feature style.")
 @click.option("--group-features/--no-group-features", default=False, help="Include group-level length_stats features.")
 @click.option("--wratio-lower", default=60, type=int, help="WRatio band lower bound.")
 @click.option("--wratio-upper", default=100, type=int, help="WRatio band upper bound.")
-@click.option("--experiment", "experiment_num", default=None, type=int, help="Experiment number for backfill labelling.")
+@click.option(
+    "--experiment", "experiment_num", default=None, type=int, help="Experiment number for backfill labelling."
+)
 @click.option("--include-composites", is_flag=True, help="Include composite models (Voting, Stacking, Bagging).")
-@click.option("--cluster-cap", default=0, type=int, help="Max cluster size for dbscan-capped (Exp 7, default 30 when used).")
-@click.option("--neg-ratio", default=0, type=int, help="Target neg:pos ratio for dbscan-capped (Exp 7, default 10 when used).")
-@click.option("--feature-strategy", type=_FEATURE_STRATEGY_CHOICES, default="standard", help="Feature strategy: standard or separated (Exp 8).")
-@click.option("--neg-matching", type=_NEG_MATCHING_CHOICES, default="none", help="Negative matching: none or distribution (Exp 8).")
+@click.option(
+    "--cluster-cap", default=0, type=int, help="Max cluster size for dbscan-capped (Exp 7, default 30 when used)."
+)
+@click.option(
+    "--neg-ratio", default=0, type=int, help="Target neg:pos ratio for dbscan-capped (Exp 7, default 10 when used)."
+)
+@click.option(
+    "--feature-strategy",
+    type=_FEATURE_STRATEGY_CHOICES,
+    default="standard",
+    help="Feature strategy: standard or separated (Exp 8).",
+)
+@click.option(
+    "--neg-matching",
+    type=_NEG_MATCHING_CHOICES,
+    default="none",
+    help="Negative matching: none or distribution (Exp 8).",
+)
 @click.option("--neg-count", default=5000, type=int, help="Target count for distribution-matched negatives (Exp 8).")
 def train_run(
     run_name: str | None,
@@ -372,6 +428,7 @@ def train_run(
 ) -> None:
     """Train canonisation models (unified pipeline with MLflow tracking)"""
     from corefunc.canon.trainer import run_training
+
     model_list = [m.strip() for m in models.split(",")] if models else None
     cat_label = " +catalogue" if catalogue and features == "full" else " (no catalogue)"
     strategy_label = f", strategy={feature_strategy}" if feature_strategy != "standard" else ""
@@ -411,7 +468,13 @@ _TCN_MODEL_CHOICES = click.Choice(["siamese", "hybrid"], case_sensitive=False)
 
 
 @train.command("tcn")
-@click.option("--model", "model_type", type=_TCN_MODEL_CHOICES, default="siamese", help="TCN architecture: siamese (Exp 9) or hybrid (Exp 10).")
+@click.option(
+    "--model",
+    "model_type",
+    type=_TCN_MODEL_CHOICES,
+    default="siamese",
+    help="TCN architecture: siamese (Exp 9) or hybrid (Exp 10).",
+)
 @click.option("--epochs", default=80, type=int, help="Max training epochs.")
 @click.option("--batch-size", default=None, type=int, help="Mini-batch size (default: 256 siamese, 512 hybrid).")
 @click.option("--lr", default=None, type=float, help="Learning rate (default: 1e-3 siamese, 3e-4 hybrid).")
@@ -429,10 +492,8 @@ def train_tcn(
 ) -> None:
     """Train TCN-based canonisation models (Siamese or Hybrid architecture)"""
     from corefunc.canon.tcn_trainer import run_tcn_training
-    click.echo(
-        f"TCN training — model={model_type}, epochs={epochs}, "
-        f"patience={patience} …"
-    )
+
+    click.echo(f"TCN training — model={model_type}, epochs={epochs}, patience={patience} …")
     run_tcn_training(
         model_type=model_type,
         epochs=epochs,
@@ -465,11 +526,9 @@ def tune(
 ) -> None:
     """Optuna hyperparameter tuning with precision-biased objective"""
     from corefunc.canon.tuner import run_tuning
+
     model_list = [m.strip() for m in models.split(",")] if models else None
-    click.echo(
-        f"Optuna tuning — {trials} trials/model, {folds}-fold CV, "
-        f"min_precision={min_precision} …"
-    )
+    click.echo(f"Optuna tuning — {trials} trials/model, {folds}-fold CV, min_precision={min_precision} …")
     if model_list:
         click.echo(f"Models: {', '.join(model_list)}")
     run_tuning(
@@ -491,6 +550,7 @@ def tune(
 def mlflow_ui(host: str, port: int) -> None:
     """Launches the MLflow tracking UI for experiment comparison"""
     from helpers.experiment import TRACKING_URI
+
     click.echo(f"Starting MLflow UI at http://{host}:{port}  (store: {TRACKING_URI})")
     os.execvp(
         "mlflow",
@@ -505,6 +565,7 @@ def mlflow_ui(host: str, port: int) -> None:
 def serve(host: str, port: int) -> None:
     """Start the ASGI model-serving endpoint"""
     import uvicorn
+
     click.echo(f"Starting model server on {host}:{port} …")
     uvicorn.run("corefunc.model_server:app", host=host, port=port, workers=1)
 
@@ -523,6 +584,7 @@ def dashboard(ctx: click.Context) -> None:
 def dashboard_artist(top: int) -> None:
     """Show top artists by play count"""
     from helpers.query import scrobble_count, unique_artists, top_artists
+
     total = scrobble_count()
     artists = unique_artists()
     click.echo(f"Scrobbles: {total:,}   Unique artists: {artists:,}")
@@ -538,6 +600,7 @@ def dashboard_artist(top: int) -> None:
 def dashboard_album(top: int) -> None:
     """Show top albums by play count"""
     from helpers.query import top_albums
+
     df = top_albums(top)
     if df.empty:
         click.echo("No album data found.")
@@ -552,6 +615,7 @@ def dashboard_album(top: int) -> None:
 def dashboard_track(top: int) -> None:
     """Show top tracks"""
     from helpers.query import top_tracks
+
     df = top_tracks(top)
     if df.empty:
         click.echo("No track data found.")
@@ -568,6 +632,7 @@ def dashboard_track(top: int) -> None:
 def dashboard_recent(n: int) -> None:
     """Show most recent scrobbles"""
     from helpers.query import recent_scrobbles
+
     df = recent_scrobbles(n)
     if df.empty:
         click.echo("No scrobbles found.")
@@ -588,6 +653,7 @@ _MEDAL = {1: "GOLD", 2: "SILVER", 3: "BRONZE"}
 def dashboard_yearly(top: int) -> None:
     """Show top artists per year (gold / silver / bronze)"""
     from corefunc.profile import yearly_top_artists_profile
+
     result = yearly_top_artists_profile(top_n=top)
     if "error" in result:
         click.echo(f"Error: {result['error']}")
@@ -610,6 +676,7 @@ def purge(purge_all: bool, yes: bool) -> None:
     Without --all, presents each file interactively for selection.
     """
     from helpers.io import PQ_DIR
+
     targets = sorted(PQ_DIR.glob("*.parquet"))
     if not targets:
         click.echo("No Parquet files found.")
@@ -637,6 +704,7 @@ def purge(purge_all: bool, yes: bool) -> None:
 def fix_encoding_cmd() -> None:
     """Repair encoding-corrupted strings in scrobble & artist_info"""
     from corefunc.data_cleaning import fix_encoding
+
     click.echo("Scanning for encoding issues …")
     results = fix_encoding()
     any_fixed = False
@@ -654,6 +722,7 @@ def fix_encoding_cmd() -> None:
 def migrate_scrobbles_cmd(remove_legacy: bool) -> None:
     """Convert legacy scrobble.parquet to year-partitioned layout"""
     from helpers.io import migrate_scrobble_to_partitioned, SCROBBLE_PQ
+
     n = migrate_scrobble_to_partitioned()
     if n == 0:
         click.echo("Nothing to migrate — legacy scrobble.parquet not found or empty.")
@@ -687,27 +756,31 @@ def schema_show() -> None:
     if SCROBBLE_PQ_DIR.exists() and any(SCROBBLE_PQ_DIR.rglob("*.parquet")):
         first = next(SCROBBLE_PQ_DIR.rglob("*.parquet"))
         info = validate_schema(first)
-        rows.append({
-            "table": info.get("table") or "?",
-            "file_version": str(info.get("file_version", "?")),
-            "current_version": str(info.get("current_version") or "?"),
-            "status": info.get("status") or "?",
-            "path": "scrobble/",
-            "missing_cols": info.get("missing_cols") or [],
-        })
+        rows.append(
+            {
+                "table": info.get("table") or "?",
+                "file_version": str(info.get("file_version", "?")),
+                "current_version": str(info.get("current_version") or "?"),
+                "status": info.get("status") or "?",
+                "path": "scrobble/",
+                "missing_cols": info.get("missing_cols") or [],
+            }
+        )
 
     for pf in sorted(PQ_DIR.glob("*.parquet")):
         info = validate_schema(pf)
         tbl = info.get("table") or pf.stem
         cur = info.get("current_version")
-        rows.append({
-            "table": tbl,
-            "file_version": str(info.get("file_version", "?")),
-            "current_version": str(cur) if cur is not None else "?",
-            "status": info.get("status") or "?",
-            "path": pf.name,
-            "missing_cols": info.get("missing_cols") or [],
-        })
+        rows.append(
+            {
+                "table": tbl,
+                "file_version": str(info.get("file_version", "?")),
+                "current_version": str(cur) if cur is not None else "?",
+                "status": info.get("status") or "?",
+                "path": pf.name,
+                "missing_cols": info.get("missing_cols") or [],
+            }
+        )
 
     table_w = max([len("Table")] + [len(str(r["table"])) for r in rows]) if rows else len("Table")
     status_w = max([len("Status")] + [len(str(r["status"])) for r in rows]) if rows else len("Status")
@@ -730,6 +803,7 @@ def schema_migrate() -> None:
     """Migrate all Parquet files to current schema versions"""
     from helpers.io import PQ_DIR
     from helpers.schema import migrate_all
+
     click.echo("Migrating Parquet schemas \u2026")
     results = migrate_all(PQ_DIR)
     if not results:
@@ -751,10 +825,13 @@ def qa(ctx: click.Context) -> None:
 
 @qa.command("scrobble")
 @click.option("--hours", "-h", default=None, type=int, help="Only check scrobbles from the last N hours.")
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default=None, envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
+@click.option(
+    "--source", "-s", type=_SOURCE_CHOICES, default=None, envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE)."
+)
 def qa_scrobble(hours: int | None, source: str | None) -> None:
     """Run QA checks on scrobble.parquet"""
     from corefunc.qa import qa_lb_ingest
+
     source = _normalise_source(source) if source else None
     click.echo("Running scrobble QA checks …")
     report = qa_lb_ingest(last_n_hours=hours, source=source)
@@ -795,7 +872,9 @@ def qa_scrobble(hours: int | None, source: str | None) -> None:
     # Reconciliation
     rec = report["reconciliation"]
     if rec.get("fetched") is not None:
-        click.echo(f"  Reconciliation: fetched={rec['fetched']:,}, stored={rec['stored']:,}, diff={rec.get('diff', 0):,}")
+        click.echo(
+            f"  Reconciliation: fetched={rec['fetched']:,}, stored={rec['stored']:,}, diff={rec.get('diff', 0):,}"
+        )
     _print_qa_history("scrobble")
 
 
@@ -803,6 +882,7 @@ def qa_scrobble(hours: int | None, source: str | None) -> None:
 def qa_artist_info_cmd() -> None:
     """Run QA checks on artist_info"""
     from corefunc.qa import qa_artist_info
+
     click.echo("Running artist_info QA checks …")
     report = qa_artist_info()
     if report.get("status") == "skipped":
@@ -845,6 +925,7 @@ def qa_artist_info_cmd() -> None:
 def qa_avc_cmd() -> None:
     """Run QA checks on avc"""
     from corefunc.qa import qa_avc
+
     click.echo("Running avc QA checks …")
     report = qa_avc()
     if report.get("status") == "skipped":
@@ -877,6 +958,7 @@ def qa_avc_cmd() -> None:
 def qa_gs_mb_cmd() -> None:
     """Run QA checks on the MB gold-standard pairs"""
     from corefunc.qa import qa_gs_mb
+
     click.echo("Running gs_mb QA checks …")
     report = qa_gs_mb()
     if report.get("status") == "skipped":
@@ -902,7 +984,9 @@ def qa_gs_mb_cmd() -> None:
         click.echo(f"  Encoding: {enc['bad_char_rows']} rows with bad characters")
     # Printing label distribution and source breakdown
     dist = report.get("label_distribution", {})
-    click.echo(f"  Labels: {dist.get('positive', 0):,} positive, {dist.get('negative', 0):,} negative, {dist.get('null', 0):,} null")
+    click.echo(
+        f"  Labels: {dist.get('positive', 0):,} positive, {dist.get('negative', 0):,} negative, {dist.get('null', 0):,} null"
+    )
     src_bk = report.get("source_breakdown", {})
     if src_bk:
         parts = ", ".join(f"{k}={v:,}" for k, v in src_bk.items())
@@ -914,6 +998,7 @@ def qa_gs_mb_cmd() -> None:
 def qa_uc_cmd() -> None:
     """Show summary stats for user country history"""
     from corefunc.qa import qa_uc
+
     click.echo("Running uc summary …")
     report = qa_uc()
     if report.get("status") == "skipped":
@@ -927,6 +1012,7 @@ def qa_uc_cmd() -> None:
 def _format_qa_src(row) -> str:
     """Builds the src= display value from source and target columns."""
     import pandas as pd
+
     parts: list[str] = []
     for key in ("source", "target"):
         val = row.get(key)
@@ -957,9 +1043,7 @@ def _format_qa_row(row) -> str:
     if target == "user_country":
         _uc = row.get("unique_countries")
         countries = int(_uc) if _uc is not None and not (isinstance(_uc, float) and math.isnan(_uc)) else "?"
-        return (f"  {ts}  {status}{src_str}"
-                f"  rows={int(row['row_count']):,}"
-                f"  countries={countries}")
+        return f"  {ts}  {status}{src_str}  rows={int(row['row_count']):,}  countries={countries}"
     if target == "artist_info":
         _cr = row.get("country_fill_rate", 0)
         country_rate = 0 if (_cr is None or (isinstance(_cr, float) and math.isnan(_cr))) else _cr
@@ -967,33 +1051,40 @@ def _format_qa_row(row) -> str:
         disambig_rate = 0 if (_dr is None or (isinstance(_dr, float) and math.isnan(_dr))) else _dr
         _ar = row.get("aliases_fill_rate", 0)
         aliases_rate = 0 if (_ar is None or (isinstance(_ar, float) and math.isnan(_ar))) else _ar
-        return (f"  {ts}  {status}{src_str}"
-                f"  rows={int(row['row_count']):,}"
-                f"  dupes={row['duplicate_pct']}%"
-                f"  mbid={mbid_rate}%"
-                f"  country={country_rate}%"
-                f"  disambig={disambig_rate}%"
-                f"  aliases={aliases_rate}%"
-                f"  bad_chars={int(row['bad_char_rows'])}")
+        return (
+            f"  {ts}  {status}{src_str}"
+            f"  rows={int(row['row_count']):,}"
+            f"  dupes={row['duplicate_pct']}%"
+            f"  mbid={mbid_rate}%"
+            f"  country={country_rate}%"
+            f"  disambig={disambig_rate}%"
+            f"  aliases={aliases_rate}%"
+            f"  bad_chars={int(row['bad_char_rows'])}"
+        )
     if target == "gs_mb":
-        return (f"  {ts}  {status}{src_str}"
-                f"  rows={int(row['row_count']):,}"
-                f"  dupes={row['duplicate_pct']}%"
-                f"  bad_chars={int(row['bad_char_rows'])}")
+        return (
+            f"  {ts}  {status}{src_str}"
+            f"  rows={int(row['row_count']):,}"
+            f"  dupes={row['duplicate_pct']}%"
+            f"  bad_chars={int(row['bad_char_rows'])}"
+        )
     if target == "artist_variants_canonized":
         fill_str = f"hash_fill={hash_rate}%"
     else:
         fill_str = f"mbid_fill={mbid_rate}%"
-    return (f"  {ts}  {status}{src_str}"
-            f"  rows={int(row['row_count']):,}"
-            f"  dupes={row['duplicate_pct']}%"
-            f"  {fill_str}"
-            f"  bad_chars={int(row['bad_char_rows'])}")
+    return (
+        f"  {ts}  {status}{src_str}"
+        f"  rows={int(row['row_count']):,}"
+        f"  dupes={row['duplicate_pct']}%"
+        f"  {fill_str}"
+        f"  bad_chars={int(row['bad_char_rows'])}"
+    )
 
 
 def _print_qa_history(target: str, last_n: int = 5) -> None:
     """Prints recent QA one-liners for a given target."""
     from helpers.query import qa_reports
+
     df = qa_reports(last_n=last_n, target=target)
     if df.empty:
         return
@@ -1009,13 +1100,13 @@ def _print_qa_history(target: str, last_n: int = 5) -> None:
 def show(last_n: int, show_all: bool, fail_only: bool) -> None:
     """Display past QA reports from qa_report.parquet"""
     from helpers.query import qa_reports
+
     limit = None if show_all else last_n
     df = qa_reports(last_n=limit, fail_only=fail_only)
     if df.empty:
         click.echo("No QA reports found.")
         return
-    click.echo(f"{'All' if show_all else f'Last {last_n}'} QA reports"
-               f"{' (failures only)' if fail_only else ''}:\n")
+    click.echo(f"{'All' if show_all else f'Last {last_n}'} QA reports{' (failures only)' if fail_only else ''}:\n")
     for _, row in df.iterrows():
         click.echo(_format_qa_row(row))
 
@@ -1033,6 +1124,7 @@ def profile(ctx: click.Context) -> None:
 def overview() -> None:
     """Print eagle-level scrobble stats"""
     from corefunc.profile import overview_stats
+
     stats = overview_stats()
     if "error" in stats:
         click.echo(f"Error: {stats['error']}")
@@ -1048,11 +1140,16 @@ def overview() -> None:
         click.echo(f"  {int(year)}  {plays:>6,}  {bar}")
     d = stats["distribution"]
     click.echo("\nPlay-count distribution per artist:")
-    click.echo(f"  min={d['min']}  Q1={d['q25']}  median={d['median']}  Q3={d['q75']}  max={d['max']:,}  mean={d['mean']:.1f}")
-    click.echo(f"  Singletons (1 play): {d['singletons']:,} / {d['total_artists']:,}"
-               f" ({100 * d['singletons'] / d['total_artists']:.1f}%)")
-    click.echo(f"  ≤5 plays:           {d['lte5']:,} / {d['total_artists']:,}"
-               f" ({100 * d['lte5'] / d['total_artists']:.1f}%)")
+    click.echo(
+        f"  min={d['min']}  Q1={d['q25']}  median={d['median']}  Q3={d['q75']}  max={d['max']:,}  mean={d['mean']:.1f}"
+    )
+    click.echo(
+        f"  Singletons (1 play): {d['singletons']:,} / {d['total_artists']:,}"
+        f" ({100 * d['singletons'] / d['total_artists']:.1f}%)"
+    )
+    click.echo(
+        f"  ≤5 plays:           {d['lte5']:,} / {d['total_artists']:,} ({100 * d['lte5'] / d['total_artists']:.1f}%)"
+    )
 
 
 @profile.command()
@@ -1063,6 +1160,7 @@ def overview() -> None:
 def variants(threshold: int, min_plays: int, limit: int, top: int) -> None:
     """Show examples for the Bohren problem"""
     from corefunc.profile import variant_candidates
+
     click.echo(f"Scanning top {limit} artists (≥{min_plays} plays) for near-duplicates (threshold={threshold}) …")
     clusters = variant_candidates(threshold=threshold, min_plays=min_plays, limit=limit)
     if not clusters:
@@ -1083,6 +1181,7 @@ def _parse_rank_ranges(raw: str) -> list[tuple[int, int]]:
     validated (start, end) tuples.
     """
     import re
+
     pairs = re.findall(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)", raw)
     if not pairs:
         raise click.BadParameter(f"Cannot parse rank ranges from: {raw}")
@@ -1109,11 +1208,11 @@ def _echo_ranged_entries(entries: list[dict], ranges: list[tuple[int, int]]) -> 
 @profile.command("top")
 @click.option("-n", default=20, type=int, help="Number of top artists.")
 @click.option("--canonized", is_flag=True, help="Apply alias-based canonisation before ranking.")
-@click.option("--custom", "custom_ranges", default=None, type=str,
-              help="Custom rank ranges, e.g. '(1,5),(27,29)'.")
+@click.option("--custom", "custom_ranges", default=None, type=str, help="Custom rank ranges, e.g. '(1,5),(27,29)'.")
 def profile_top(n: int, canonized: bool, custom_ranges: str | None) -> None:
     """Show top by scrobble optionally after canonisation"""
     from corefunc.profile import top_artists_profile
+
     # Determining how many rows to fetch
     ranges: list[tuple[int, int]] | None = None
     if custom_ranges:
@@ -1153,6 +1252,7 @@ def profile_top(n: int, canonized: bool, custom_ranges: str | None) -> None:
 def companions(start: int, end: int, n: int) -> None:
     """Find trusted companions"""
     from corefunc.profile import trusted_companions
+
     result = trusted_companions(start_year=start, end_year=end)
     if "error" in result:
         click.echo(f"Error: {result['error']}")
@@ -1175,6 +1275,7 @@ def companions(start: int, end: int, n: int) -> None:
 def countries(n: int) -> None:
     """Show top countries by scrobble count"""
     from corefunc.profile import country_breakdown
+
     rows = country_breakdown(top_n=n)
     if not rows:
         click.echo("No enriched country data available.")
@@ -1183,13 +1284,16 @@ def countries(n: int) -> None:
     click.echo(f"  {'#':>4}  {'CC':<4} {'Plays':>8} {'Artists':>8} {'Share':>7}  {'Name'}")
     click.echo(f"  {'─' * 4}  {'──':<4} {'─' * 8} {'─' * 8} {'─' * 7}  {'─' * 4}")
     for i, r in enumerate(rows, 1):
-        click.echo(f"  {i:>3}.  {r['country']:<4} {r['play_count']:>8,} {r['artist_count']:>8,} {r['pct']:>6.1f}%  {r['name']}")
+        click.echo(
+            f"  {i:>3}.  {r['country']:<4} {r['play_count']:>8,} {r['artist_count']:>8,} {r['pct']:>6.1f}%  {r['name']}"
+        )
 
 
 @profile.command()
 def timeline() -> None:
     """Show monthly scrobble summary across all years"""
     from corefunc.profile import monthly_summary
+
     result = monthly_summary()
     if "error" in result:
         click.echo(f"Error: {result['error']}")
@@ -1199,8 +1303,7 @@ def timeline() -> None:
     click.echo(f"  {'─' * 12} {'─' * 7} {'─' * 7} {'─' * 7} {'─' * 8} {'─' * 5}")
     for m in result["months"]:
         click.echo(
-            f"  {m['name']:<12} {m['mean']:>7.1f} {m['min']:>7,} {m['max']:>7,}"
-            f" {m['total']:>8,} {m['year_count']:>5}"
+            f"  {m['name']:<12} {m['mean']:>7.1f} {m['min']:>7,} {m['max']:>7,} {m['total']:>8,} {m['year_count']:>5}"
         )
     s = result["strongest"]
     w = result["weakest"]
@@ -1213,6 +1316,7 @@ def timeline() -> None:
 def streaks() -> None:
     """Show listening streak and gap statistics"""
     from corefunc.profile import streak_analysis
+
     result = streak_analysis()
     if "error" in result:
         click.echo(f"Error: {result['error']}")
@@ -1235,6 +1339,7 @@ def streaks() -> None:
 def clock() -> None:
     """Show when you listen — hour-of-day and day-of-week patterns"""
     from corefunc.profile import listening_clock_profile
+
     result = listening_clock_profile()
     if "error" in result:
         click.echo(f"Error: {result['error']}")
@@ -1270,6 +1375,7 @@ def clock() -> None:
 def population(n: int) -> None:
     """Correlate artist-origin country population with scrobble counts"""
     from corefunc.profile import population_vs_scrobbles
+
     result = population_vs_scrobbles(top_n=n)
     if "error" in result:
         click.echo(f"Error: {result['error']}")
@@ -1298,13 +1404,13 @@ def population(n: int) -> None:
 def profile_where(n: int) -> None:
     """Show where you were when you scrobbled"""
     from corefunc.profile import user_country_profile
+
     result = user_country_profile(top_n=n)
     if "error" in result:
         click.echo(f"Error: {result['error']}")
         return
     click.echo(
-        f"Scrobbles matched: {result['total_scrobbles_matched']:,}"
-        f"   Unique countries: {result['unique_countries']}"
+        f"Scrobbles matched: {result['total_scrobbles_matched']:,}   Unique countries: {result['unique_countries']}"
     )
     click.echo(f"\n  {'#':>4}  {'CC':<4} {'Scrobbles':>10} {'Share':>7}  {'Name'}")
     click.echo(f"  {'─' * 4}  {'──':<4} {'─' * 10} {'─' * 7}  {'─' * 4}")
@@ -1318,15 +1424,19 @@ def _parse_country_codes(raw: str) -> list[str]:
     upper-cased ISO-2 codes.
     """
     import re
+
     stripped = raw.strip().strip("()")
     codes = re.split(r"[,\s]+", stripped)
     return [c.upper() for c in codes if c]
 
 
 _CATEGORY_ALIASES: dict[str, str] = {
-    "artist": "artists", "artists": "artists",
-    "album": "albums", "albums": "albums",
-    "track": "tracks", "tracks": "tracks",
+    "artist": "artists",
+    "artists": "artists",
+    "album": "albums",
+    "albums": "albums",
+    "track": "tracks",
+    "tracks": "tracks",
 }
 
 
@@ -1336,6 +1446,7 @@ def _parse_categories(raw: str) -> list[str]:
     a list of internal keys ('artists', 'albums', 'tracks').
     """
     import re
+
     stripped = raw.strip().strip("()")
     tokens = re.split(r"[,\s]+", stripped)
     result: list[str] = []
@@ -1351,13 +1462,21 @@ def _parse_categories(raw: str) -> list[str]:
 @profile.command("uc")
 @click.option("-n", default=3, type=int, help="Number of entries per category (medal count).")
 @click.option("--ucn", default=5, type=int, help="Number of top user-countries to include.")
-@click.option("-c", "countries_raw", default=None, type=str,
-              help="Comma-separated country codes to filter, e.g. '(HU, ES, DK)'.")
-@click.option("-s", "--show", "show_raw", default=None, type=str,
-              help="Categories to display: artist, album, track, e.g. '(artist, track)'.")
+@click.option(
+    "-c", "countries_raw", default=None, type=str, help="Comma-separated country codes to filter, e.g. '(HU, ES, DK)'."
+)
+@click.option(
+    "-s",
+    "--show",
+    "show_raw",
+    default=None,
+    type=str,
+    help="Categories to display: artist, album, track, e.g. '(artist, track)'.",
+)
 def profile_uc(n: int, ucn: int, countries_raw: str | None, show_raw: str | None) -> None:
     """Show medal tables per user-country (artists, albums, tracks)"""
     from corefunc.profile import user_country_medal_profile
+
     country_codes = _parse_country_codes(countries_raw) if countries_raw else None
     categories = _parse_categories(show_raw) if show_raw else ["artists", "albums", "tracks"]
     all_labels = [("Artists", "artists"), ("Albums", "albums"), ("Tracks", "tracks")]
@@ -1366,7 +1485,9 @@ def profile_uc(n: int, ucn: int, countries_raw: str | None, show_raw: str | None
     if "error" in result:
         click.echo(f"Error: {result['error']}")
         return
-    click.echo(f"Top {result['top_n']} per category across {result['ucn']} countr{'y' if result['ucn'] == 1 else 'ies'}:\n")
+    click.echo(
+        f"Top {result['top_n']} per category across {result['ucn']} countr{'y' if result['ucn'] == 1 else 'ies'}:\n"
+    )
     for c in result["countries"]:
         click.echo(f"  {c['country']} ({c['name']}) — {c['scrobble_count']:,} scrobbles")
         for label, key in visible:
@@ -1383,12 +1504,15 @@ def profile_uc(n: int, ucn: int, countries_raw: str | None, show_raw: str | None
 
 # ── flow ───────────────────────────────────────────────────────────────────
 @cli.command()
-@click.option("--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE).")
+@click.option(
+    "--source", "-s", type=_SOURCE_CHOICES, default="lastfm", envvar="C9R_SOURCE", help="Data source (env: C9R_SOURCE)."
+)
 @click.option("--full", is_flag=True, help="Fetch full history instead of incremental.")
 def flow(source: str, full: bool) -> None:
     """Run the full Prefect orchestration flow"""
     source = _normalise_source(source)
     from flows.cf_ingest import weekly_ingest_flow
+
     click.echo("Starting Prefect flow …")
     result = weekly_ingest_flow(full=full, source=source)
     click.echo(

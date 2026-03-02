@@ -4,6 +4,7 @@ Probes GPU availability for XGBoost and caches the result.
 Other models (RF, LightGBM pip, Extra Trees, sklearn composites) are
 CPU-only by design — this module only concerns XGBoost's ``device`` param.
 """
+
 from __future__ import annotations
 import logging
 
@@ -22,6 +23,7 @@ def get_device() -> str:
     try:
         import numpy as np
         import xgboost as xgb
+
         dtrain = xgb.DMatrix(np.array([[1, 2], [3, 4]], dtype=np.float32), label=[0, 1])
         bst = xgb.train({"device": "cuda", "max_depth": 1, "verbosity": 0}, dtrain, num_boost_round=1)
         del bst, dtrain

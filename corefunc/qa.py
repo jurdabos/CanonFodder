@@ -5,6 +5,7 @@ Covers schema conformance, null/empty rates, timestamp integrity,
 duplicate detection, MBID validation, row-count reconciliation,
 and character-encoding sanity.
 """
+
 from __future__ import annotations
 import json
 import logging
@@ -13,16 +14,27 @@ from datetime import datetime, UTC
 from typing import Any
 import pandas as pd
 from helpers.io import (
-    SCROBBLE_COLS, ARTIST_INFO_COLS, AVC_COLS, GS_MB_COLS,
-    ARTIST_INFO_PQ, AVC_PQ, UC_PQ, GS_MB_PQ, PQ_DIR, QA_REPORT_PQ,
-    UUID_RE, read_parquet, append_to_parquet, read_scrobble_df,
+    SCROBBLE_COLS,
+    ARTIST_INFO_COLS,
+    AVC_COLS,
+    GS_MB_COLS,
+    ARTIST_INFO_PQ,
+    AVC_PQ,
+    UC_PQ,
+    GS_MB_PQ,
+    PQ_DIR,
+    QA_REPORT_PQ,
+    UUID_RE,
+    read_parquet,
+    append_to_parquet,
+    read_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
-ALBUM_NULL_THRESHOLD = 0.30        # up to 30 % album missingness is normal for LB
-DUPLICATE_RATE_THRESHOLD = 0.05    # > 5 % duplicates warrants a warning
+ALBUM_NULL_THRESHOLD = 0.30  # up to 30 % album missingness is normal for LB
+DUPLICATE_RATE_THRESHOLD = 0.05  # > 5 % duplicates warrants a warning
 MIN_PLAUSIBLE_YEAR = 2000
 # Matching Unicode replacement char or C0/C1 control chars (except \n \r \t)
 _BAD_CHAR_RE = re.compile(r"[\uFFFD\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]")
@@ -230,14 +242,16 @@ def qa_lb_ingest(
         "encoding": _check_encoding(df),
     }
     # Deriving overall pass/fail
-    report["passed"] = all([
-        report["schema"]["pass"],
-        report["timestamps"]["pass"],
-        report["duplicates"]["pass"],
-        report["encoding"]["pass"],
-        report["nulls"].get("artist_name", {}).get("null_pct", 0) == 0,
-        report["nulls"].get("track_title", {}).get("null_pct", 0) == 0,
-    ])
+    report["passed"] = all(
+        [
+            report["schema"]["pass"],
+            report["timestamps"]["pass"],
+            report["duplicates"]["pass"],
+            report["encoding"]["pass"],
+            report["nulls"].get("artist_name", {}).get("null_pct", 0) == 0,
+            report["nulls"].get("track_title", {}).get("null_pct", 0) == 0,
+        ]
+    )
     # Persisting a flat summary row to qa_report.parquet
     _persist_report(report)
     return report
@@ -247,31 +261,35 @@ def _persist_report(report: dict[str, Any]) -> None:
     """Appends a single summary row to PQ/qa_report.parquet."""
     nulls = report.get("nulls", {})
     enrichment = report.get("enrichment", {})
-    row = pd.DataFrame([{
-        "timestamp": report["timestamp"],
-        "source": report.get("source"),
-        "target": report.get("target", "scrobble"),
-        "row_count": report["row_count"],
-        "passed": report["passed"],
-        "schema_ok": report.get("schema", {}).get("pass", True),
-        "artist_null_pct": nulls.get("artist_name", {}).get("null_pct", 0),
-        "track_null_pct": nulls.get("track_title", {}).get("null_pct", 0),
-        "album_null_pct": nulls.get("album_title", {}).get("null_pct", 0),
-        "mbid_fill_rate": report.get("mbids", {}).get("fill_rate", 0),
-        "mbid_valid_rate": report.get("mbids", {}).get("valid_rate", 0),
-        "hash_fill_rate": report.get("hash_fill", {}).get("fill_rate", 0),
-        "unique_countries": report.get("unique_countries"),
-        "duplicate_count": report.get("duplicates", {}).get("duplicate_count", 0),
-        "duplicate_pct": report.get("duplicates", {}).get("duplicate_pct", 0),
-        "ts_before_min": report.get("timestamps", {}).get("before_min_count", 0),
-        "ts_after_now": report.get("timestamps", {}).get("after_now_count", 0),
-        "bad_char_rows": report.get("encoding", {}).get("bad_char_rows", 0),
-        "fetched": report.get("reconciliation", {}).get("fetched"),
-        "stored": report.get("reconciliation", {}).get("stored"),
-        "country_fill_rate": enrichment.get("country", {}).get("fill_rate"),
-        "disambiguation_fill_rate": enrichment.get("disambiguation", {}).get("fill_rate"),
-        "aliases_fill_rate": enrichment.get("aliases", {}).get("fill_rate"),
-    }])
+    row = pd.DataFrame(
+        [
+            {
+                "timestamp": report["timestamp"],
+                "source": report.get("source"),
+                "target": report.get("target", "scrobble"),
+                "row_count": report["row_count"],
+                "passed": report["passed"],
+                "schema_ok": report.get("schema", {}).get("pass", True),
+                "artist_null_pct": nulls.get("artist_name", {}).get("null_pct", 0),
+                "track_null_pct": nulls.get("track_title", {}).get("null_pct", 0),
+                "album_null_pct": nulls.get("album_title", {}).get("null_pct", 0),
+                "mbid_fill_rate": report.get("mbids", {}).get("fill_rate", 0),
+                "mbid_valid_rate": report.get("mbids", {}).get("valid_rate", 0),
+                "hash_fill_rate": report.get("hash_fill", {}).get("fill_rate", 0),
+                "unique_countries": report.get("unique_countries"),
+                "duplicate_count": report.get("duplicates", {}).get("duplicate_count", 0),
+                "duplicate_pct": report.get("duplicates", {}).get("duplicate_pct", 0),
+                "ts_before_min": report.get("timestamps", {}).get("before_min_count", 0),
+                "ts_after_now": report.get("timestamps", {}).get("after_now_count", 0),
+                "bad_char_rows": report.get("encoding", {}).get("bad_char_rows", 0),
+                "fetched": report.get("reconciliation", {}).get("fetched"),
+                "stored": report.get("reconciliation", {}).get("stored"),
+                "country_fill_rate": enrichment.get("country", {}).get("fill_rate"),
+                "disambiguation_fill_rate": enrichment.get("disambiguation", {}).get("fill_rate"),
+                "aliases_fill_rate": enrichment.get("aliases", {}).get("fill_rate"),
+            }
+        ]
+    )
     append_to_parquet(row, QA_REPORT_PQ)
     log.info("QA report appended to %s", QA_REPORT_PQ)
 
@@ -322,7 +340,9 @@ def qa_artist_info(*, source: str | None = None) -> dict[str, Any]:
     # Computing real-fill enrichment rates
     enrichment = {
         "country": _real_fill(df["country"], total) if "country" in df.columns else {"filled": 0, "fill_rate": 0.0},
-        "disambiguation": _real_fill(df["disambiguation_comment"], total) if "disambiguation_comment" in df.columns else {"filled": 0, "fill_rate": 0.0},
+        "disambiguation": _real_fill(df["disambiguation_comment"], total)
+        if "disambiguation_comment" in df.columns
+        else {"filled": 0, "fill_rate": 0.0},
         "aliases": _real_fill(df["aliases"], total) if "aliases" in df.columns else {"filled": 0, "fill_rate": 0.0},
     }
     report: dict[str, Any] = {
@@ -337,12 +357,14 @@ def qa_artist_info(*, source: str | None = None) -> dict[str, Any]:
         "encoding": encoding,
         "enrichment": enrichment,
     }
-    report["passed"] = all([
-        schema["pass"],
-        duplicates["pass"],
-        encoding["pass"],
-        nulls.get("artist_name", {}).get("null_pct", 0) == 0,
-    ])
+    report["passed"] = all(
+        [
+            schema["pass"],
+            duplicates["pass"],
+            encoding["pass"],
+            nulls.get("artist_name", {}).get("null_pct", 0) == 0,
+        ]
+    )
     _persist_report(report)
     return report
 
@@ -406,12 +428,14 @@ def qa_avc(*, source: str | None = None) -> dict[str, Any]:
         "encoding": encoding,
         "hash_fill": {"filled": hash_filled, "fill_rate": hash_fill_rate},
     }
-    report["passed"] = all([
-        schema["pass"],
-        duplicates["pass"],
-        timestamps["pass"],
-        encoding["pass"],
-    ])
+    report["passed"] = all(
+        [
+            schema["pass"],
+            duplicates["pass"],
+            timestamps["pass"],
+            encoding["pass"],
+        ]
+    )
     _persist_report(report)
     return report
 
@@ -448,8 +472,8 @@ def qa_gs_mb(*, source: str | None = None) -> dict[str, Any]:
     encoding = _check_encoding(df, ["variant_a", "variant_b"])
     # Computing to_link distribution
     if "to_link" in df.columns:
-        pos = int((df["to_link"] == True).sum())   # noqa: E712
-        neg = int((df["to_link"] == False).sum())   # noqa: E712
+        pos = int((df["to_link"] == True).sum())  # noqa: E712
+        neg = int((df["to_link"] == False).sum())  # noqa: E712
         null_link = int(df["to_link"].isna().sum())
     else:
         pos, neg, null_link = 0, 0, 0
@@ -471,13 +495,15 @@ def qa_gs_mb(*, source: str | None = None) -> dict[str, Any]:
         "label_distribution": label_dist,
         "source_breakdown": source_counts,
     }
-    report["passed"] = all([
-        schema["pass"],
-        duplicates["pass"],
-        encoding["pass"],
-        nulls.get("variant_a", {}).get("null_pct", 0) == 0,
-        nulls.get("variant_b", {}).get("null_pct", 0) == 0,
-    ])
+    report["passed"] = all(
+        [
+            schema["pass"],
+            duplicates["pass"],
+            encoding["pass"],
+            nulls.get("variant_a", {}).get("null_pct", 0) == 0,
+            nulls.get("variant_b", {}).get("null_pct", 0) == 0,
+        ]
+    )
     _persist_report(report)
     return report
 
@@ -559,8 +585,7 @@ def _feature_quantile_drift(
         }
         if shift > threshold:
             warnings.append(
-                f"Feature '{col}' median shifted by {shift:.3f} "
-                f"(baseline={bl_med:.3f}, recent={rc_med:.3f})."
+                f"Feature '{col}' median shifted by {shift:.3f} (baseline={bl_med:.3f}, recent={rc_med:.3f})."
             )
     return quantiles, warnings
 
@@ -602,24 +627,16 @@ def qa_predictions(
     recent_mean = float(recent["probability"].mean())
     mean_shift = abs(recent_mean - baseline_mean)
     # Ambiguous-band proportion (0.2 ≤ p < 0.8)
-    baseline_ambig = float((
-        (baseline["probability"] >= 0.2) & (baseline["probability"] < 0.8)
-    ).mean())
-    recent_ambig = float((
-        (recent["probability"] >= 0.2) & (recent["probability"] < 0.8)
-    ).mean())
-    ambig_ratio = (
-        recent_ambig / baseline_ambig
-        if baseline_ambig > 0.01 else 1.0
-    )
+    baseline_ambig = float(((baseline["probability"] >= 0.2) & (baseline["probability"] < 0.8)).mean())
+    recent_ambig = float(((recent["probability"] >= 0.2) & (recent["probability"] < 0.8)).mean())
+    ambig_ratio = recent_ambig / baseline_ambig if baseline_ambig > 0.01 else 1.0
     # Computing feature quantile drift
     feat_quantiles, feat_warnings = _feature_quantile_drift(baseline, recent)
     # Building warnings
     warnings_list: list[str] = []
     if mean_shift > DRIFT_MEAN_SHIFT_THRESHOLD:
         warnings_list.append(
-            f"Mean probability shifted by {mean_shift:.3f} "
-            f"(baseline={baseline_mean:.3f}, recent={recent_mean:.3f})."
+            f"Mean probability shifted by {mean_shift:.3f} (baseline={baseline_mean:.3f}, recent={recent_mean:.3f})."
         )
     if ambig_ratio > DRIFT_AMBIGUOUS_RATIO_THRESHOLD:
         warnings_list.append(

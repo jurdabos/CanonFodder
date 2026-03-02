@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.stats (pure statistical/ML utility functions).
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -68,30 +69,38 @@ class TestIterativeCorrelationDropper:
         """Drops columns exceeding the cutoff."""
         rng = np.random.default_rng(7)
         base = rng.normal(size=100)
-        df = pd.DataFrame({
-            "a": base,
-            "b": base + rng.normal(0, 0.01, 100),  # nearly perfect corr with a
-            "c": rng.normal(size=100),
-        })
-        varframe = pd.DataFrame({
-            "features": ["a", "b", "c"],
-            "variances": [df[c].var() for c in df.columns],
-        })
+        df = pd.DataFrame(
+            {
+                "a": base,
+                "b": base + rng.normal(0, 0.01, 100),  # nearly perfect corr with a
+                "c": rng.normal(size=100),
+            }
+        )
+        varframe = pd.DataFrame(
+            {
+                "features": ["a", "b", "c"],
+                "variances": [df[c].var() for c in df.columns],
+            }
+        )
         result = iterative_correlation_dropper(df, cutoff=0.8, varframe=varframe, min_features=2)
         assert len(result.columns) == 2
 
     def test_stops_when_no_pairs_above_cutoff(self):
         """Keeps all columns when none exceed the cutoff."""
         rng = np.random.default_rng(42)
-        df = pd.DataFrame({
-            "x": rng.normal(size=50),
-            "y": rng.normal(size=50),
-            "z": rng.normal(size=50),
-        })
-        varframe = pd.DataFrame({
-            "features": ["x", "y", "z"],
-            "variances": [df[c].var() for c in df.columns],
-        })
+        df = pd.DataFrame(
+            {
+                "x": rng.normal(size=50),
+                "y": rng.normal(size=50),
+                "z": rng.normal(size=50),
+            }
+        )
+        varframe = pd.DataFrame(
+            {
+                "features": ["x", "y", "z"],
+                "variances": [df[c].var() for c in df.columns],
+            }
+        )
         result = iterative_correlation_dropper(df, cutoff=0.99, varframe=varframe, min_features=1)
         assert len(result.columns) == 3
 
@@ -154,10 +163,12 @@ class TestVarianceTesting:
 
     def test_selects_high_variance_features(self):
         """Drops a zero-variance column."""
-        df = pd.DataFrame({
-            "high_var": [1, 2, 3, 4, 5],
-            "zero_var": [1, 1, 1, 1, 1],
-        })
+        df = pd.DataFrame(
+            {
+                "high_var": [1, 2, 3, 4, 5],
+                "zero_var": [1, 1, 1, 1, 1],
+            }
+        )
         var_df, selected = variance_testing(df, varthresh=0.01)
         assert "high_var" in selected.tolist()
         assert "zero_var" not in selected.tolist()

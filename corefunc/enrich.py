@@ -9,12 +9,17 @@ Three backends are supported:
 All paths write to artist_info.parquet (metadata) and backfill MBIDs
 into scrobble.parquet.
 """
+
 from __future__ import annotations
 import logging
 import time
 import pandas as pd
 from helpers.io import (
-    ARTIST_INFO_PQ, read_parquet, append_to_parquet, read_scrobble_df, dump_scrobble_df,
+    ARTIST_INFO_PQ,
+    read_parquet,
+    append_to_parquet,
+    read_scrobble_df,
+    dump_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
@@ -29,16 +34,14 @@ def enrich_artist_country(*, batch: int = 100) -> int:
     Returns the number of artists enriched.
     """
     from HTTP.mbAPI import search_artist, _cache_artist
+
     scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:
         return 0
     known = read_parquet(ARTIST_INFO_PQ)
     known_names = set(known["artist_name"].tolist()) if known is not None and not known.empty else set()
     # Finding artists in scrobbles that are not yet cached
-    pairs = (
-        scrobbles[["artist_name", "artist_mbid"]]
-        .drop_duplicates(subset=["artist_name"])
-    )
+    pairs = scrobbles[["artist_name", "artist_mbid"]].drop_duplicates(subset=["artist_name"])
     unknown = pairs[~pairs["artist_name"].isin(known_names)]
     if unknown.empty:
         log.info("All artists already in artist_info.parquet.")
@@ -53,21 +56,25 @@ def enrich_artist_country(*, batch: int = 100) -> int:
                 continue
             cand = hit[0]
             _cache_artist(cand)  # to also persist via mbAPI
-            rows.append({
-                "artist_name": name,
-                "mbid": cand.get("id", ""),
-                "country": cand.get("country", ""),
-                "disambiguation_comment": cand.get("disambiguation", ""),
-                "aliases": ",".join(cand.get("aliases", [])) if isinstance(cand.get("aliases"), list) else "",
-            })
+            rows.append(
+                {
+                    "artist_name": name,
+                    "mbid": cand.get("id", ""),
+                    "country": cand.get("country", ""),
+                    "disambiguation_comment": cand.get("disambiguation", ""),
+                    "aliases": ",".join(cand.get("aliases", [])) if isinstance(cand.get("aliases"), list) else "",
+                }
+            )
         else:
-            rows.append({
-                "artist_name": name,
-                "mbid": mbid,
-                "country": "",
-                "disambiguation_comment": "",
-                "aliases": "",
-            })
+            rows.append(
+                {
+                    "artist_name": name,
+                    "mbid": mbid,
+                    "country": "",
+                    "disambiguation_comment": "",
+                    "aliases": "",
+                }
+            )
         time.sleep(0.25)  # to respect MusicBrainz rate limits
     if rows:
         df_new = pd.DataFrame(rows)
@@ -132,12 +139,14 @@ def enrich_all(
     result: dict[str, int] = {"artist_info_rows": 0, "mbids_backfilled": 0}
     if backend == "local":
         from corefunc.mb_local import enrich_from_local_mb
+
         result["artist_info_rows"] = enrich_from_local_mb(rebuild=rebuild)
     elif backend == "mbapi":
         result["artist_info_rows"] = enrich_artist_country()
     elif backend == "lastfmapi":
         # Step 1: Last.fm for MBIDs in scrobble.parquet
         from HTTP.lfAPI import enrich_artist_mbids
+
         mbid_result = enrich_artist_mbids()
         log.info("Last.fm MBID enrichment: %s", mbid_result.get("message", ""))
         # Step 2: remote MB API for metadata in artist_info.parquet

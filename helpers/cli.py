@@ -1,6 +1,7 @@
 """
 Provides interactive command-line helpers for data cleaning and user prompts.
 """
+
 from __future__ import annotations
 import hashlib
 import logging
@@ -12,18 +13,17 @@ from typing import Optional
 import click
 import pandas as pd
 from dotenv import load_dotenv
+
 load_dotenv()
 from .io import AVC_PQ, UC_PQ, read_parquet, append_to_parquet, dump_parquet  # noqa: E402
+
 log = logging.getLogger(__name__)
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[1] if "__file__" in globals() else Path.cwd()
 SEPARATOR = "{"
 
 
-def _apply_canonical(canonical: str,
-                     variants: list[str],
-                     data: pd.DataFrame,
-                     artcounts: pd.DataFrame) -> None:
+def _apply_canonical(canonical: str, variants: list[str], data: pd.DataFrame, artcounts: pd.DataFrame) -> None:
     """Replace every variant in *data* with *canonical* and refresh counts in-place."""
     data["Artist"] = data["Artist"].replace(dict.fromkeys(variants, canonical))
     artcounts.loc[artcounts["Artist"].isin(variants), "Artist"] = canonical
@@ -55,14 +55,18 @@ def _parse_date(d: str) -> Optional[pd.Timestamp]:
 def _remember_artist_variant(signature: str, canonical: str, link_flag: bool, comment: str | None) -> None:
     """Upserts a variant decision into avc.parquet."""
     signature_hash = hashlib.sha256(signature.encode("utf-8")).hexdigest()
-    row = pd.DataFrame([{
-        "artist_variants_hash": signature_hash,
-        "artist_variants_text": signature,
-        "canonical_name": canonical,
-        "to_link": link_flag,
-        "comment": comment or "",
-        "stamp": datetime.now(UTC).isoformat(),
-    }])
+    row = pd.DataFrame(
+        [
+            {
+                "artist_variants_hash": signature_hash,
+                "artist_variants_text": signature,
+                "canonical_name": canonical,
+                "to_link": link_flag,
+                "comment": comment or "",
+                "stamp": datetime.now(UTC).isoformat(),
+            }
+        ]
+    )
     append_to_parquet(row, AVC_PQ, dedup_cols=["artist_variants_hash"])
 
 
@@ -70,10 +74,7 @@ def _split_variants(sig: str) -> list[str]:
     return [v.strip() for v in sig.split(SEPARATOR) if v.strip()]
 
 
-
-
-def ask(question: str,
-        default: str | None = None) -> str:
+def ask(question: str, default: str | None = None) -> str:
     """
     Prompts until the user enters text or accepts `default`
     Args:
@@ -86,7 +87,7 @@ def ask(question: str,
         prompt = f"{question.strip()} "
         if default is not None:
             prompt += f"[{default}] "
-        print(prompt, end='', flush=True)
+        print(prompt, end="", flush=True)
         reply = input().strip()
         if reply:
             return reply
@@ -105,8 +106,9 @@ def choose_lastfm_user() -> str:
     default = os.getenv("LASTFM_USER", "").strip() or None
     while True:
         tail = f" [{default}]" if default else ""
-        reply = input(f"If you are querying data for last.fm user {tail}, press enter"
-                      " Otherwise, type username here: › ").strip()
+        reply = input(
+            f"If you are querying data for last.fm user {tail}, press enter Otherwise, type username here: › "
+        ).strip()
         if reply:
             return reply
         if default:
@@ -121,9 +123,11 @@ def choose_timeline(default: str = "Y") -> str:
     • If running in a true TTY → prompt the user.
     • If stdin is not a TTY (PyCharm SciView, Jupyter, CI) → return *default*.
     """
+
     def _prompt() -> str:
         answ = input("Use existing user-country timeline? [Y]es/[E]dit/[N]ew: ").strip() or default
         return answ[0].lower()
+
     # PyCharm's console / notebooks: no interactive stdin
     if not sys.stdin.isatty() or os.getenv("PYCHARM_HOSTED"):
         print(f"(no TTY – assuming '{default}')")
@@ -135,7 +139,7 @@ def choose_timeline(default: str = "Y") -> str:
                 return ans
             print("Please enter Y, E, or N.")
         except (EOFError, KeyboardInterrupt):
-            print()           # new line
+            print()  # new line
             sys.exit("aborted by user")
 
 
@@ -181,13 +185,13 @@ def make_signature(variants: list[str]) -> str:
 
 
 def make_signature_hash(signature: str) -> str:
-    return hashlib.sha256(signature.encode('utf-8')).hexdigest()
+    return hashlib.sha256(signature.encode("utf-8")).hexdigest()
 
 
 def unify_artist_names_cli(
-        data: pd.DataFrame,
-        fltrd_artcount: pd.DataFrame,
-        similar_artist_groups: list[list[str]],
+    data: pd.DataFrame,
+    fltrd_artcount: pd.DataFrame,
+    similar_artist_groups: list[list[str]],
 ):
     """
     Interactively resolves artist-name duplicates using Click prompts.
@@ -241,12 +245,7 @@ def unify_artist_names_cli(
         _remember_artist_variant(signature, canonical, True, comment)
         # Reloading avc_df after each write to keep it fresh
         avc_df = read_parquet(AVC_PQ)
-    refreshed = (
-        data["Artist"]
-        .value_counts()
-        .rename_axis("Artist")
-        .reset_index(name="Count")
-    )
+    refreshed = data["Artist"].value_counts().rename_axis("Artist").reset_index(name="Count")
     return data, refreshed
 
 
@@ -276,24 +275,23 @@ def verify_commas(csv_path: str | Path) -> None:
         (1, "Ágy,  asztal, TV", "Ágy  asztal TV"),
         (2, "Video fiú, video lány", "Video fiú video lány"),
         (2, "Nyálas, nyers angyalok", "Nyálas nyers angyalok"),
-        (2, "I Have the Moon, You Have the Internet",
-         "I Have the Moon You Have the Internet"),
+        (2, "I Have the Moon, You Have the Internet", "I Have the Moon You Have the Internet"),
     ]
     banner = "\n── Checking whether CSV export kept the internal commas ──"
     print(banner)
     for col, with_comma, no_comma in probes:
-        series = df.iloc[:, col] if isinstance(col, int) else (
-            df[col] if col in df.columns else None
-        )
+        series = df.iloc[:, col] if isinstance(col, int) else (df[col] if col in df.columns else None)
         if series is None:
-            print(f"[warn] column \"{col!r}\" is not found in CSV - skipped")
+            print(f'[warn] column "{col!r}" is not found in CSV - skipped')
             continue
         kept = int(series.eq(with_comma).sum())
         lost = int(series.eq(no_comma).sum())
-        print(f"\n» column {col:5}  "
-              f"→ '{with_comma}' OR '{no_comma}?'\n"
-              f"    rows *with* comma   : {kept}\n"
-              f"    rows sans comma     : {lost}")
+        print(
+            f"\n» column {col:5}  "
+            f"→ '{with_comma}' OR '{no_comma}?'\n"
+            f"    rows *with* comma   : {kept}\n"
+            f"    rows sans comma     : {lost}"
+        )
     print("\n──────────────────────────────────────────────────────────\n")
 
 

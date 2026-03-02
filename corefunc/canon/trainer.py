@@ -15,6 +15,7 @@ Pipeline stages:
      final model on full training set, held-out evaluation at 3 operating
      points (default 0.5, F1-optimal, high-precision P≥0.80).
 """
+
 from __future__ import annotations
 import itertools
 import logging
@@ -44,7 +45,13 @@ from helpers import cluster, experiment, stats
 from helpers.device import get_device
 from helpers.features import compute_pair_features
 from helpers.io import (
-    AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet, read_scrobble_df, dump_parquet, sanitize,
+    AVC_PQ,
+    GS_MB_PQ,
+    PQ_DIR,
+    read_parquet,
+    read_scrobble_df,
+    dump_parquet,
+    sanitize,
 )
 from sklearn.cluster import DBSCAN
 
@@ -58,12 +65,19 @@ MAX_TRACKS = 10_000
 MAX_ALBUMS = 1_000
 SOLO_DISCO_PQ = PQ_DIR / "mbdb_discography_solo.parquet"
 _SIM_SCORES = [
-    "ratio", "partial_ratio", "token_sort_ratio",
-    "token_set_ratio", "WRatio", "QRatio",
+    "ratio",
+    "partial_ratio",
+    "token_sort_ratio",
+    "token_set_ratio",
+    "WRatio",
+    "QRatio",
 ]
 _TREE_MODELS = {
-    "XGBoost", "RandomForest", "ExtraTrees",
-    "LightGBM", "GradientBoosting",
+    "XGBoost",
+    "RandomForest",
+    "ExtraTrees",
+    "LightGBM",
+    "GradientBoosting",
 }
 DEFAULT_MODELS = ["LightGBM"]
 
@@ -78,6 +92,7 @@ def verify_mlflow() -> None:
     failure so callers can abort before expensive feature computation.
     """
     import mlflow
+
     experiment.init_experiment()
     try:
         with mlflow.start_run(run_name="_verify_mlflow_tracking"):
@@ -109,46 +124,61 @@ def build_training_data(
     decided = avc[avc["to_link"].notna()].reset_index(drop=True)
     log.info(
         "AVC decided rows: %d (pos=%d, neg=%d).",
-        len(decided), decided["to_link"].sum(), (~decided["to_link"]).sum(),
+        len(decided),
+        decided["to_link"].sum(),
+        (~decided["to_link"]).sum(),
     )
     # Expanding to pair level
     all_rows: list[tuple] = []
     for _, row in decided.iterrows():
         all_rows.extend(cluster.expand_pairs(row))
     all_pairs = pd.DataFrame(
-        all_rows, columns=["variants", "variant_a", "variant_b", "to_link"],
+        all_rows,
+        columns=["variants", "variant_a", "variant_b", "to_link"],
     )
     all_pairs = all_pairs.drop_duplicates(
         subset=["variant_a", "variant_b"],
     ).reset_index(drop=True)
     log.info(
         "Expanded to %d unique pairs (pos=%d, neg=%d).",
-        len(all_pairs), all_pairs["to_link"].sum(), (~all_pairs["to_link"]).sum(),
+        len(all_pairs),
+        all_pairs["to_link"].sum(),
+        (~all_pairs["to_link"]).sum(),
     )
     # Applying WRatio band filter
     all_pairs["_wr"] = all_pairs.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
-    all_pairs = all_pairs[
-        (all_pairs["_wr"] >= WRATIO_LOWER) & (all_pairs["_wr"] < WRATIO_UPPER)
-    ].drop(columns=["_wr", "variants"]).reset_index(drop=True)
+    all_pairs = (
+        all_pairs[(all_pairs["_wr"] >= WRATIO_LOWER) & (all_pairs["_wr"] < WRATIO_UPPER)]
+        .drop(columns=["_wr", "variants"])
+        .reset_index(drop=True)
+    )
     log.info(
         "After WRatio [%d,%d) filter: %d pairs (pos=%d, neg=%d).",
-        WRATIO_LOWER, WRATIO_UPPER, len(all_pairs),
-        all_pairs["to_link"].sum(), (~all_pairs["to_link"]).sum(),
+        WRATIO_LOWER,
+        WRATIO_UPPER,
+        len(all_pairs),
+        all_pairs["to_link"].sum(),
+        (~all_pairs["to_link"]).sum(),
     )
     # Performing stratified split
     train_pairs, test_pairs = train_test_split(
-        all_pairs, test_size=test_size, random_state=random_state,
+        all_pairs,
+        test_size=test_size,
+        random_state=random_state,
         stratify=all_pairs["to_link"],
     )
     train_pairs = train_pairs.reset_index(drop=True)
     test_pairs = test_pairs.reset_index(drop=True)
     log.info(
         "Train: %d (pos=%d, neg=%d) | Test: %d (pos=%d, neg=%d)",
-        len(train_pairs), train_pairs["to_link"].sum(),
+        len(train_pairs),
+        train_pairs["to_link"].sum(),
         (~train_pairs["to_link"]).sum(),
-        len(test_pairs), test_pairs["to_link"].sum(),
+        len(test_pairs),
+        test_pairs["to_link"].sum(),
         (~test_pairs["to_link"]).sum(),
     )
     return train_pairs, test_pairs
@@ -189,26 +219,17 @@ def _load_catalogue_lookups() -> tuple[dict[str, list[str]], dict[str, list[str]
     if scrobbles is None or scrobbles.empty:
         log.warning("No scrobble data — catalogue features will be zeros.")
         return {}, {}
-    has_mbid = (
-        scrobbles["artist_mbid"].notna()
-        & (scrobbles["artist_mbid"].str.len() == 36)
-    )
+    has_mbid = scrobbles["artist_mbid"].notna() & (scrobbles["artist_mbid"].str.len() == 36)
     name_to_mbid: dict[str, str] = (
-        scrobbles[has_mbid]
-        .drop_duplicates("artist_name")
-        .set_index("artist_name")["artist_mbid"]
+        scrobbles[has_mbid].drop_duplicates("artist_name").set_index("artist_name")["artist_mbid"].to_dict()
+    )
+    clean = scrobbles[scrobbles["album_title"].notna() & (scrobbles["album_title"].str.strip() != "")]
+    scrobble_albums = clean.groupby("artist_name")["album_title"].apply(lambda x: sorted(set(x.unique()))).to_dict()
+    scrobble_tracks = (
+        scrobbles.groupby("artist_name")["track_title"]
+        .apply(lambda x: sorted({t for t in x.dropna().unique() if t.strip()}))
         .to_dict()
     )
-    clean = scrobbles[
-        scrobbles["album_title"].notna()
-        & (scrobbles["album_title"].str.strip() != "")
-    ]
-    scrobble_albums = clean.groupby("artist_name")["album_title"].apply(
-        lambda x: sorted(set(x.unique()))
-    ).to_dict()
-    scrobble_tracks = scrobbles.groupby("artist_name")["track_title"].apply(
-        lambda x: sorted({t for t in x.dropna().unique() if t.strip()})
-    ).to_dict()
     all_names = set(scrobbles["artist_name"].unique())
     name_to_albums: dict[str, list[str]] = {}
     name_to_tracks: dict[str, list[str]] = {}
@@ -231,7 +252,9 @@ def _load_catalogue_lookups() -> tuple[dict[str, list[str]], dict[str, list[str]
             name_to_tracks[name] = tracks
     log.info(
         "Unified lookups: %d MBDB, %d scrobble fallback, %d empty.",
-        n_mbdb, n_scrobble, n_empty,
+        n_mbdb,
+        n_scrobble,
+        n_empty,
     )
     return name_to_albums, name_to_tracks
 
@@ -250,14 +273,19 @@ def _collect_best_scores(list_a: list[str], list_b: list[str]) -> list[float]:
     scores: list[float] = []
     for a in list_a:
         result = process.extractOne(
-            a, list_b, scorer=fuzz.token_sort_ratio, score_cutoff=0,
+            a,
+            list_b,
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=0,
         )
         scores.append(float(result[1]) if result is not None else 0.0)
     return scores
 
 
 def _presence_features(
-    items_a: list[str], items_b: list[str], prefix: str,
+    items_a: list[str],
+    items_b: list[str],
+    prefix: str,
 ) -> dict[str, float]:
     """Computes 9 presence-and-quality features for a single catalogue domain.
 
@@ -265,8 +293,8 @@ def _presence_features(
     300, the features capture whether real overlap exists and how strong
     the best evidence is.
     """
-    items_a = items_a[:MAX_ALBUMS if "disco" in prefix else MAX_TRACKS]
-    items_b = items_b[:MAX_ALBUMS if "disco" in prefix else MAX_TRACKS]
+    items_a = items_a[: MAX_ALBUMS if "disco" in prefix else MAX_TRACKS]
+    items_b = items_b[: MAX_ALBUMS if "disco" in prefix else MAX_TRACKS]
     set_a, set_b = set(items_a), set(items_b)
     exact_matches = set_a & set_b
     n_exact = len(exact_matches)
@@ -413,19 +441,17 @@ def _load_scrobble_only_lookups() -> tuple[dict[str, list[str]], dict[str, list[
     if scrobbles is None or scrobbles.empty:
         log.warning("No scrobble data — catalogue features will be zeros.")
         return {}, {}
-    clean = scrobbles[
-        scrobbles["album_title"].notna()
-        & (scrobbles["album_title"].str.strip() != "")
-    ]
-    name_to_albums = clean.groupby("artist_name")["album_title"].apply(
-        lambda x: sorted(set(x.unique()))
-    ).to_dict()
-    name_to_tracks = scrobbles.groupby("artist_name")["track_title"].apply(
-        lambda x: sorted({t for t in x.dropna().unique() if t.strip()})
-    ).to_dict()
+    clean = scrobbles[scrobbles["album_title"].notna() & (scrobbles["album_title"].str.strip() != "")]
+    name_to_albums = clean.groupby("artist_name")["album_title"].apply(lambda x: sorted(set(x.unique()))).to_dict()
+    name_to_tracks = (
+        scrobbles.groupby("artist_name")["track_title"]
+        .apply(lambda x: sorted({t for t in x.dropna().unique() if t.strip()}))
+        .to_dict()
+    )
     log.info(
         "Scrobble-only lookups: %d album entries, %d track entries.",
-        len(name_to_albums), len(name_to_tracks),
+        len(name_to_albums),
+        len(name_to_tracks),
     )
     return name_to_albums, name_to_tracks
 
@@ -442,7 +468,9 @@ def _jaccard_set(a: set, b: set) -> float:
 
 
 def _fuzzy_overlap(
-    list_a: list[str], list_b: list[str], threshold: int = 80,
+    list_a: list[str],
+    list_b: list[str],
+    threshold: int = 80,
 ) -> tuple[int, float]:
     """Counts items in list_a that fuzzy-match any item in list_b.
 
@@ -453,7 +481,10 @@ def _fuzzy_overlap(
     matched = 0
     for a in list_a:
         result = process.extractOne(
-            a, list_b, scorer=fuzz.token_sort_ratio, score_cutoff=threshold,
+            a,
+            list_b,
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=threshold,
         )
         if result is not None:
             matched += 1
@@ -503,12 +534,18 @@ def _add_proportional_catalogue_features(
     for i, (_, row) in enumerate(df.iterrows()):
         va, vb = str(row["variant_a"]), str(row["variant_b"])
         feats: dict[str, float] = {}
-        feats.update(_proportional_disco_features(
-            name_to_albums.get(va, []), name_to_albums.get(vb, []),
-        ))
-        feats.update(_proportional_melo_features(
-            name_to_tracks.get(va, []), name_to_tracks.get(vb, []),
-        ))
+        feats.update(
+            _proportional_disco_features(
+                name_to_albums.get(va, []),
+                name_to_albums.get(vb, []),
+            )
+        )
+        feats.update(
+            _proportional_melo_features(
+                name_to_tracks.get(va, []),
+                name_to_tracks.get(vb, []),
+            )
+        )
         feat_rows.append(feats)
         if (i + 1) % 200 == 0:
             log.info("  Proportional catalogue: %d/%d (%.0f%%)", i + 1, n, 100 * (i + 1) / n)
@@ -537,17 +574,23 @@ def _build_avc_full_test(
     for _, row in decided.iterrows():
         all_rows.extend(cluster.expand_pairs(row))
     test_df = pd.DataFrame(
-        all_rows, columns=["variants", "variant_a", "variant_b", "to_link"],
+        all_rows,
+        columns=["variants", "variant_a", "variant_b", "to_link"],
     )
     test_df["_wr"] = test_df.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
-    test_df = test_df[
-        (test_df["_wr"] >= wratio_lower) & (test_df["_wr"] < wratio_upper)
-    ].drop(columns=["_wr", "variants"]).reset_index(drop=True)
+    test_df = (
+        test_df[(test_df["_wr"] >= wratio_lower) & (test_df["_wr"] < wratio_upper)]
+        .drop(columns=["_wr", "variants"])
+        .reset_index(drop=True)
+    )
     log.info(
         "AVC-full test: %d pairs (pos=%d, neg=%d).",
-        len(test_df), test_df["to_link"].sum(), (~test_df["to_link"]).sum(),
+        len(test_df),
+        test_df["to_link"].sum(),
+        (~test_df["to_link"]).sum(),
     )
     return test_df
 
@@ -572,19 +615,25 @@ def _build_mbdb_training_data(
     combined = combined.dropna(subset=["variant_a", "variant_b"])
     # Deduplicating (order-insensitive pair keys)
     combined["_key"] = combined.apply(
-        lambda r: tuple(sorted([str(r["variant_a"]), str(r["variant_b"])])), axis=1,
+        lambda r: tuple(sorted([str(r["variant_a"]), str(r["variant_b"])])),
+        axis=1,
     )
     combined = combined.drop_duplicates(subset=["_key"]).drop(columns=["_key"])
     # Applying WRatio filter
     combined["_wr"] = combined.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
-    combined = combined[
-        (combined["_wr"] >= wratio_lower) & (combined["_wr"] < wratio_upper)
-    ].drop(columns=["_wr"]).reset_index(drop=True)
+    combined = (
+        combined[(combined["_wr"] >= wratio_lower) & (combined["_wr"] < wratio_upper)]
+        .drop(columns=["_wr"])
+        .reset_index(drop=True)
+    )
     log.info(
         "MBDB train: %d pairs (pos=%d, neg=%d).",
-        len(combined), combined["to_link"].sum(), (~combined["to_link"]).sum(),
+        len(combined),
+        combined["to_link"].sum(),
+        (~combined["to_link"]).sum(),
     )
     return combined
 
@@ -602,14 +651,19 @@ def _build_dbscan_training_data(
     if dbscan is None or dbscan.empty:
         raise RuntimeError("gs_mb_dbscan.parquet not found — run the DBSCAN seeding step first.")
     dbscan["_wr"] = dbscan.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
-    dbscan = dbscan[
-        (dbscan["_wr"] >= wratio_lower) & (dbscan["_wr"] < wratio_upper)
-    ].drop(columns=["_wr"]).reset_index(drop=True)
+    dbscan = (
+        dbscan[(dbscan["_wr"] >= wratio_lower) & (dbscan["_wr"] < wratio_upper)]
+        .drop(columns=["_wr"])
+        .reset_index(drop=True)
+    )
     log.info(
         "DBSCAN train: %d pairs (pos=%d, neg=%d).",
-        len(dbscan), dbscan["to_link"].sum(), (~dbscan["to_link"]).sum(),
+        len(dbscan),
+        dbscan["to_link"].sum(),
+        (~dbscan["to_link"]).sum(),
     )
     return dbscan
 
@@ -635,6 +689,7 @@ def _build_dbscan_capped_training_data(
             return cached
     # ── Running capped DBSCAN pipeline ─────────────────────────────────────
     from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb
+
     scrobbles = read_scrobble_df()
     artist_names = sorted(scrobbles["artist_name"].dropna().unique().tolist())
     n = len(artist_names)
@@ -681,7 +736,11 @@ def _build_dbscan_capped_training_data(
             anchors_in = [nm for nm in group if nm in anchor_names]
             others = [nm for nm in group if nm not in anchor_names]
             budget = cluster_cap - len(anchors_in)
-            sampled = rng.choice(others, size=min(budget, len(others)), replace=False).tolist() if budget > 0 and others else []
+            sampled = (
+                rng.choice(others, size=min(budget, len(others)), replace=False).tolist()
+                if budget > 0 and others
+                else []
+            )
             capped_groups.append(anchors_in + sampled)
     log.info("Capped clusters: %d groups, %d total names.", len(capped_groups), sum(len(g) for g in capped_groups))
     # Extracting pairs
@@ -699,7 +758,7 @@ def _build_dbscan_capped_training_data(
     name_to_mbids: dict[str, set[str]] = {}
     batch_size = 150
     for i in range(0, len(all_names_unique), batch_size):
-        batch = all_names_unique[i:i + batch_size]
+        batch = all_names_unique[i : i + batch_size]
         values = ",".join(f"'{_escape_pg(nm)}'" for nm in batch)
         sql = f"""SELECT DISTINCT q.lookup_name, a.gid::text AS mbid
 FROM (
@@ -726,11 +785,10 @@ JOIN musicbrainz.artist a ON a.id = q.artist_id"""
     verified_df = pd.DataFrame(verified_rows)
     # Applying WRatio filter
     verified_df["_wr"] = verified_df.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
-    filtered = verified_df[
-        (verified_df["_wr"] >= wratio_lower) & (verified_df["_wr"] < wratio_upper)
-    ].copy()
+    filtered = verified_df[(verified_df["_wr"] >= wratio_lower) & (verified_df["_wr"] < wratio_upper)].copy()
     # Subsampling negatives to target ratio
     pos_df = filtered[filtered["to_link"].eq(True)]
     neg_df = filtered[filtered["to_link"].eq(False)]
@@ -754,7 +812,9 @@ JOIN musicbrainz.artist a ON a.id = q.artist_id"""
     combined = pd.concat([pos_df, neg_sampled], ignore_index=True).drop(columns=["_wr"]).reset_index(drop=True)
     log.info(
         "DBSCAN-capped train: %d pairs (pos=%d, neg=%d).",
-        len(combined), combined["to_link"].sum(), (~combined["to_link"]).sum(),
+        len(combined),
+        combined["to_link"].sum(),
+        (~combined["to_link"]).sum(),
     )
     dump_parquet(combined, GS_DBSCAN_CAPPED_PQ)
     return combined
@@ -777,7 +837,8 @@ def _build_feature_sep_training_data(
     if gs is None or gs.empty:
         raise RuntimeError("gs_mb.parquet not found — run 'c9r canon avc augment' first.")
     positives = gs[gs["to_link"].eq(True)].sample(
-        n=min(neg_count, gs["to_link"].sum()), random_state=RANDOM_STATE,
+        n=min(neg_count, gs["to_link"].sum()),
+        random_state=RANDOM_STATE,
     )
     log.info("Sampled %d positives from gs_mb.parquet.", len(positives))
     # Loading DBSCAN negative pool
@@ -788,10 +849,12 @@ def _build_feature_sep_training_data(
     log.info("DBSCAN negative pool: %d pairs.", len(neg_pool))
     # Computing WRatio for both sides
     pos_wr = positives.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
     neg_wr = neg_pool.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
     neg_pool = neg_pool.copy()
     neg_pool["_wr"] = neg_wr
@@ -829,13 +892,18 @@ def _build_feature_sep_training_data(
             sampled_parts.append(bin_df.sample(n=target, random_state=RANDOM_STATE))
     neg_sampled = pd.concat(sampled_parts, ignore_index=True).drop(columns=["_wr", "_bin"])
     log.info("Distribution-matched negatives: %d.", len(neg_sampled))
-    train = pd.concat([
-        positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-        neg_sampled[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-    ], ignore_index=True)
+    train = pd.concat(
+        [
+            positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+            neg_sampled[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+        ],
+        ignore_index=True,
+    )
     log.info(
         "Feature-sep train: %d pairs (pos=%d, neg=%d).",
-        len(train), train["to_link"].sum(), (~train["to_link"]).sum(),
+        len(train),
+        train["to_link"].sum(),
+        (~train["to_link"]).sum(),
     )
     return train
 
@@ -854,7 +922,8 @@ def _build_mbdb_max_training_data(
     if positives_all is None or positives_all.empty:
         raise RuntimeError("gs_mb_max.parquet not found — run Exp 10 first.")
     pos_wr = positives_all.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
     mask = (pos_wr >= wratio_lower) & (pos_wr < wratio_upper)
     positives = positives_all[mask].reset_index(drop=True)
@@ -865,13 +934,18 @@ def _build_mbdb_max_training_data(
     neg_pool = dbscan[dbscan["to_link"].eq(False)].reset_index(drop=True)
     n_target = min(len(positives), len(neg_pool))
     neg_sampled = neg_pool.sample(n=n_target, random_state=RANDOM_STATE)
-    train = pd.concat([
-        positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-        neg_sampled[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-    ], ignore_index=True)
+    train = pd.concat(
+        [
+            positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+            neg_sampled[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+        ],
+        ignore_index=True,
+    )
     log.info(
         "MBDB-max train: %d pairs (pos=%d, neg=%d).",
-        len(train), train["to_link"].sum(), (~train["to_link"]).sum(),
+        len(train),
+        train["to_link"].sum(),
+        (~train["to_link"]).sum(),
     )
     return train
 
@@ -894,7 +968,8 @@ def _build_mixed_training_data(
     for _, row in decided.iterrows():
         avc_rows.extend(cluster.expand_pairs(row))
     avc_pairs = pd.DataFrame(
-        avc_rows, columns=["variants", "variant_a", "variant_b", "to_link"],
+        avc_rows,
+        columns=["variants", "variant_a", "variant_b", "to_link"],
     ).drop(columns=["variants"])
     # Loading MBDB
     mb = read_parquet(GS_MB_PQ)
@@ -907,20 +982,28 @@ def _build_mixed_training_data(
     ).reset_index(drop=True)
     # Applying WRatio filter
     combined["_wr"] = combined.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
-    combined = combined[
-        (combined["_wr"] >= wratio_lower) & (combined["_wr"] < wratio_upper)
-    ].drop(columns=["_wr"]).reset_index(drop=True)
+    combined = (
+        combined[(combined["_wr"] >= wratio_lower) & (combined["_wr"] < wratio_upper)]
+        .drop(columns=["_wr"])
+        .reset_index(drop=True)
+    )
     train, test = train_test_split(
-        combined, test_size=test_size, random_state=RANDOM_STATE,
+        combined,
+        test_size=test_size,
+        random_state=RANDOM_STATE,
         stratify=combined["to_link"],
     )
     log.info(
         "Mixed train: %d | test: %d (pos=%d/%d, neg=%d/%d).",
-        len(train), len(test),
-        train["to_link"].sum(), test["to_link"].sum(),
-        (~train["to_link"]).sum(), (~test["to_link"]).sum(),
+        len(train),
+        len(test),
+        train["to_link"].sum(),
+        test["to_link"].sum(),
+        (~train["to_link"]).sum(),
+        (~test["to_link"]).sum(),
     )
     return train.reset_index(drop=True), test.reset_index(drop=True)
 
@@ -939,32 +1022,43 @@ def _build_avc_group_split(
         raise RuntimeError("avc.parquet is empty or missing.")
     decided = avc[avc["to_link"].notna()].reset_index(drop=True)
     train_groups, test_groups = train_test_split(
-        decided, test_size=test_size, random_state=RANDOM_STATE,
+        decided,
+        test_size=test_size,
+        random_state=RANDOM_STATE,
         stratify=decided["to_link"],
     )
+
     def _expand(groups_df: pd.DataFrame) -> pd.DataFrame:
         """Expands group-level rows into all pairwise variant combinations."""
         rows: list[tuple] = []
         for _, row in groups_df.iterrows():
             rows.extend(cluster.expand_pairs(row))
         return pd.DataFrame(rows, columns=["variants", "variant_a", "variant_b", "to_link"])
+
     train_pairs = _expand(train_groups)
     test_pairs = _expand(test_groups)
     # Filtering to WRatio band
     for df in [train_pairs, test_pairs]:
         df["_wr"] = df.apply(
-            lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+            lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+            axis=1,
         )
-    train_pairs = train_pairs[
-        (train_pairs["_wr"] >= wratio_lower) & (train_pairs["_wr"] < wratio_upper)
-    ].drop(columns=["_wr"]).reset_index(drop=True)
-    test_pairs = test_pairs[
-        (test_pairs["_wr"] >= wratio_lower) & (test_pairs["_wr"] < wratio_upper)
-    ].drop(columns=["_wr"]).reset_index(drop=True)
+    train_pairs = (
+        train_pairs[(train_pairs["_wr"] >= wratio_lower) & (train_pairs["_wr"] < wratio_upper)]
+        .drop(columns=["_wr"])
+        .reset_index(drop=True)
+    )
+    test_pairs = (
+        test_pairs[(test_pairs["_wr"] >= wratio_lower) & (test_pairs["_wr"] < wratio_upper)]
+        .drop(columns=["_wr"])
+        .reset_index(drop=True)
+    )
     log.info(
         "AVC group split: train=%d (pos=%d), test=%d (pos=%d).",
-        len(train_pairs), train_pairs["to_link"].sum(),
-        len(test_pairs), test_pairs["to_link"].sum(),
+        len(train_pairs),
+        train_pairs["to_link"].sum(),
+        len(test_pairs),
+        test_pairs["to_link"].sum(),
     )
     return train_pairs, test_pairs
 
@@ -986,21 +1080,25 @@ def _dispatch_data_build(
     if data_source == "mixed":
         return _build_mixed_training_data(
             test_size=test_size,
-            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+            wratio_lower=wratio_lower,
+            wratio_upper=wratio_upper,
         )
     if data_source == "avc":
         if split_strategy == "group":
             return _build_avc_group_split(
                 test_size=test_size,
-                wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+                wratio_lower=wratio_lower,
+                wratio_upper=wratio_upper,
             )
         return build_training_data(
-            test_size=test_size, random_state=RANDOM_STATE,
+            test_size=test_size,
+            random_state=RANDOM_STATE,
         )
     # Cross-domain experiments: train on external, test on AVC
     if test_source == "avc-full":
         test_pairs = _build_avc_full_test(
-            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+            wratio_lower=wratio_lower,
+            wratio_upper=wratio_upper,
         )
     else:
         raise RuntimeError(
@@ -1009,26 +1107,31 @@ def _dispatch_data_build(
         )
     if data_source == "mbdb":
         train_pairs = _build_mbdb_training_data(
-            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+            wratio_lower=wratio_lower,
+            wratio_upper=wratio_upper,
         )
     elif data_source == "mbdb-max":
         train_pairs = _build_mbdb_max_training_data(
-            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+            wratio_lower=wratio_lower,
+            wratio_upper=wratio_upper,
         )
     elif data_source == "dbscan-capped":
         train_pairs = _build_dbscan_capped_training_data(
             cluster_cap=cluster_cap or 30,
             neg_ratio=neg_ratio or 10,
-            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+            wratio_lower=wratio_lower,
+            wratio_upper=wratio_upper,
         )
     elif data_source == "dbscan" and neg_matching == "distribution":
         train_pairs = _build_feature_sep_training_data(
             neg_count=neg_count,
-            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+            wratio_lower=wratio_lower,
+            wratio_upper=wratio_upper,
         )
     elif data_source == "dbscan":
         train_pairs = _build_dbscan_training_data(
-            wratio_lower=wratio_lower, wratio_upper=wratio_upper,
+            wratio_lower=wratio_lower,
+            wratio_upper=wratio_upper,
         )
     else:
         raise RuntimeError(f"Unknown data_source: {data_source}")
@@ -1039,20 +1142,39 @@ def _dispatch_data_build(
 # Feature separation constants (Exp 8)
 # ═════════════════════════════════════════════════════════════════════════════
 _WHOLE_STRING_FEATURES = [
-    "ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio",
-    "WRatio", "QRatio", "norm_levenshtein", "jaro_winkler",
-    "length_ratio", "abs_len_diff",
+    "ratio",
+    "partial_ratio",
+    "token_sort_ratio",
+    "token_set_ratio",
+    "WRatio",
+    "QRatio",
+    "norm_levenshtein",
+    "jaro_winkler",
+    "length_ratio",
+    "abs_len_diff",
 ]
 _NON_WS_FEATURES = [
-    "token_count_diff", "token_jaccard", "shared_token_ratio",
-    "lcs_token_len", "token_order_displacement",
-    "bigram_jaccard", "trigram_jaccard",
-    "edit_inserts", "edit_deletes", "edit_replaces",
-    "shared_prefix_len", "shared_suffix_len", "script_mismatch",
+    "token_count_diff",
+    "token_jaccard",
+    "shared_token_ratio",
+    "lcs_token_len",
+    "token_order_displacement",
+    "bigram_jaccard",
+    "trigram_jaccard",
+    "edit_inserts",
+    "edit_deletes",
+    "edit_replaces",
+    "shared_prefix_len",
+    "shared_suffix_len",
+    "script_mismatch",
 ]
 _WS_SIM_SCORES = [
-    "ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio",
-    "WRatio", "QRatio",
+    "ratio",
+    "partial_ratio",
+    "token_sort_ratio",
+    "token_set_ratio",
+    "WRatio",
+    "QRatio",
 ]
 
 
@@ -1253,7 +1375,10 @@ def _cv_evaluate(
 # GPU-safe fitting wrapper
 # ═════════════════════════════════════════════════════════════════════════════
 def _fit_with_gpu_fallback(
-    pipeline: Pipeline, X, y, device: str,
+    pipeline: Pipeline,
+    X,
+    y,
+    device: str,
 ) -> tuple[Pipeline, str]:
     """Fits the pipeline; retries on CPU if CUDA fails at runtime."""
     try:
@@ -1276,6 +1401,7 @@ def _fit_with_gpu_fallback(
 def _next_experiment_number() -> int:
     """Queries MLflow for the highest logged experiment number and returns n+1."""
     import mlflow
+
     try:
         client = mlflow.tracking.MlflowClient()
         exp = client.get_experiment_by_name(experiment.DEFAULT_EXPERIMENT)
@@ -1386,16 +1512,24 @@ def run_training(
     # ── Step 3: Computing features ─────────────────────────────────────────
     log.info("Computing features for training set...")
     train_df = _compute_features_for_split(
-        train_pairs, features=features, feature_strategy=feature_strategy,
-        catalogue=effective_catalogue, cat_design=effective_cat_design,
-        name_to_albums=name_to_albums, name_to_tracks=name_to_tracks,
+        train_pairs,
+        features=features,
+        feature_strategy=feature_strategy,
+        catalogue=effective_catalogue,
+        cat_design=effective_cat_design,
+        name_to_albums=name_to_albums,
+        name_to_tracks=name_to_tracks,
         group_features=group_features,
     )
     log.info("Computing features for test set...")
     test_df = _compute_features_for_split(
-        test_pairs, features=features, feature_strategy=feature_strategy,
-        catalogue=effective_catalogue, cat_design=effective_cat_design,
-        name_to_albums=name_to_albums, name_to_tracks=name_to_tracks,
+        test_pairs,
+        features=features,
+        feature_strategy=feature_strategy,
+        catalogue=effective_catalogue,
+        cat_design=effective_cat_design,
+        name_to_albums=name_to_albums,
+        name_to_tracks=name_to_tracks,
         group_features=group_features,
     )
     # ── Step 4: Pruning ────────────────────────────────────────────────────
@@ -1405,9 +1539,9 @@ def run_training(
     if feature_strategy == "separated":
         exclude.update(_WHOLE_STRING_FEATURES)
     all_num = [
-        c for c in train_df.columns
-        if c not in exclude
-        and train_df[c].dtype in ("float64", "int64", "float32", "int32")
+        c
+        for c in train_df.columns
+        if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")
     ]
     log.info("Pre-pruning features: %d", len(all_num))
     num_cols = prune_feature_columns(train_df[all_num])
@@ -1421,7 +1555,9 @@ def run_training(
     melo_survived = [c for c in num_cols if c.startswith("melo_")]
     log.info(
         "Post-pruning: %d features (%d disco, %d melo survived).",
-        len(num_cols), len(disco_survived), len(melo_survived),
+        len(num_cols),
+        len(disco_survived),
+        len(melo_survived),
     )
     # ── Step 5: Training and evaluation ────────────────────────────────────
     X_train = train_df[num_cols]
@@ -1432,7 +1568,11 @@ def run_training(
     spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
     log.info(
         "Train: %d | Test: %d | Features: %d | spw: %.2f | device: %s",
-        len(X_train), len(X_test), len(num_cols), spw, device,
+        len(X_train),
+        len(X_test),
+        len(num_cols),
+        spw,
+        device,
     )
     model_catalogue = _build_model_catalogue(spw, device, random_state=RANDOM_STATE)
     if not include_composites:
@@ -1446,39 +1586,41 @@ def run_training(
     experiment.init_experiment()
     results: dict[str, dict[str, float]] = {}
     with experiment.start_run(run_name=parent_name):
-        experiment.log_params({
-            "experiment": exp_num,
-            "experiment_type": "unified_pipeline",
-            "random_state": RANDOM_STATE,
-            "test_size": test_size,
-            "n_folds": n_folds,
-            "wratio_lower": wratio_lower,
-            "wratio_upper": wratio_upper,
-            "catalogue_features": effective_catalogue,
-            "n_features": len(num_cols),
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "train_pos": int(y_train.sum()),
-            "train_neg": int((y_train == 0).sum()),
-            "test_pos": int(y_test.sum()),
-            "test_neg": int((y_test == 0).sum()),
-            "spw": round(spw, 2),
-            "device_probed": device,
-            "model_count": len(model_catalogue),
-            "data_source": data_source,
-            "split_strategy": split_strategy,
-            "test_source": test_source,
-            "feature_tiers": features,
-            "catalogue_source": effective_cat_source,
-            "group_features": "length_stats" if group_features else "none",
-            "catalogue_feature_design": effective_cat_design,
-            "include_composites": include_composites,
-            "feature_strategy": feature_strategy,
-            "neg_matching": neg_matching,
-            "neg_count": neg_count if neg_matching == "distribution" else 0,
-            "cluster_cap": cluster_cap if data_source == "dbscan-capped" else 0,
-            "neg_ratio": neg_ratio if data_source == "dbscan-capped" else 0,
-        })
+        experiment.log_params(
+            {
+                "experiment": exp_num,
+                "experiment_type": "unified_pipeline",
+                "random_state": RANDOM_STATE,
+                "test_size": test_size,
+                "n_folds": n_folds,
+                "wratio_lower": wratio_lower,
+                "wratio_upper": wratio_upper,
+                "catalogue_features": effective_catalogue,
+                "n_features": len(num_cols),
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "train_pos": int(y_train.sum()),
+                "train_neg": int((y_train == 0).sum()),
+                "test_pos": int(y_test.sum()),
+                "test_neg": int((y_test == 0).sum()),
+                "spw": round(spw, 2),
+                "device_probed": device,
+                "model_count": len(model_catalogue),
+                "data_source": data_source,
+                "split_strategy": split_strategy,
+                "test_source": test_source,
+                "feature_tiers": features,
+                "catalogue_source": effective_cat_source,
+                "group_features": "length_stats" if group_features else "none",
+                "catalogue_feature_design": effective_cat_design,
+                "include_composites": include_composites,
+                "feature_strategy": feature_strategy,
+                "neg_matching": neg_matching,
+                "neg_count": neg_count if neg_matching == "distribution" else 0,
+                "cluster_cap": cluster_cap if data_source == "dbscan-capped" else 0,
+                "neg_ratio": neg_ratio if data_source == "dbscan-capped" else 0,
+            }
+        )
         # Logging train/test splits as artefacts
         with tempfile.TemporaryDirectory() as tmpdir:
             train_path = Path(tmpdir) / f"exp{exp_num}_train.parquet"
@@ -1491,14 +1633,19 @@ def run_training(
             log.info("─── Training %s ───", model_name)
             with experiment.start_run(run_name=model_name, nested=True):
                 import mlflow
+
                 mlflow.set_tag("model_type", model_name)
                 safe_params = _safe_get_params(clf)
                 safe_params["device_used"] = device
                 experiment.log_params(safe_params)
                 # Running cross-validation with per-fold tracking
                 cv_metrics = _cv_evaluate(
-                    clf, X_train, y_train, num_cols,
-                    n_folds=n_folds, random_state=RANDOM_STATE,
+                    clf,
+                    X_train,
+                    y_train,
+                    num_cols,
+                    n_folds=n_folds,
+                    random_state=RANDOM_STATE,
                     model_name=model_name,
                 )
                 experiment.log_metrics(cv_metrics)
@@ -1513,7 +1660,10 @@ def run_training(
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     final_pipeline, actual_device = _fit_with_gpu_fallback(
-                        final_pipeline, X_train, y_train, device,
+                        final_pipeline,
+                        X_train,
+                        y_train,
+                        device,
                     )
                 if actual_device != device:
                     experiment.log_params({"device_fallback": actual_device})
@@ -1524,20 +1674,22 @@ def run_training(
                 opt_thr, _ = _optimal_threshold(y_test, y_prob)
                 optimal_m = _eval_at(y_test, y_prob, opt_thr)
                 hiprec_m = _high_precision_threshold(y_test, y_prob)
-                experiment.log_metrics({
-                    "auc": auc,
-                    "default_f1": default_m["f1"],
-                    "default_precision": default_m["precision"],
-                    "default_recall": default_m["recall"],
-                    "opt_threshold": optimal_m["threshold"],
-                    "opt_f1": optimal_m["f1"],
-                    "opt_precision": optimal_m["precision"],
-                    "opt_recall": optimal_m["recall"],
-                    "hiprec_threshold": hiprec_m["threshold"],
-                    "hiprec_f1": hiprec_m["f1"],
-                    "hiprec_precision": hiprec_m["precision"],
-                    "hiprec_recall": hiprec_m["recall"],
-                })
+                experiment.log_metrics(
+                    {
+                        "auc": auc,
+                        "default_f1": default_m["f1"],
+                        "default_precision": default_m["precision"],
+                        "default_recall": default_m["recall"],
+                        "opt_threshold": optimal_m["threshold"],
+                        "opt_f1": optimal_m["f1"],
+                        "opt_precision": optimal_m["precision"],
+                        "opt_recall": optimal_m["recall"],
+                        "hiprec_threshold": hiprec_m["threshold"],
+                        "hiprec_f1": hiprec_m["f1"],
+                        "hiprec_precision": hiprec_m["precision"],
+                        "hiprec_recall": hiprec_m["recall"],
+                    }
+                )
                 results[model_name] = {
                     "auc": auc,
                     "default_f1": default_m["f1"],
@@ -1554,23 +1706,33 @@ def run_training(
                     **cv_metrics,
                 }
                 log.info(
-                    "%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f)"
-                    " | hi-P F1=%.4f (thr=%.3f)",
-                    model_name, auc, default_m["f1"], optimal_m["f1"],
-                    opt_thr, hiprec_m["f1"], hiprec_m["threshold"],
+                    "%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f) | hi-P F1=%.4f (thr=%.3f)",
+                    model_name,
+                    auc,
+                    default_m["f1"],
+                    optimal_m["f1"],
+                    opt_thr,
+                    hiprec_m["f1"],
+                    hiprec_m["threshold"],
                 )
                 # Printing classification report at optimal threshold
                 y_pred_opt = (y_prob >= opt_thr).astype(int)
                 print(f"\n=== {model_name} (optimal thr={opt_thr:.3f}) ===")
-                print(classification_report(
-                    y_test, y_pred_opt, target_names=["no link", "link"],
-                ))
+                print(
+                    classification_report(
+                        y_test,
+                        y_pred_opt,
+                        target_names=["no link", "link"],
+                    )
+                )
                 # Logging artefacts
                 experiment.log_confusion_matrix(y_test, y_pred_opt)
                 experiment.log_feature_importance(final_pipeline, num_cols)
                 X_test_transformed = final_pipeline.named_steps["prep"].transform(X_test)
                 experiment.log_shap_summary(
-                    final_pipeline, X_test_transformed, num_cols,
+                    final_pipeline,
+                    X_test_transformed,
+                    num_cols,
                 )
                 experiment.log_model(final_pipeline)
     # ── Summary table ──────────────────────────────────────────────────────
@@ -1594,7 +1756,9 @@ def run_training(
         )
     print("=" * 130)
     # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
-    best = max(results, key=lambda k: 0.4 * results[k]["hiprec_prec"] + 0.3 * results[k]["hiprec_f1"] + 0.3 * results[k]["auc"])
+    best = max(
+        results, key=lambda k: 0.4 * results[k]["hiprec_prec"] + 0.3 * results[k]["hiprec_f1"] + 0.3 * results[k]["auc"]
+    )
     score = 0.4 * results[best]["hiprec_prec"] + 0.3 * results[best]["hiprec_f1"] + 0.3 * results[best]["auc"]
     print(f"\nBest model by c9r score: {best} (score={score:.4f})")
     return results

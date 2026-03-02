@@ -3,6 +3,7 @@ Centralises MLflow experiment-tracking for c9r model training.
 
 Keeps MLflow concerns out of canon.py so the training logic stays readable.
 """
+
 from __future__ import annotations
 import logging
 from pathlib import Path
@@ -63,9 +64,11 @@ def log_cv_fold(
 def log_confusion_matrix(y_true, y_pred, labels: list[str] | None = None) -> None:
     """Saves a confusion matrix heatmap as an MLflow artefact."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
     cm = confusion_matrix(y_true, y_pred)
     disp = ConfusionMatrixDisplay(cm, display_labels=labels or ["no link", "link"])
     fig, ax = plt.subplots(figsize=(5, 4))
@@ -83,9 +86,11 @@ def log_confusion_matrix(y_true, y_pred, labels: list[str] | None = None) -> Non
 def log_feature_importance(model, feature_names: list[str], top_n: int = 20) -> None:
     """Saves a horizontal bar chart of feature importances as an MLflow artefact."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import numpy as np
+
     # Extracting importances from tree-based models
     if hasattr(model, "feature_importances_"):
         importances = model.feature_importances_
@@ -125,22 +130,20 @@ def _get_shap_estimator(estimator):
     """
     import copy
     from sklearn.ensemble import BaggingClassifier, StackingClassifier, VotingClassifier
+
     # Extracting a tree-based sub-estimator from ensemble wrappers
     if isinstance(estimator, (VotingClassifier, StackingClassifier)):
         for sub in estimator.estimators_:
             if hasattr(sub, "feature_importances_"):
-                log.info("SHAP: using sub-estimator %s from %s.",
-                         type(sub).__name__, type(estimator).__name__)
+                log.info("SHAP: using sub-estimator %s from %s.", type(sub).__name__, type(estimator).__name__)
                 estimator = sub
                 break
         else:
-            log.warning("No tree-based sub-estimator in %s; skipping SHAP.",
-                        type(estimator).__name__)
+            log.warning("No tree-based sub-estimator in %s; skipping SHAP.", type(estimator).__name__)
             return None
     elif isinstance(estimator, BaggingClassifier):
         if estimator.estimators_:
-            log.info("SHAP: using first bagged %s.",
-                     type(estimator.estimators_[0]).__name__)
+            log.info("SHAP: using first bagged %s.", type(estimator.estimators_[0]).__name__)
             estimator = estimator.estimators_[0]
         else:
             log.warning("BaggingClassifier has no fitted estimators; skipping SHAP.")
@@ -161,9 +164,11 @@ def log_shap_summary(model, X_sample, feature_names: list[str]) -> None:
     sub-estimator, and CUDA XGBoost by deep-copying to CPU.
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import pandas as pd
+
     try:
         import shap
     except ImportError:

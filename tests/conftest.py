@@ -1,6 +1,7 @@
 """
 Pytest configuration and shared Parquet-based fixtures for c9r.
 """
+
 import pathlib
 import sys
 import pandas as pd
@@ -17,6 +18,7 @@ def tmp_pq_dir(monkeypatch, tmp_path):
     pq.mkdir()
     import helpers.io as io_mod
     import helpers.query as q_mod
+
     # Mapping of constant name → temp path
     paths = {
         "PQ_DIR": pq,
@@ -74,36 +76,43 @@ def tmp_pq_dir(monkeypatch, tmp_path):
 @pytest.fixture()
 def sample_scrobble_df():
     """Provides a small scrobble DataFrame with UTC timestamps."""
-    return pd.DataFrame({
-        "artist_name": ["Bohren & der Club of Gore", "Ry Cooder", "Bohren & der Club of Gore"],
-        "album_title": ["Sunset Mission", "Paris, Texas", "Sunset Mission"],
-        "track_title": ["Prowler", "Paris, Texas", "Midnight Walker"],
-        "artist_mbid": [
-            "a4074512-87e0-4820-b609-0c4a18142a70",
-            "4d6b954c-3022-4515-966e-30c3e7081bce",
-            "a4074512-87e0-4820-b609-0c4a18142a70",
-        ],
-        "play_time": pd.to_datetime([
-            "2024-01-15 20:00:00",
-            "2024-01-15 20:05:00",
-            "2024-01-15 20:10:00",
-        ], utc=True),
-    })
+    return pd.DataFrame(
+        {
+            "artist_name": ["Bohren & der Club of Gore", "Ry Cooder", "Bohren & der Club of Gore"],
+            "album_title": ["Sunset Mission", "Paris, Texas", "Sunset Mission"],
+            "track_title": ["Prowler", "Paris, Texas", "Midnight Walker"],
+            "artist_mbid": [
+                "a4074512-87e0-4820-b609-0c4a18142a70",
+                "4d6b954c-3022-4515-966e-30c3e7081bce",
+                "a4074512-87e0-4820-b609-0c4a18142a70",
+            ],
+            "play_time": pd.to_datetime(
+                [
+                    "2024-01-15 20:00:00",
+                    "2024-01-15 20:05:00",
+                    "2024-01-15 20:10:00",
+                ],
+                utc=True,
+            ),
+        }
+    )
 
 
 @pytest.fixture()
 def sample_artist_info_df():
     """Provides a small artist_info DataFrame."""
-    return pd.DataFrame({
-        "artist_name": ["Bohren & der Club of Gore", "Ry Cooder"],
-        "mbid": [
-            "a4074512-87e0-4820-b609-0c4a18142a70",
-            "4d6b954c-3022-4515-966e-30c3e7081bce",
-        ],
-        "country": ["DE", "US"],
-        "disambiguation_comment": ["", ""],
-        "aliases": ["", ""],
-    })
+    return pd.DataFrame(
+        {
+            "artist_name": ["Bohren & der Club of Gore", "Ry Cooder"],
+            "mbid": [
+                "a4074512-87e0-4820-b609-0c4a18142a70",
+                "4d6b954c-3022-4515-966e-30c3e7081bce",
+            ],
+            "country": ["DE", "US"],
+            "disambiguation_comment": ["", ""],
+            "aliases": ["", ""],
+        }
+    )
 
 
 @pytest.fixture()
@@ -151,4 +160,3 @@ def temporal_pq(tmp_pq_dir, temporal_scrobble_df):
     """Writes temporal scrobble data into the temp PQ directory."""
     temporal_scrobble_df.to_parquet(tmp_pq_dir / "scrobble.parquet", index=False)
     return tmp_pq_dir
-

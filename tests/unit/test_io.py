@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.io (Parquet I/O layer).
 """
+
 import pandas as pd
 from helpers.io import (
     append_to_parquet,
@@ -99,40 +100,50 @@ class TestNormaliseScrobbleDf:
 
     def test_renames_lastfm_columns(self):
         """Renames Last.fm API column names to canonical names."""
-        raw = pd.DataFrame({
-            "Artist": ["Test"],
-            "Album": ["A"],
-            "Song": ["S"],
-            "mbid": ["a4074512-87e0-4820-b609-0c4a18142a70"],
-            "uts": [1705348800],
-        })
+        raw = pd.DataFrame(
+            {
+                "Artist": ["Test"],
+                "Album": ["A"],
+                "Song": ["S"],
+                "mbid": ["a4074512-87e0-4820-b609-0c4a18142a70"],
+                "uts": [1705348800],
+            }
+        )
         result = normalise_scrobble_df(raw)
         assert list(result.columns) == [
-            "artist_name", "album_title", "track_title", "artist_mbid", "play_time",
+            "artist_name",
+            "album_title",
+            "track_title",
+            "artist_mbid",
+            "play_time",
         ]
         assert result["artist_name"].iloc[0] == "Test"
 
     def test_cleans_invalid_mbid(self):
         """Replaces non-UUID artist_mbid with NaN."""
-        raw = pd.DataFrame({
-            "artist_name": ["X"],
-            "album_title": ["A"],
-            "track_title": ["T"],
-            "artist_mbid": ["not-a-uuid"],
-            "uts": [1705348800],
-        })
+        raw = pd.DataFrame(
+            {
+                "artist_name": ["X"],
+                "album_title": ["A"],
+                "track_title": ["T"],
+                "artist_mbid": ["not-a-uuid"],
+                "uts": [1705348800],
+            }
+        )
         result = normalise_scrobble_df(raw)
         assert pd.isna(result["artist_mbid"].iloc[0])
 
     def test_deduplicates_rows(self):
         """Drops duplicate scrobbles based on artist+track+time."""
-        raw = pd.DataFrame({
-            "artist_name": ["A", "A"],
-            "album_title": ["Al", "Al"],
-            "track_title": ["T", "T"],
-            "artist_mbid": [None, None],
-            "uts": [1705348800, 1705348800],
-        })
+        raw = pd.DataFrame(
+            {
+                "artist_name": ["A", "A"],
+                "album_title": ["Al", "Al"],
+                "track_title": ["T", "T"],
+                "artist_mbid": [None, None],
+                "uts": [1705348800, 1705348800],
+            }
+        )
         result = normalise_scrobble_df(raw)
         assert len(result) == 1
 
@@ -143,6 +154,7 @@ class TestIngestScrobbles:
     def test_ingests_and_returns_count(self, tmp_pq_dir, sample_scrobble_df):
         """Normalises and writes scrobbles to partitioned layout; returns row count."""
         from helpers.io import scrobble_data_exists
+
         n = ingest_scrobbles(sample_scrobble_df)
         assert n == 3
         assert scrobble_data_exists()
@@ -158,6 +170,7 @@ class TestLatestScrobbleTs:
     def test_returns_max_timestamp(self, tmp_pq_dir, sample_scrobble_df):
         """Returns the Unix timestamp of the newest scrobble."""
         import helpers.io as io_mod
+
         sample_scrobble_df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         ts = latest_scrobble_ts()
         assert isinstance(ts, int)

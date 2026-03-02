@@ -8,6 +8,7 @@ pickle can select the subset it needs via ``pipeline.feature_names_in_``.
 The single entry point is ``compute_inference_features(a, b)``.
 A convenience ``load_model()`` returns the persisted sklearn Pipeline.
 """
+
 from __future__ import annotations
 import itertools
 import logging
@@ -31,8 +32,12 @@ SOLO_DISCO_PQ = PQ_DIR / "mbdb_discography_solo.parquet"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH = PROJECT_ROOT / "ML" / "lightgbm_best.pkl"
 _SIM_SCORES = [
-    "ratio", "partial_ratio", "token_sort_ratio",
-    "token_set_ratio", "WRatio", "QRatio",
+    "ratio",
+    "partial_ratio",
+    "token_sort_ratio",
+    "token_set_ratio",
+    "WRatio",
+    "QRatio",
 ]
 
 # ── Session-level catalogue cache ─────────────────────────────────────────────
@@ -72,26 +77,17 @@ def _load_catalogue_cache() -> tuple[dict[str, list[str]], dict[str, list[str]]]
         log.warning("No scrobble data — catalogue features will be zeros.")
         _catalogue_cache = {"albums": {}, "tracks": {}}
         return {}, {}
-    has_mbid = (
-        scrobbles["artist_mbid"].notna()
-        & (scrobbles["artist_mbid"].str.len() == 36)
-    )
+    has_mbid = scrobbles["artist_mbid"].notna() & (scrobbles["artist_mbid"].str.len() == 36)
     name_to_mbid: dict[str, str] = (
-        scrobbles[has_mbid]
-        .drop_duplicates("artist_name")
-        .set_index("artist_name")["artist_mbid"]
+        scrobbles[has_mbid].drop_duplicates("artist_name").set_index("artist_name")["artist_mbid"].to_dict()
+    )
+    clean = scrobbles[scrobbles["album_title"].notna() & (scrobbles["album_title"].str.strip() != "")]
+    scrobble_albums = clean.groupby("artist_name")["album_title"].apply(lambda x: sorted(set(x.unique()))).to_dict()
+    scrobble_tracks = (
+        scrobbles.groupby("artist_name")["track_title"]
+        .apply(lambda x: sorted({t for t in x.dropna().unique() if t.strip()}))
         .to_dict()
     )
-    clean = scrobbles[
-        scrobbles["album_title"].notna()
-        & (scrobbles["album_title"].str.strip() != "")
-    ]
-    scrobble_albums = clean.groupby("artist_name")["album_title"].apply(
-        lambda x: sorted(set(x.unique()))
-    ).to_dict()
-    scrobble_tracks = scrobbles.groupby("artist_name")["track_title"].apply(
-        lambda x: sorted({t for t in x.dropna().unique() if t.strip()})
-    ).to_dict()
     # Building unified lookups
     all_names = set(scrobbles["artist_name"].unique())
     name_to_albums: dict[str, list[str]] = {}
@@ -108,7 +104,8 @@ def _load_catalogue_cache() -> tuple[dict[str, list[str]], dict[str, list[str]]]
     _catalogue_cache = {"albums": name_to_albums, "tracks": name_to_tracks}
     log.info(
         "Catalogue cache loaded: %d album entries, %d track entries.",
-        len(name_to_albums), len(name_to_tracks),
+        len(name_to_albums),
+        len(name_to_tracks),
     )
     return name_to_albums, name_to_tracks
 
@@ -129,7 +126,9 @@ def _jaccard(a: set, b: set) -> float:
 
 
 def _fuzzy_overlap(
-    list_a: list[str], list_b: list[str], threshold: int,
+    list_a: list[str],
+    list_b: list[str],
+    threshold: int,
 ) -> tuple[int, float]:
     """Counts items in list_a that fuzzy-match any item in list_b.
 
@@ -140,7 +139,10 @@ def _fuzzy_overlap(
     matched = 0
     for a in list_a:
         result = process.extractOne(
-            a, list_b, scorer=fuzz.token_sort_ratio, score_cutoff=threshold,
+            a,
+            list_b,
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=threshold,
         )
         if result is not None:
             matched += 1

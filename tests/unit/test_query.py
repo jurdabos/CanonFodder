@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.query (DuckDB analytics layer).
 """
+
 import pandas as pd
 from helpers.query import (
     artist_country_stats,
@@ -77,21 +78,26 @@ class TestCanonicalResolution:
     def _write_variant_fixtures(pq_dir):
         """Writes scrobble + post-propagation artist_info with aliases."""
         import helpers.io as io_mod
-        scrobbles = pd.DataFrame({
-            "artist_name": ["Bohren & der Club of Gore"] * 3 + ["Bohren und der Club of Gore"] * 2 + ["Autechre"],
-            "album_title": ["Sunset Mission"] * 3 + ["Black Earth"] * 2 + ["Amber"],
-            "track_title": [f"Track {i}" for i in range(6)],
-            "artist_mbid": ["a4074512-87e0-4820-b609-0c4a18142a70"] * 5 + ["410c9baf-5469-44f6-9852-826524b80c61"],
-            "play_time": pd.date_range("2024-06-01", periods=6, freq="5min", tz="UTC"),
-        })
+
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["Bohren & der Club of Gore"] * 3 + ["Bohren und der Club of Gore"] * 2 + ["Autechre"],
+                "album_title": ["Sunset Mission"] * 3 + ["Black Earth"] * 2 + ["Amber"],
+                "track_title": [f"Track {i}" for i in range(6)],
+                "artist_mbid": ["a4074512-87e0-4820-b609-0c4a18142a70"] * 5 + ["410c9baf-5469-44f6-9852-826524b80c61"],
+                "play_time": pd.date_range("2024-06-01", periods=6, freq="5min", tz="UTC"),
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
-        ai = pd.DataFrame({
-            "artist_name": ["Bohren & der Club of Gore", "Autechre"],
-            "mbid": ["a4074512-87e0-4820-b609-0c4a18142a70", "410c9baf-5469-44f6-9852-826524b80c61"],
-            "country": ["DE", "GB"],
-            "disambiguation_comment": ["", ""],
-            "aliases": ["Bohren und der Club of Gore", ""],
-        })
+        ai = pd.DataFrame(
+            {
+                "artist_name": ["Bohren & der Club of Gore", "Autechre"],
+                "mbid": ["a4074512-87e0-4820-b609-0c4a18142a70", "410c9baf-5469-44f6-9852-826524b80c61"],
+                "country": ["DE", "GB"],
+                "disambiguation_comment": ["", ""],
+                "aliases": ["Bohren und der Club of Gore", ""],
+            }
+        )
         ai.to_parquet(io_mod.ARTIST_INFO_PQ, index=False)
 
     def test_top_artists_merges_variants(self, tmp_pq_dir):
@@ -136,6 +142,7 @@ class TestArtistCountryStats:
     def test_returns_empty_when_no_info(self, tmp_pq_dir, sample_scrobble_df):
         """Returns empty when artist_info is missing."""
         import helpers.io as io_mod
+
         sample_scrobble_df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         df = artist_country_stats()
         assert df.empty
@@ -148,24 +155,32 @@ class TestUserCountryScrobbleCounts:
     def _write_uc_fixtures(pq_dir):
         """Writes scrobble + uc parquets for user-country testing."""
         import helpers.io as io_mod
-        scrobbles = pd.DataFrame({
-            "artist_name": ["Alpha", "Beta", "Alpha", "Gamma"],
-            "album_title": ["A1", "B1", "A2", "G1"],
-            "track_title": ["T1", "T2", "T3", "T4"],
-            "artist_mbid": [None, None, None, None],
-            "play_time": pd.to_datetime([
-                "2020-03-15 10:00:00",
-                "2020-03-20 11:00:00",
-                "2022-06-01 14:00:00",
-                "2023-01-10 09:00:00",
-            ], utc=True),
-        })
+
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["Alpha", "Beta", "Alpha", "Gamma"],
+                "album_title": ["A1", "B1", "A2", "G1"],
+                "track_title": ["T1", "T2", "T3", "T4"],
+                "artist_mbid": [None, None, None, None],
+                "play_time": pd.to_datetime(
+                    [
+                        "2020-03-15 10:00:00",
+                        "2020-03-20 11:00:00",
+                        "2022-06-01 14:00:00",
+                        "2023-01-10 09:00:00",
+                    ],
+                    utc=True,
+                ),
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
-        uc = pd.DataFrame({
-            "country_code": ["DE", "HU"],
-            "start_date": pd.to_datetime(["2019-01-01", "2022-01-01"]).date,
-            "end_date": [pd.Timestamp("2021-12-31").date(), None],
-        })
+        uc = pd.DataFrame(
+            {
+                "country_code": ["DE", "HU"],
+                "start_date": pd.to_datetime(["2019-01-01", "2022-01-01"]).date,
+                "end_date": [pd.Timestamp("2021-12-31").date(), None],
+            }
+        )
         uc.to_parquet(io_mod.UC_PQ, index=False)
 
     def test_returns_counts_by_country(self, tmp_pq_dir):
@@ -195,6 +210,7 @@ class TestUserCountryScrobbleCounts:
     def test_returns_empty_when_no_uc(self, tmp_pq_dir, sample_scrobble_df):
         """Returns empty when uc.parquet is missing."""
         import helpers.io as io_mod
+
         sample_scrobble_df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
         df = user_country_scrobble_counts()
         assert df.empty
@@ -212,25 +228,33 @@ class TestUserCountryTopEntities:
     def _write_uc_fixtures(pq_dir):
         """Writes scrobble + uc parquets with varied albums/tracks."""
         import helpers.io as io_mod
-        scrobbles = pd.DataFrame({
-            "artist_name": ["Alpha", "Alpha", "Beta", "Gamma", "Gamma"],
-            "album_title": ["A1", "A1", "B1", "G1", "G2"],
-            "track_title": ["T1", "T2", "T3", "T4", "T5"],
-            "artist_mbid": [None] * 5,
-            "play_time": pd.to_datetime([
-                "2020-03-15 10:00:00",
-                "2020-03-16 10:00:00",
-                "2020-03-17 11:00:00",
-                "2022-06-01 14:00:00",
-                "2022-06-02 14:00:00",
-            ], utc=True),
-        })
+
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["Alpha", "Alpha", "Beta", "Gamma", "Gamma"],
+                "album_title": ["A1", "A1", "B1", "G1", "G2"],
+                "track_title": ["T1", "T2", "T3", "T4", "T5"],
+                "artist_mbid": [None] * 5,
+                "play_time": pd.to_datetime(
+                    [
+                        "2020-03-15 10:00:00",
+                        "2020-03-16 10:00:00",
+                        "2020-03-17 11:00:00",
+                        "2022-06-01 14:00:00",
+                        "2022-06-02 14:00:00",
+                    ],
+                    utc=True,
+                ),
+            }
+        )
         scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
-        uc = pd.DataFrame({
-            "country_code": ["DE", "HU"],
-            "start_date": pd.to_datetime(["2019-01-01", "2022-01-01"]).date,
-            "end_date": [pd.Timestamp("2021-12-31").date(), None],
-        })
+        uc = pd.DataFrame(
+            {
+                "country_code": ["DE", "HU"],
+                "start_date": pd.to_datetime(["2019-01-01", "2022-01-01"]).date,
+                "end_date": [pd.Timestamp("2021-12-31").date(), None],
+            }
+        )
         uc.to_parquet(io_mod.UC_PQ, index=False)
 
     def test_returns_three_categories(self, tmp_pq_dir):

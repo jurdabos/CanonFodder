@@ -2,6 +2,7 @@
 Tests for the canonisation workflow modules:
 corefunc/canonize.py and corefunc/avc_seed.py.
 """
+
 from __future__ import annotations
 import hashlib
 from unittest.mock import patch
@@ -52,22 +53,26 @@ class TestAvcSummary:
         """Returns empty list when avc.parquet does not exist."""
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import avc_summary
+
             assert avc_summary() == []
 
     def test_returns_rows_with_correct_keys(self, tmp_pq):
         """Returns dicts with the expected keys."""
         sig = _sig(["Beatles", "The Beatles"])
-        rows = [{
-            "artist_variants_hash": _hash(sig),
-            "artist_variants_text": sig,
-            "canonical_name": "The Beatles",
-            "to_link": True,
-            "comment": "",
-            "stamp": "2025-05-02T16:49:38+00:00",
-        }]
+        rows = [
+            {
+                "artist_variants_hash": _hash(sig),
+                "artist_variants_text": sig,
+                "canonical_name": "The Beatles",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:49:38+00:00",
+            }
+        ]
         _make_avc_df(rows).to_parquet(tmp_pq["avc"], index=False)
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import avc_summary
+
             result = avc_summary()
             assert len(result) == 1
             assert result[0]["to_link_display"] == "✓"
@@ -79,14 +84,27 @@ class TestAvcSummary:
         sig1 = _sig(["A", "B"])
         sig2 = _sig(["C", "D"])
         rows = [
-            {"artist_variants_hash": _hash(sig1), "artist_variants_text": sig1,
-             "canonical_name": "A", "to_link": True, "comment": "", "stamp": "2025-05-02T16:00:00+00:00"},
-            {"artist_variants_hash": _hash(sig2), "artist_variants_text": sig2,
-             "canonical_name": "", "to_link": pd.NA, "comment": "", "stamp": "2025-05-02T17:00:00+00:00"},
+            {
+                "artist_variants_hash": _hash(sig1),
+                "artist_variants_text": sig1,
+                "canonical_name": "A",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:00:00+00:00",
+            },
+            {
+                "artist_variants_hash": _hash(sig2),
+                "artist_variants_text": sig2,
+                "canonical_name": "",
+                "to_link": pd.NA,
+                "comment": "",
+                "stamp": "2025-05-02T17:00:00+00:00",
+            },
         ]
         _make_avc_df(rows).to_parquet(tmp_pq["avc"], index=False)
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import avc_summary
+
             decided = avc_summary(decided_only=True)
             assert len(decided) == 1
             assert decided[0]["to_link_display"] == "✓"
@@ -96,14 +114,27 @@ class TestAvcSummary:
         sig1 = _sig(["A", "B"])
         sig2 = _sig(["C", "D"])
         rows = [
-            {"artist_variants_hash": _hash(sig1), "artist_variants_text": sig1,
-             "canonical_name": "A", "to_link": True, "comment": "", "stamp": "2025-05-02T16:00:00+00:00"},
-            {"artist_variants_hash": _hash(sig2), "artist_variants_text": sig2,
-             "canonical_name": "", "to_link": pd.NA, "comment": "", "stamp": "2025-05-02T17:00:00+00:00"},
+            {
+                "artist_variants_hash": _hash(sig1),
+                "artist_variants_text": sig1,
+                "canonical_name": "A",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:00:00+00:00",
+            },
+            {
+                "artist_variants_hash": _hash(sig2),
+                "artist_variants_text": sig2,
+                "canonical_name": "",
+                "to_link": pd.NA,
+                "comment": "",
+                "stamp": "2025-05-02T17:00:00+00:00",
+            },
         ]
         _make_avc_df(rows).to_parquet(tmp_pq["avc"], index=False)
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import avc_summary
+
             undecided = avc_summary(undecided_only=True)
             assert len(undecided) == 1
             assert undecided[0]["to_link_display"] == "?"
@@ -116,14 +147,16 @@ class TestPropagateAvc:
     def test_appends_aliases_without_overwriting(self, tmp_pq):
         """Appends variant names to existing aliases."""
         sig = _sig(["Bjork", "Björk"])
-        avc_rows = [{
-            "artist_variants_hash": _hash(sig),
-            "artist_variants_text": sig,
-            "canonical_name": "Björk",
-            "to_link": True,
-            "comment": "",
-            "stamp": "2025-05-02T16:52:43+00:00",
-        }]
+        avc_rows = [
+            {
+                "artist_variants_hash": _hash(sig),
+                "artist_variants_text": sig,
+                "canonical_name": "Björk",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:52:43+00:00",
+            }
+        ]
         ai_rows = [
             {"artist_name": "Björk", "mbid": "abc", "country": "IS", "disambiguation_comment": "", "aliases": "Byork"},
         ]
@@ -134,6 +167,7 @@ class TestPropagateAvc:
             patch("corefunc.canon.workflow.ARTIST_INFO_PQ", tmp_pq["ai"]),
         ):
             from corefunc.canon.workflow import propagate_avc
+
             result = propagate_avc()
             assert result["aliases_added"] == 1
             # Verifying the alias was appended, not overwritten
@@ -145,14 +179,16 @@ class TestPropagateAvc:
     def test_renames_variant_row_to_canonical(self, tmp_pq):
         """Renames artist_info rows from variant to canonical name."""
         sig = _sig(["Beatles", "The Beatles"])
-        avc_rows = [{
-            "artist_variants_hash": _hash(sig),
-            "artist_variants_text": sig,
-            "canonical_name": "The Beatles",
-            "to_link": True,
-            "comment": "",
-            "stamp": "2025-05-02T16:49:38+00:00",
-        }]
+        avc_rows = [
+            {
+                "artist_variants_hash": _hash(sig),
+                "artist_variants_text": sig,
+                "canonical_name": "The Beatles",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:49:38+00:00",
+            }
+        ]
         ai_rows = [
             {"artist_name": "Beatles", "mbid": "xyz", "country": "GB", "disambiguation_comment": "", "aliases": ""},
         ]
@@ -163,6 +199,7 @@ class TestPropagateAvc:
             patch("corefunc.canon.workflow.ARTIST_INFO_PQ", tmp_pq["ai"]),
         ):
             from corefunc.canon.workflow import propagate_avc
+
             result = propagate_avc()
             assert result["updated"] >= 1
             ai_after = pd.read_parquet(tmp_pq["ai"])
@@ -172,14 +209,16 @@ class TestPropagateAvc:
     def test_skip_rows_are_ignored(self, tmp_pq):
         """Rows with to_link=False are not propagated."""
         sig = _sig(["Battles", "The Beatniks"])
-        avc_rows = [{
-            "artist_variants_hash": _hash(sig),
-            "artist_variants_text": sig,
-            "canonical_name": "__SKIP__",
-            "to_link": False,
-            "comment": "",
-            "stamp": "2025-05-02T16:49:46+00:00",
-        }]
+        avc_rows = [
+            {
+                "artist_variants_hash": _hash(sig),
+                "artist_variants_text": sig,
+                "canonical_name": "__SKIP__",
+                "to_link": False,
+                "comment": "",
+                "stamp": "2025-05-02T16:49:46+00:00",
+            }
+        ]
         ai_rows = [
             {"artist_name": "Battles", "mbid": "", "country": "", "disambiguation_comment": "", "aliases": ""},
         ]
@@ -190,6 +229,7 @@ class TestPropagateAvc:
             patch("corefunc.canon.workflow.ARTIST_INFO_PQ", tmp_pq["ai"]),
         ):
             from corefunc.canon.workflow import propagate_avc
+
             result = propagate_avc()
             assert result["updated"] == 0
             assert result["aliases_added"] == 0
@@ -205,16 +245,35 @@ class TestUndecidedRows:
         sig2 = _sig(["C", "D"])
         sig3 = _sig(["E", "F"])
         rows = [
-            {"artist_variants_hash": _hash(sig1), "artist_variants_text": sig1,
-             "canonical_name": "A", "to_link": True, "comment": "", "stamp": "2025-05-02T16:00:00+00:00"},
-            {"artist_variants_hash": _hash(sig2), "artist_variants_text": sig2,
-             "canonical_name": "__SKIP__", "to_link": False, "comment": "", "stamp": "2025-05-02T17:00:00+00:00"},
-            {"artist_variants_hash": _hash(sig3), "artist_variants_text": sig3,
-             "canonical_name": "", "to_link": pd.NA, "comment": "", "stamp": "2025-05-02T18:00:00+00:00"},
+            {
+                "artist_variants_hash": _hash(sig1),
+                "artist_variants_text": sig1,
+                "canonical_name": "A",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:00:00+00:00",
+            },
+            {
+                "artist_variants_hash": _hash(sig2),
+                "artist_variants_text": sig2,
+                "canonical_name": "__SKIP__",
+                "to_link": False,
+                "comment": "",
+                "stamp": "2025-05-02T17:00:00+00:00",
+            },
+            {
+                "artist_variants_hash": _hash(sig3),
+                "artist_variants_text": sig3,
+                "canonical_name": "",
+                "to_link": pd.NA,
+                "comment": "",
+                "stamp": "2025-05-02T18:00:00+00:00",
+            },
         ]
         _make_avc_df(rows).to_parquet(tmp_pq["avc"], index=False)
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import undecided_rows
+
             result = undecided_rows()
             assert len(result) == 1
             assert result.iloc[0]["artist_variants_text"] == sig3
@@ -222,13 +281,20 @@ class TestUndecidedRows:
     def test_returns_empty_when_all_decided(self, tmp_pq):
         """Returns empty DataFrame when no rows are undecided."""
         sig = _sig(["X", "Y"])
-        rows = [{
-            "artist_variants_hash": _hash(sig), "artist_variants_text": sig,
-            "canonical_name": "X", "to_link": True, "comment": "", "stamp": "2025-05-02T16:00:00+00:00",
-        }]
+        rows = [
+            {
+                "artist_variants_hash": _hash(sig),
+                "artist_variants_text": sig,
+                "canonical_name": "X",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:00:00+00:00",
+            }
+        ]
         _make_avc_df(rows).to_parquet(tmp_pq["avc"], index=False)
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import undecided_rows
+
             assert undecided_rows().empty
 
 
@@ -240,13 +306,20 @@ class TestUpdateAvcDecision:
         """Updates to_link and canonical_name for a given hash."""
         sig = _sig(["M", "N"])
         h = _hash(sig)
-        rows = [{
-            "artist_variants_hash": h, "artist_variants_text": sig,
-            "canonical_name": "", "to_link": pd.NA, "comment": "", "stamp": "2025-05-02T16:00:00+00:00",
-        }]
+        rows = [
+            {
+                "artist_variants_hash": h,
+                "artist_variants_text": sig,
+                "canonical_name": "",
+                "to_link": pd.NA,
+                "comment": "",
+                "stamp": "2025-05-02T16:00:00+00:00",
+            }
+        ]
         _make_avc_df(rows).to_parquet(tmp_pq["avc"], index=False)
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import update_avc_decision
+
             update_avc_decision(h, True, "M", "test comment")
             after = pd.read_parquet(tmp_pq["avc"])
             row = after.iloc[0]
@@ -262,10 +335,16 @@ class TestBuildExclusionSet:
     def test_includes_variants_and_aliases(self, tmp_pq):
         """Collects names from both avc and artist_info."""
         sig = _sig(["Beatles", "The Beatles"])
-        avc_rows = [{
-            "artist_variants_hash": _hash(sig), "artist_variants_text": sig,
-            "canonical_name": "The Beatles", "to_link": True, "comment": "", "stamp": "2025-05-02T16:00:00+00:00",
-        }]
+        avc_rows = [
+            {
+                "artist_variants_hash": _hash(sig),
+                "artist_variants_text": sig,
+                "canonical_name": "The Beatles",
+                "to_link": True,
+                "comment": "",
+                "stamp": "2025-05-02T16:00:00+00:00",
+            }
+        ]
         ai_rows = [
             {"artist_name": "Björk", "mbid": "", "country": "", "disambiguation_comment": "", "aliases": "Bjork{Byork"},
         ]
@@ -276,6 +355,7 @@ class TestBuildExclusionSet:
             patch("corefunc.canon.workflow.ARTIST_INFO_PQ", tmp_pq["ai"]),
         ):
             from corefunc.canon.workflow import _build_exclusion_set
+
             excl = _build_exclusion_set()
             assert "Beatles" in excl
             assert "The Beatles" in excl
@@ -295,6 +375,7 @@ class TestWriteNewCandidates:
         ]
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import write_new_candidates
+
             n = write_new_candidates(candidates)
             assert n == 1
             df = pd.read_parquet(tmp_pq["avc"])
@@ -305,6 +386,7 @@ class TestWriteNewCandidates:
         """Returns 0 and writes nothing when candidate list is empty."""
         with patch("corefunc.canon.workflow.AVC_PQ", tmp_pq["avc"]):
             from corefunc.canon.workflow import write_new_candidates
+
             assert write_new_candidates([]) == 0
 
 
@@ -322,6 +404,7 @@ INSERT INTO `artist_variants_canonized` VALUES ('aaa','Beatles{The Beatles',1,'T
         avc_pq = tmp_path / "avc.parquet"
         with patch("corefunc.avc_seed.AVC_PQ", avc_pq):
             from corefunc.avc_seed import seed_avc_from_sql
+
             n = seed_avc_from_sql(sql_file)
             assert n == 2
             df = pd.read_parquet(avc_pq)
@@ -339,6 +422,7 @@ INSERT INTO `artist_variants_canonized` VALUES ('ccc','Trevor Dunn\\'s Trio-Conv
         avc_pq = tmp_path / "avc.parquet"
         with patch("corefunc.avc_seed.AVC_PQ", avc_pq):
             from corefunc.avc_seed import seed_avc_from_sql
+
             n = seed_avc_from_sql(sql_file)
             assert n == 1
             df = pd.read_parquet(avc_pq)

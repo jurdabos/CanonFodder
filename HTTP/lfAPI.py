@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import pandas as pd
 from dotenv import load_dotenv
+
 load_dotenv()
 from HTTP.client import make_request, USER_AGENT  # noqa: E402
 from helpers.io import C_PQ, UC_PQ, read_parquet, dump_parquet, read_scrobble_df, dump_scrobble_df  # noqa: E402
+
 log = logging.getLogger("lfAPI")
 LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/"
 HERE = Path(__file__).resolve().parent
@@ -73,27 +75,26 @@ def _normalise_tracks(tracks: list[dict]) -> list[dict]:
         # Skip "now playing" tracks (no timestamp)
         if "date" not in track:
             continue
-        artist = track.get(
-            "artist",
-            {}
-        ) if isinstance(track.get("artist"), dict) else {"#text": track.get("artist", "")}
+        artist = (
+            track.get("artist", {}) if isinstance(track.get("artist"), dict) else {"#text": track.get("artist", "")}
+        )
         album = track.get("album", {}) if isinstance(track.get("album"), dict) else {"#text": track.get("album", "")}
-        normalized.append({
-            "Artist": artist.get("#text", ""),
-            "Song": track.get("name", ""),
-            "Album": album.get("#text", ""),
-            "uts": int(track.get("date", {}).get("uts", 0)),
-            "artist_mbid": artist.get("mbid") if isinstance(artist, dict) else None
-        })
+        normalized.append(
+            {
+                "Artist": artist.get("#text", ""),
+                "Song": track.get("name", ""),
+                "Album": album.get("#text", ""),
+                "uts": int(track.get("date", {}).get("uts", 0)),
+                "artist_mbid": artist.get("mbid") if isinstance(artist, dict) else None,
+            }
+        )
     return normalized
 
 
 # --------------------------------------------------------------
 # Thin last.fm-specific wrapper around HTTP.client's make_request
 # --------------------------------------------------------------
-def _paginate(method: str,
-              progress_callback: Optional[Callable[[int, int, str], None]] = None,
-              **params) -> list[dict]:
+def _paginate(method: str, progress_callback: Optional[Callable[[int, int, str], None]] = None, **params) -> list[dict]:
     """
     Handle pagination for Last.fm API calls.
     Returns all pages of results combined into a single list.
@@ -128,14 +129,9 @@ def _paginate(method: str,
         params_with_page = params.copy()
         params_with_page["page"] = page
         # Use lastfm_request with progress_callback
-        response = lastfm_request(
-            method,
-            page=page,
-            progress_callback=progress_callback,
-            **params
-        )
+        response = lastfm_request(method, page=page, progress_callback=progress_callback, **params)
         # Extracting the result key based on method
-        result_key = method.split('.')[-1]
+        result_key = method.split(".")[-1]
         if method == "user.getRecentTracks":
             items = response.get("recenttracks", {}).get("track", [])
             attr = response.get("recenttracks", {}).get("@attr", {})
@@ -219,7 +215,7 @@ def enrich_artist_mbids(progress_callback: Optional[Callable] = None) -> dict:
         artist_mbid_map: dict[str, str] = {}
         batch_size = 50
         for i in range(0, len(artists), batch_size):
-            batch = artists[i:i + batch_size]
+            batch = artists[i : i + batch_size]
             if progress_callback:
                 pct = 5 + (i / len(artists)) * 45
                 progress_callback("Fetching", pct, f"Getting MBIDs {i + 1}-{i + len(batch)} of {len(artists)}")
@@ -297,8 +293,9 @@ def fetch_misc_data_from_lastfmapi(user: str | None = None) -> None:
 # --------------------------------------------------------------
 # Get pages of recent tracks from last.fm API until first DB hit
 # --------------------------------------------------------------
-def fetch_recent(limit: int = 1000, 
-                 progress_callback: Optional[Callable[[int, int, str], None]] = None) -> pd.DataFrame:
+def fetch_recent(
+    limit: int = 1000, progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> pd.DataFrame:
     """
     Return the user's most recent scrobbles as a DataFrame.
     Columns match the naming expected by `_prepare_scrobble_rows`.
@@ -324,7 +321,7 @@ def fetch_recent(limit: int = 1000,
     tracks = get_recent_tracks_with_progress(
         username=username,
         limit=min(200, limit),  # Last.fm API limit per page is 200
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
     )
 
     # Normalize tracks and truncate to requested limit
@@ -336,8 +333,9 @@ def fetch_recent(limit: int = 1000,
 # --------------------------------------------------------------
 # Get all pages of recent tracks from last.fm API to df
 # --------------------------------------------------------------
-def fetch_recent_tracks_all_pages(user: str, 
-                                  progress_callback: Optional[Callable[[int, int, str], None]] = None) -> pd.DataFrame:
+def fetch_recent_tracks_all_pages(
+    user: str, progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> pd.DataFrame:
     """
     Return all scrobbles for *user* as a DataFrame.
 
@@ -357,7 +355,7 @@ def fetch_recent_tracks_all_pages(user: str,
     tracks = get_recent_tracks_with_progress(
         username=user,
         limit=200,  # Last.fm API limit per page is 200
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
     )
 
     if not tracks:
@@ -371,9 +369,9 @@ def fetch_recent_tracks_all_pages(user: str,
     return pd.DataFrame(batch)
 
 
-def fetch_scrobbles_since(username: str,
-                          since: Optional[int] = None,
-                          progress_callback: Optional[Callable[[int, int, str], None]] = None) -> pd.DataFrame:
+def fetch_scrobbles_since(
+    username: str, since: Optional[int] = None, progress_callback: Optional[Callable[[int, int, str], None]] = None
+) -> pd.DataFrame:
     """
     Fetch every scrobble after `since` (Unix time, exclusive).
     When `since` is None we fetch the complete history.
@@ -399,7 +397,7 @@ def fetch_scrobbles_since(username: str,
         username=username,
         limit=PER_PAGE,
         from_timestamp=since + 1 if since is not None else None,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
     )
 
     # Process the tracks into the expected format
@@ -419,7 +417,7 @@ def fetch_scrobbles_since(username: str,
                 "Song": t.get("name", ""),
                 "Album": album.get("#text", ""),
                 "uts": int(t.get("date", {}).get("uts", 0)),
-                "artist_mbid": artist.get("mbid") if isinstance(artist, dict) else None
+                "artist_mbid": artist.get("mbid") if isinstance(artist, dict) else None,
             }
         )
 
@@ -454,11 +452,13 @@ def iso2_for_en_name(en_name: str) -> str | None:
     match = df.loc[df["en_name"].str.lower() == en_name.lower(), "ISO2"]
     if not match.empty:
         return str(match.iloc[0])
+
     # Fuzzy fallback (edit distance ≤ 1)
     def _very_close(a: str, b: str) -> bool:
         if abs(len(a) - len(b)) > 1:
             return False
         return sum(c1 != c2 for c1, c2 in zip(a.lower(), b.lower())) <= 1
+
     for _, row in df.iterrows():
         if _very_close(str(row["en_name"]), en_name):
             return str(row["ISO2"])
@@ -466,16 +466,16 @@ def iso2_for_en_name(en_name: str) -> str | None:
 
 
 def lastfm_request(
-        method: str,
-        *,
-        authed: bool = False,
-        user: Optional[str] = None,
-        page: Optional[int] = None,
-        limit: Optional[int] = None,
-        from_ts: Optional[int] = None,  # Added parameter to handle 'from' timestamp
-        timeout: int = 10,  # Unused parameter kept for API consistency  # noqa: ARG001
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-        **kwargs  # Additional parameters
+    method: str,
+    *,
+    authed: bool = False,
+    user: Optional[str] = None,
+    page: Optional[int] = None,
+    limit: Optional[int] = None,
+    from_ts: Optional[int] = None,  # Added parameter to handle 'from' timestamp
+    timeout: int = 10,  # Unused parameter kept for API consistency  # noqa: ARG001
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    **kwargs,  # Additional parameters
 ) -> Dict[str, Any]:
     """
     Thin wrapper around the Last.fm REST endpoint.
@@ -551,10 +551,7 @@ def lastfm_request(
             msg += f" from timestamp: {q['from']}"
         progress_callback(page, page, msg)
 
-    r = make_request(url=LASTFM_API_URL,
-                     params=q,
-                     headers={"User-Agent": USER_AGENT},
-                     max_retries=10)
+    r = make_request(url=LASTFM_API_URL, params=q, headers={"User-Agent": USER_AGENT}, max_retries=10)
     if r is None:  # network totally failed
         raise LastFMError(-1, "empty HTTP response", LASTFM_API_URL)
     # Try JSON decoding no matter what the status code was
@@ -567,15 +564,11 @@ def lastfm_request(
     if r.status_code != 200:
         # Did Last.fm still give us a structured error?
         if isinstance(json_body, dict) and "error" in json_body:
-            raise LastFMError(json_body["error"],
-                              json_body.get("message", "No message"),
-                              r.url)
+            raise LastFMError(json_body["error"], json_body.get("message", "No message"), r.url)
         raise LastFMError(-1, f"HTTP {r.status_code}", r.url)
     # 200 OK, but application-level error?
     if isinstance(json_body, dict) and "error" in json_body:
-        raise LastFMError(json_body["error"],
-                          json_body.get("message", "No message"),
-                          r.url)
+        raise LastFMError(json_body["error"], json_body.get("message", "No message"), r.url)
     return json_body  # type: ignore[return-value]
 
 
@@ -584,8 +577,8 @@ def get_recent_tracks_with_progress(
     limit: int = 200,
     from_timestamp: Optional[int] = None,
     to_timestamp: Optional[int] = None,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
-        ) -> List[Dict[str, Any]]:
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> List[Dict[str, Any]]:
     """
     Enhanced version of get_recent_tracks that provides detailed progress updates.
     Parameters
@@ -613,12 +606,7 @@ def get_recent_tracks_with_progress(
         params["to"] = to_timestamp
     # First request to get total pages
     response = lastfm_request(
-        "user.getRecentTracks",
-        user=username,
-        page=1,
-        limit=limit,
-        progress_callback=progress_callback,
-        **params
+        "user.getRecentTracks", user=username, page=1, limit=limit, progress_callback=progress_callback, **params
     )
     # Extracting metadata
     metadata = response.get("recenttracks", {}).get("@attr", {})
@@ -636,15 +624,11 @@ def get_recent_tracks_with_progress(
     # Fetching remaining pages
     for page in range(2, total_pages + 1):
         if progress_callback:
-            progress_callback(page, total_pages, f"Fetching page {page} of {total_pages} ({len(all_tracks)}/{
-                total_tracks} tracks)")
+            progress_callback(
+                page, total_pages, f"Fetching page {page} of {total_pages} ({len(all_tracks)}/{total_tracks} tracks)"
+            )
         response = lastfm_request(
-            "user.getRecentTracks",
-            user=username,
-            page=page,
-            limit=limit,
-            progress_callback=progress_callback,
-            **params
+            "user.getRecentTracks", user=username, page=page, limit=limit, progress_callback=progress_callback, **params
         )
         tracks = response.get("recenttracks", {}).get("track", [])
         if not isinstance(tracks, list):

@@ -4,6 +4,7 @@ Extracts artist name variant training pairs from the local MusicBrainz mirror.
 Produces a supplementary gold standard (gs_mb.parquet) with positive pairs
 from MB aliases and negative pairs from same-name / fuzzy-similar artists.
 """
+
 from __future__ import annotations
 import logging
 import pandas as pd
@@ -86,7 +87,8 @@ LIMIT {cross_limit}"""
     combined = combined.dropna(subset=["variant_a", "variant_b"])
     # Deduplicating pairs (order-insensitive)
     combined["_key"] = combined.apply(
-        lambda r: tuple(sorted([str(r["variant_a"]), str(r["variant_b"])])), axis=1,
+        lambda r: tuple(sorted([str(r["variant_a"]), str(r["variant_b"])])),
+        axis=1,
     )
     combined = combined.drop_duplicates(subset=["_key"]).drop(columns=["_key"])
     log.info("Extracted %d total positive pairs from MBDB.", len(combined))
@@ -180,8 +182,11 @@ LIMIT {pool_size}"""
         if len(rows) >= limit:
             break
         matches = process.extract(
-            name, names, scorer=fuzz.WRatio,
-            score_cutoff=similarity_floor, limit=5,
+            name,
+            names,
+            scorer=fuzz.WRatio,
+            score_cutoff=similarity_floor,
+            limit=5,
         )
         for match_name, _score, _ in matches:
             if match_name == name:
@@ -193,12 +198,14 @@ LIMIT {pool_size}"""
             if pair in pairs_seen:
                 continue
             pairs_seen.add(pair)
-            rows.append({
-                "variant_a": name,
-                "variant_b": match_name,
-                "to_link": False,
-                "source": "mb_neg_fuzzy",
-            })
+            rows.append(
+                {
+                    "variant_a": name,
+                    "variant_b": match_name,
+                    "to_link": False,
+                    "source": "mb_neg_fuzzy",
+                }
+            )
             if len(rows) >= limit:
                 break
     if not rows:
@@ -219,13 +226,12 @@ def augment_gold_standard(
     Returns the total number of rows written.
     """
     if not check_local_mb():
-        raise RuntimeError(
-            "Cannot reach local MusicBrainz mirror. "
-            "Is musicbrainz-docker running?"
-        )
+        raise RuntimeError("Cannot reach local MusicBrainz mirror. Is musicbrainz-docker running?")
     log.info(
         "Augmenting gold standard: pos_limit=%d, neg_limit=%d, similarity_floor=%d",
-        pos_limit, neg_limit, similarity_floor,
+        pos_limit,
+        neg_limit,
+        similarity_floor,
     )
     positives = extract_positive_pairs(limit=pos_limit)
     negatives = extract_negative_pairs(limit=neg_limit, similarity_floor=similarity_floor)

@@ -7,6 +7,7 @@ GET  /health          – liveness / readiness probe
 POST /predict         – single-pair prediction
 POST /predict_batch   – batch prediction
 """
+
 from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Union
@@ -46,16 +47,19 @@ def _preprocess(data: Dict[str, Union[float, int]]) -> pd.DataFrame:
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
 class PredictRequest(BaseModel):
     """Represents a single prediction request."""
+
     data: Dict[str, Union[float, int]]
 
 
 class PredictBatchRequest(BaseModel):
     """Represents a batch prediction request."""
+
     data: List[Dict[str, Union[float, int]]]
 
 
 class PredictResponse(BaseModel):
     """Represents a single prediction response."""
+
     prediction: int
     probability: float
     should_link: bool

@@ -1,6 +1,7 @@
 """
 Tests for uncovered CLI commands and helper functions in main.py.
 """
+
 import pandas as pd
 import pytest
 from click.testing import CliRunner
@@ -31,8 +32,20 @@ class TestAvcShowCommand:
     def test_show_with_rows(self, mock_summary, runner, tmp_pq_dir):
         """Displays avc rows in table format."""
         mock_summary.return_value = [
-            {"idx": 1, "to_link_display": "✓", "canonical_name": "Alpha", "stamp": "2024-01-01", "artist_variants_text": "Alpha{Alfa"},
-            {"idx": 2, "to_link_display": "?", "canonical_name": "", "stamp": "2024-01-02", "artist_variants_text": "Beta{Beto"},
+            {
+                "idx": 1,
+                "to_link_display": "✓",
+                "canonical_name": "Alpha",
+                "stamp": "2024-01-01",
+                "artist_variants_text": "Alpha{Alfa",
+            },
+            {
+                "idx": 2,
+                "to_link_display": "?",
+                "canonical_name": "",
+                "stamp": "2024-01-02",
+                "artist_variants_text": "Beta{Beto",
+            },
         ]
         result = runner.invoke(cli, ["canon", "avc", "show"])
         assert result.exit_code == 0
@@ -238,8 +251,11 @@ class TestSchemaCommands:
     def test_schema_show(self, mock_validate, runner, populated_pq):
         """Displays schema version info for existing files."""
         mock_validate.return_value = {
-            "table": "scrobble", "file_version": "v2", "current_version": "v2",
-            "status": "up-to-date", "missing_cols": [],
+            "table": "scrobble",
+            "file_version": "v2",
+            "current_version": "v2",
+            "status": "up-to-date",
+            "missing_cols": [],
         }
         result = runner.invoke(cli, ["schema", "show"])
         assert result.exit_code == 0
@@ -321,12 +337,23 @@ class TestProfileCommands:
     def test_overview(self, mock_stats, runner, tmp_pq_dir):
         """Displays eagle-level stats."""
         mock_stats.return_value = {
-            "total_scrobbles": 10000, "unique_artists": 500, "unique_tracks": 3000,
-            "unique_albums": 800, "earliest": "2020-01-01", "latest": "2025-02-28",
+            "total_scrobbles": 10000,
+            "unique_artists": 500,
+            "unique_tracks": 3000,
+            "unique_albums": 800,
+            "earliest": "2020-01-01",
+            "latest": "2025-02-28",
             "yearly": [(2024, 5000), (2025, 5000)],
             "distribution": {
-                "min": 1, "q25": 2, "median": 5, "q75": 20, "max": 500,
-                "mean": 15.0, "singletons": 100, "lte5": 250, "total_artists": 500,
+                "min": 1,
+                "q25": 2,
+                "median": 5,
+                "q75": 20,
+                "max": 500,
+                "mean": 15.0,
+                "singletons": 100,
+                "lte5": 250,
+                "total_artists": 500,
             },
         }
         result = runner.invoke(cli, ["profile", "overview"])
@@ -345,8 +372,11 @@ class TestProfileCommands:
     def test_variants(self, mock_vc, runner, tmp_pq_dir):
         """Displays variant candidates."""
         mock_vc.return_value = [
-            {"variants": [{"name": "Alpha", "plays": 50}, {"name": "Alfa", "plays": 30}],
-             "combined_count": 80, "similarity": 92},
+            {
+                "variants": [{"name": "Alpha", "plays": 50}, {"name": "Alfa", "plays": 30}],
+                "combined_count": 80,
+                "similarity": 92,
+            },
         ]
         result = runner.invoke(cli, ["profile", "variants"])
         assert result.exit_code == 0
@@ -402,7 +432,8 @@ class TestProfileCommands:
     def test_companions(self, mock_tc, runner, tmp_pq_dir):
         """Displays trusted companions."""
         mock_tc.return_value = {
-            "years": [2023, 2024, 2025], "year_count": 3,
+            "years": [2023, 2024, 2025],
+            "year_count": 3,
             "companions": [
                 {"name": "Alpha", "total_plays": 300, "mean_per_year": 100, "std_dev": 5.0},
             ],
@@ -456,9 +487,16 @@ class TestProfileCommands:
     def test_streaks(self, mock_sa, runner, tmp_pq_dir):
         """Displays streak statistics."""
         mock_sa.return_value = {
-            "total_active_days": 365, "first_day": "2024-01-01", "last_day": "2025-02-28",
-            "longest_streak": 30, "longest_streak_start": "2024-06-01", "longest_streak_end": "2024-06-30",
-            "current_streak": 5, "longest_gap_days": 3, "longest_gap_start": "2024-03-01", "longest_gap_end": "2024-03-03",
+            "total_active_days": 365,
+            "first_day": "2024-01-01",
+            "last_day": "2025-02-28",
+            "longest_streak": 30,
+            "longest_streak_start": "2024-06-01",
+            "longest_streak_end": "2024-06-30",
+            "current_streak": 5,
+            "longest_gap_days": 3,
+            "longest_gap_start": "2024-03-01",
+            "longest_gap_end": "2024-03-03",
         }
         result = runner.invoke(cli, ["profile", "streaks"])
         assert result.exit_code == 0
@@ -487,12 +525,17 @@ class TestProfileCommands:
         mock_pvs.return_value = {
             "total_countries": 10,
             "by_absolute": [
-                {"country": "US", "play_count": 5000, "artist_count": 100,
-                 "population": 330000000, "per_million": 15.15, "name": "United States"},
+                {
+                    "country": "US",
+                    "play_count": 5000,
+                    "artist_count": 100,
+                    "population": 330000000,
+                    "per_million": 15.15,
+                    "name": "United States",
+                },
             ],
             "by_per_capita": [
-                {"country": "IS", "per_million": 500.0, "play_count": 200,
-                 "population": 400000, "name": "Iceland"},
+                {"country": "IS", "per_million": 500.0, "play_count": 200, "population": 400000, "name": "Iceland"},
             ],
         }
         result = runner.invoke(cli, ["profile", "population"])
@@ -504,7 +547,8 @@ class TestProfileCommands:
     def test_where(self, mock_ucp, runner, tmp_pq_dir):
         """Displays user country profile."""
         mock_ucp.return_value = {
-            "total_scrobbles_matched": 5000, "unique_countries": 3,
+            "total_scrobbles_matched": 5000,
+            "unique_countries": 3,
             "countries": [
                 {"country": "DE", "scrobble_count": 3000, "pct": 60.0, "name": "Germany"},
             ],
@@ -517,12 +561,18 @@ class TestProfileCommands:
     def test_uc(self, mock_ucmp, runner, tmp_pq_dir):
         """Displays medal tables per user country."""
         mock_ucmp.return_value = {
-            "top_n": 3, "ucn": 1,
-            "countries": [{
-                "country": "DE", "name": "Germany", "scrobble_count": 5000,
-                "artists": [{"rank": 1, "name": "Alpha", "plays": 300}],
-                "albums": [], "tracks": [],
-            }],
+            "top_n": 3,
+            "ucn": 1,
+            "countries": [
+                {
+                    "country": "DE",
+                    "name": "Germany",
+                    "scrobble_count": 5000,
+                    "artists": [{"rank": 1, "name": "Alpha", "plays": 300}],
+                    "albums": [],
+                    "tracks": [],
+                }
+            ],
         }
         result = runner.invoke(cli, ["profile", "uc"])
         assert result.exit_code == 0
@@ -540,8 +590,12 @@ class TestFlowCommand:
         """Runs Prefect flow and reports results."""
         mock_mod = MagicMock()
         mock_mod.weekly_ingest_flow.return_value = {
-            "new_scrobbles": 100, "enriched_artists": 10, "flagged_for_review": 2,
-            "avc_propagated": 1, "gs_rows_written": 50, "models_trained": 1,
+            "new_scrobbles": 100,
+            "enriched_artists": 10,
+            "flagged_for_review": 2,
+            "avc_propagated": 1,
+            "gs_rows_written": 50,
+            "models_trained": 1,
         }
         with patch.dict("sys.modules", {"flows.cf_ingest": mock_mod}):
             result = runner.invoke(cli, ["flow"])
@@ -558,6 +612,7 @@ class TestParseRankRanges:
     def test_valid(self):
         """Parses well-formed rank range string."""
         from main import _parse_rank_ranges
+
         result = _parse_rank_ranges("(1,5),(27,29)")
         assert result == [(1, 5), (27, 29)]
 
@@ -565,6 +620,7 @@ class TestParseRankRanges:
         """Raises BadParameter for unparseable input."""
         import click
         from main import _parse_rank_ranges
+
         with pytest.raises(click.BadParameter):
             _parse_rank_ranges("foobar")
 
@@ -572,6 +628,7 @@ class TestParseRankRanges:
         """Raises BadParameter for end < start."""
         import click
         from main import _parse_rank_ranges
+
         with pytest.raises(click.BadParameter, match="Invalid range"):
             _parse_rank_ranges("(5,2)")
 
@@ -582,15 +639,18 @@ class TestEchoRangedEntries:
     def test_filters_by_range(self, runner):
         """Prints only entries within specified ranges."""
         from main import _echo_ranged_entries, cli
+
         entries = [
             {"rank": 1, "name": "A", "plays": 100},
             {"rank": 2, "name": "B", "plays": 90},
             {"rank": 5, "name": "C", "plays": 50},
         ]
+
         # Using CliRunner to capture output
         @cli.command("_test_echo", hidden=True)
         def _test():
             _echo_ranged_entries(entries, [(1, 2)])
+
         result = runner.invoke(cli, ["_test_echo"])
         assert "A" in result.output
         assert "B" in result.output
@@ -603,27 +663,36 @@ class TestFormatQaHelpers:
     def test_format_qa_src_both(self):
         """Joins source and target with '/'."""
         from main import _format_qa_src
+
         assert _format_qa_src({"source": "lastfm", "target": "scrobble"}) == "lastfm/scrobble"
 
     def test_format_qa_src_none(self):
         """Returns empty string when both are None."""
         from main import _format_qa_src
+
         assert _format_qa_src({"source": None, "target": None}) == ""
 
     def test_format_qa_src_nan(self):
         """Handles NaN values."""
         from main import _format_qa_src
+
         assert _format_qa_src({"source": float("nan"), "target": "scrobble"}) == "scrobble"
 
     def test_format_qa_row_scrobble(self):
         """Formats a scrobble QA row."""
         from main import _format_qa_row
+
         row = {
-            "passed": True, "timestamp": "2024-01-01T00:00:00",
-            "source": "lastfm", "target": "scrobble",
-            "row_count": 1000, "duplicate_pct": 0.5,
-            "mbid_fill_rate": 80, "hash_fill_rate": 0,
-            "bad_char_rows": 0, "unique_countries": None,
+            "passed": True,
+            "timestamp": "2024-01-01T00:00:00",
+            "source": "lastfm",
+            "target": "scrobble",
+            "row_count": 1000,
+            "duplicate_pct": 0.5,
+            "mbid_fill_rate": 80,
+            "hash_fill_rate": 0,
+            "bad_char_rows": 0,
+            "unique_countries": None,
         }
         line = _format_qa_row(row)
         assert "PASS" in line
@@ -632,12 +701,18 @@ class TestFormatQaHelpers:
     def test_format_qa_row_user_country(self):
         """Formats a user_country QA row."""
         from main import _format_qa_row
+
         row = {
-            "passed": True, "timestamp": "2024-01-01T00:00:00",
-            "source": None, "target": "user_country",
-            "row_count": 5, "duplicate_pct": 0,
-            "mbid_fill_rate": 0, "hash_fill_rate": 0,
-            "bad_char_rows": 0, "unique_countries": 3,
+            "passed": True,
+            "timestamp": "2024-01-01T00:00:00",
+            "source": None,
+            "target": "user_country",
+            "row_count": 5,
+            "duplicate_pct": 0,
+            "mbid_fill_rate": 0,
+            "hash_fill_rate": 0,
+            "bad_char_rows": 0,
+            "unique_countries": 3,
         }
         line = _format_qa_row(row)
         assert "countries=3" in line
@@ -645,13 +720,20 @@ class TestFormatQaHelpers:
     def test_format_qa_row_artist_info(self):
         """Formats an artist_info QA row."""
         from main import _format_qa_row
+
         row = {
-            "passed": False, "timestamp": "2024-01-01T00:00:00",
-            "source": None, "target": "artist_info",
-            "row_count": 200, "duplicate_pct": 1.5,
-            "mbid_fill_rate": 90, "hash_fill_rate": 0,
-            "bad_char_rows": 2, "unique_countries": None,
-            "country_fill_rate": 85, "disambiguation_fill_rate": 10,
+            "passed": False,
+            "timestamp": "2024-01-01T00:00:00",
+            "source": None,
+            "target": "artist_info",
+            "row_count": 200,
+            "duplicate_pct": 1.5,
+            "mbid_fill_rate": 90,
+            "hash_fill_rate": 0,
+            "bad_char_rows": 2,
+            "unique_countries": None,
+            "country_fill_rate": 85,
+            "disambiguation_fill_rate": 10,
             "aliases_fill_rate": 30,
         }
         line = _format_qa_row(row)
@@ -661,12 +743,18 @@ class TestFormatQaHelpers:
     def test_format_qa_row_gs_mb(self):
         """Formats a gs_mb QA row."""
         from main import _format_qa_row
+
         row = {
-            "passed": True, "timestamp": "2024-01-01T00:00:00",
-            "source": None, "target": "gs_mb",
-            "row_count": 500, "duplicate_pct": 0,
-            "mbid_fill_rate": 0, "hash_fill_rate": 0,
-            "bad_char_rows": 0, "unique_countries": None,
+            "passed": True,
+            "timestamp": "2024-01-01T00:00:00",
+            "source": None,
+            "target": "gs_mb",
+            "row_count": 500,
+            "duplicate_pct": 0,
+            "mbid_fill_rate": 0,
+            "hash_fill_rate": 0,
+            "bad_char_rows": 0,
+            "unique_countries": None,
         }
         line = _format_qa_row(row)
         assert "500" in line
@@ -674,12 +762,18 @@ class TestFormatQaHelpers:
     def test_format_qa_row_avc(self):
         """Formats an avc QA row."""
         from main import _format_qa_row
+
         row = {
-            "passed": True, "timestamp": "2024-01-01T00:00:00",
-            "source": None, "target": "artist_variants_canonized",
-            "row_count": 30, "duplicate_pct": 0,
-            "mbid_fill_rate": 0, "hash_fill_rate": 95,
-            "bad_char_rows": 0, "unique_countries": None,
+            "passed": True,
+            "timestamp": "2024-01-01T00:00:00",
+            "source": None,
+            "target": "artist_variants_canonized",
+            "row_count": 30,
+            "duplicate_pct": 0,
+            "mbid_fill_rate": 0,
+            "hash_fill_rate": 95,
+            "bad_char_rows": 0,
+            "unique_countries": None,
         }
         line = _format_qa_row(row)
         assert "hash_fill=95%" in line
@@ -691,11 +785,13 @@ class TestParseCountryCodes:
     def test_parenthesised(self):
         """Parses '(HU, ES, DK)' into upper-cased codes."""
         from main import _parse_country_codes
+
         assert _parse_country_codes("(HU, ES, DK)") == ["HU", "ES", "DK"]
 
     def test_comma_separated(self):
         """Parses 'hu,es' without parens."""
         from main import _parse_country_codes
+
         assert _parse_country_codes("hu,es") == ["HU", "ES"]
 
 
@@ -705,12 +801,14 @@ class TestParseCategories:
     def test_valid(self):
         """Parses '(artist, track)'."""
         from main import _parse_categories
+
         assert _parse_categories("(artist, track)") == ["artists", "tracks"]
 
     def test_invalid_raises(self):
         """Raises BadParameter for unknown categories."""
         import click
         from main import _parse_categories
+
         with pytest.raises(click.BadParameter):
             _parse_categories("(invalid)")
 
@@ -749,7 +847,8 @@ class TestQaFailurePaths:
     def test_qa_gs_mb_full(self, mock_qa, runner, tmp_pq_dir):
         """Displays full gs_mb report including label dist and sources."""
         mock_qa.return_value = {
-            "row_count": 1000, "passed": True,
+            "row_count": 1000,
+            "passed": True,
             "schema": {"pass": True, "missing": [], "unexpected": []},
             "nulls": {},
             "duplicates": {"duplicate_count": 0, "duplicate_pct": 0.0, "pass": True},
@@ -774,7 +873,8 @@ class TestQaFailurePaths:
     def test_qa_a_i_enrichment(self, mock_qa, runner, tmp_pq_dir):
         """Displays enrichment fill rates for artist_info."""
         mock_qa.return_value = {
-            "row_count": 100, "passed": True,
+            "row_count": 100,
+            "passed": True,
             "schema": {"pass": True, "missing": [], "unexpected": []},
             "nulls": {"artist_name": {"null_pct": 0, "empty_pct": 0}},
             "duplicates": {"duplicate_count": 0, "duplicate_pct": 0.0, "pass": True},
@@ -795,7 +895,8 @@ class TestQaFailurePaths:
     def test_qa_scrobble_schema_fail(self, mock_qa, runner, tmp_pq_dir):
         """Reports schema failures."""
         mock_qa.return_value = {
-            "row_count": 100, "passed": False,
+            "row_count": 100,
+            "passed": False,
             "schema": {"pass": False, "missing": ["col_x"], "unexpected": ["col_y"]},
             "nulls": {"artist_name": {"null_pct": 5, "empty_pct": 2}},
             "timestamps": {"pass": False, "issues": ["Future timestamps detected"]},

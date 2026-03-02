@@ -1,6 +1,7 @@
 """
 Unit tests for HTTP.mbAPI (MusicBrainz API helpers).
 """
+
 from unittest.mock import patch
 import pandas as pd
 import pytest
@@ -29,6 +30,7 @@ class TestCacheArtist:
     def test_caches_basic_data(self, tmp_pq_dir):
         """Writes artist data to Parquet."""
         import helpers.io as io_mod
+
         data = {"name": "TestArtist", "id": "mbid-1", "country": "DE", "disambiguation": "rock"}
         _cache_artist(data)
         df = pd.read_parquet(io_mod.ARTIST_INFO_PQ)
@@ -39,8 +41,11 @@ class TestCacheArtist:
     def test_handles_alias_list(self, tmp_pq_dir):
         """Processes aliases from 'alias-list' format."""
         import helpers.io as io_mod
+
         data = {
-            "name": "AliasArtist", "id": "mbid-2", "country": "",
+            "name": "AliasArtist",
+            "id": "mbid-2",
+            "country": "",
             "disambiguation": "",
             "alias-list": [{"alias": "Alt1"}, {"alias": "Alt2"}],
         }
@@ -51,6 +56,7 @@ class TestCacheArtist:
     def test_skips_when_no_name(self, tmp_pq_dir):
         """Does nothing when artist name is missing."""
         import helpers.io as io_mod
+
         _cache_artist({"id": "mbid-3"})
         assert not io_mod.ARTIST_INFO_PQ.exists()
 

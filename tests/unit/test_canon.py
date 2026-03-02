@@ -1,6 +1,7 @@
 """
 Unit tests for corefunc.canon — gold standard builder, LightGBM pipeline.
 """
+
 from unittest.mock import patch, MagicMock
 import numpy as np
 import pandas as pd
@@ -14,12 +15,14 @@ def _make_avc(n: int = 40) -> pd.DataFrame:
     for i in range(n):
         a = f"Artist {i}"
         b = f"Artis {i}" if i % 2 == 0 else f"Unrelated {i}"
-        rows.append({
-            "artist_variants": f"{a}{{{b}",
-            "canonical_name": a,
-            "to_link": i % 2 == 0,
-            "comment": "",
-        })
+        rows.append(
+            {
+                "artist_variants": f"{a}{{{b}",
+                "canonical_name": a,
+                "to_link": i % 2 == 0,
+                "comment": "",
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -67,6 +70,7 @@ class TestTrainModel:
         mock_exp.start_run.return_value.__enter__ = MagicMock()
         mock_exp.start_run.return_value.__exit__ = MagicMock(return_value=False)
         from sklearn.pipeline import Pipeline
+
         model = train_model(test_size=0.3, random_state=42)
         assert isinstance(model, Pipeline)
         assert "clf" in model.named_steps
@@ -87,6 +91,7 @@ class TestEvaluate:
         from sklearn.preprocessing import RobustScaler
         from lightgbm import LGBMClassifier
         from sklearn.compose import ColumnTransformer
+
         # Building a tiny trained model
         rng = np.random.default_rng(99)
         X = pd.DataFrame({"f1": rng.random(20), "f2": rng.random(20)})

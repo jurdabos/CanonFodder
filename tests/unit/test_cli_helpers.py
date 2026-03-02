@@ -1,6 +1,7 @@
 """
 Unit tests for helpers.cli (pure utility functions) and additional CLI/query tests.
 """
+
 import pandas as pd
 import pytest
 from helpers.cli import (
@@ -108,14 +109,17 @@ class TestAvcDf:
     def test_reads_existing(self, tmp_pq_dir):
         """Reads an existing avc.parquet file."""
         import helpers.io as io_mod
-        data = pd.DataFrame({
-            "artist_variants_hash": ["h1"],
-            "artist_variants_text": ["A{B"],
-            "canonical_name": ["A"],
-            "to_link": [True],
-            "comment": [""],
-            "stamp": pd.to_datetime(["2024-01-01"], utc=True),
-        })
+
+        data = pd.DataFrame(
+            {
+                "artist_variants_hash": ["h1"],
+                "artist_variants_text": ["A{B"],
+                "canonical_name": ["A"],
+                "to_link": [True],
+                "comment": [""],
+                "stamp": pd.to_datetime(["2024-01-01"], utc=True),
+            }
+        )
         data.to_parquet(io_mod.AVC_PQ, index=False)
         df = avc_df()
         assert len(df) == 1
