@@ -1,0 +1,15 @@
+[Unit]
+Description=c9r Prefect flow server
+After=network.target
+
+[Service]
+Type=simple
+User=blai
+WorkingDirectory=/home/blai/CanonFodder
+ExecStart=/home/blai/CanonFodder/.venv/bin/python flows/cf_ingest.py
+Restart=on-failure
+RestartSec=30
+EnvironmentFile=/home/blai/CanonFodder/.env
+
+[Install]
+WantedBy=multi-user.target

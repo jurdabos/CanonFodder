@@ -902,10 +902,12 @@ class TestDispatchDataBuild:
         )
         mock_train.assert_called_once()
 
-    def test_unknown_data_source_raises(self):
+    @patch("corefunc.canon.trainer._build_avc_full_test")
+    def test_unknown_data_source_raises(self, mock_test):
         """Raises for unknown data_source."""
         from corefunc.canon.trainer import _dispatch_data_build
 
+        mock_test.return_value = pd.DataFrame()
         with pytest.raises(RuntimeError, match="Unknown data_source"):
             _dispatch_data_build(
                 data_source="imaginary",

@@ -17,6 +17,7 @@ from HTTP.lfAPI import (
 class TestLastfmRequest:
     """Tests the lastfm_request wrapper."""
 
+    @patch("HTTP.lfAPI.LASTFM_API_KEY", "fake-key")
     @patch("HTTP.lfAPI.make_request")
     def test_success(self, mock_req):
         """Returns JSON payload on 200 OK."""
@@ -27,6 +28,7 @@ class TestLastfmRequest:
         result = lastfm_request("user.getInfo", user="test")
         assert result["user"]["name"] == "test"
 
+    @patch("HTTP.lfAPI.LASTFM_API_KEY", "fake-key")
     @patch("HTTP.lfAPI.make_request")
     def test_raises_on_none_response(self, mock_req):
         """Raises LastFMError when make_request returns None."""
