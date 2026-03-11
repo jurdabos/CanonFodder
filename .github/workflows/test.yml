@@ -76,4 +76,4 @@ jobs:
     - name: Run integration tests
       run: >
         uv run pytest tests/integration/ tests/test_prefect_flow.py
-        -v --tb=short
+        -v --tb=short --no-cov
