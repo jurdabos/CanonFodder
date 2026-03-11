@@ -1,0 +1,16 @@
+# WSL
+/home/blai/CanonFodder/.venv/bin/python -c "
+import duckdb
+con = duckdb.connect()
+df = con.execute(\"SELECT * FROM '/home/blai/CanonFodder/PQ/c.parquet'\").df()
+print(list(df.columns))
+print(df.to_string())
+con.close()
+"
+
+# PWSH
+uv run python -c 'import duckdb
+p = r"D:\adat\canonfodder\pq_backup_20260224\avc.parquet"
+df = duckdb.read_parquet(p).df()
+print(df.columns.tolist())
+print(df.head(20).to_string(index=False))'

@@ -1,0 +1,38 @@
+
+MLflow is purely observational — it wraps around existing code rather than replacing it. We keep full control of the pipeline and just add logging calls.
+
+1. Native sklearn + XGBoost autologging
+A single mlflow.autolog() call captures hyperparameters, metrics, feature importance, and the serialised model — no changes to our training logic.
+2. Per-fold tracking
+For our stratified k-fold CV, we can log each fold's precision/recall/F1/AUC as nested runs under a parent experiment run. This gives us the per-fold metrics table our Movement 4 calls for.
+3. Artifact storage
+SHAP plots, feature importance charts, the pruned feature list after correlation dropping, confusion matrices — all logged as artifacts alongside the run.
+4. Model comparison UI
+When we are comparing XGBoost vs Random Forest across hyperparameter grids, the MLflow UI lets us sort/filter/compare runs side-by-side. Essential for the model selection in Movement 3.
+5. Model registry
+When we settle on a champion model, we can register it with a version tag. Our model_server.py can then pull from the registry instead of a hardcoded ML/xgb.json path.
+6. Zero infrastructure
+mlflow ui runs locally, stores everything under an mlruns/ directory. No server needed.
+
+# In canon.py's train_model(), the integration is roughly:
+import mlflow
+mlflow.set_experiment("c9r-record-linkage")
+mlflow.autolog()
+with mlflow.start_run(run_name="xgb-3tier-v1"):
+    mlflow.log_param("feature_tiers", "whole+token+char")
+    mlflow.log_param("pruning_cutoff", cutoff)
+    # ... existing training code ...
+    mlflow.log_metric("auc_test", auc)
+    mlflow.log_artifact("ML/xgb.json")
+
+One addition worth pairing: we shall consider Optuna for hyperparameter search instead of sklearn's GridSearchCV/RandomizedSearchCV. It does Bayesian optimisation (TPE sampler), prunes bad trials early, and has a first-class MLflow integration via OptunaCallback. This would slot cleanly into Movement 3.
+uv add mlflow
+# and optionally
+uv add optuna
+
+Sampling
+Optuna exploits well-established algorithms to perform hyperparameter optimization, progressively reducing the search space, in light of objective values. Examples are gaussian-process-based algorithms (i.e., a gaussian process to model the objective function, tree-structured parzen estimator (TPE) (i.e., a model-based optimization method that estimates the objective function and selects the best hyperparameters[8]), and random search (i.e., a basic optimization approach used for benchmarking[9]).
+Ref.:
+Hasan Tiamin et al.: Bayes_Opt-SWMM: A Gaussian process-based Bayesian optimization tool for real-time flood modeling with SWMM
+Ozaki, Yoshihiko; Tanigaki, Yuki; Watanabe, Shuhei; Nomura, Masahiro; Onishi, Masaki (2022-04-08). "Multiobjective Tree-Structured Parzen Estimator". Journal of Artificial Intelligence Research. 73: 1209–1250. doi:10.1613/jair.1.13188. ISSN 1076-9757.
+Bergstra, James; Bengio, Yoshua (2012-02-01). "Random search for hyper-parameter optimization". J. Mach. Learn. Res. 13: 281–305. ISSN 1532-4435.
