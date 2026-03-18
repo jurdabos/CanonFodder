@@ -23,6 +23,7 @@ dependencies = [
   "pandas>=2.2",
   "prefect>=3.4.17",
   "pyarrow>=18.0",
+  "pyasn1>=0.6.3",
   "pypopulation>=2020.3",
   "python-dotenv>=1.1",
   "rapidfuzz>=3.14",
@@ -66,7 +67,10 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --cov=. --cov-report=term-missing"
+addopts = "-v --cov=. --cov-report=term-missing -m 'not integration'"
+markers = [
+    "integration: marks tests that hit real services or need external deps (deselected by default)",
+]
 
 [tool.coverage.run]
 source = ["."]
