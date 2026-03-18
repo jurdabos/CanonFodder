@@ -1,4 +1,5 @@
 """Auto-marks every test under tests/integration/ as integration."""
+
 import pytest
 
 
