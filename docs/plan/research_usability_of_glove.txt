@@ -1,0 +1,5 @@
+The GloVe model uses a cooccurrence matrix, which contains information about the word context. The developed
+model has been shown to outperform related models, especially for NER and similarity tasks (Pennington et al., 2014).
+
+Cf.
+Pennington, J., Socher, R., & Manning, C. (2014, January 1). Glove: Global Vectors for Word Representation. (edsbas.BE77926E). Proceedings of the 2014 Conference on Empirical Methods in Natural Language Processing (EMNLP) ; page 1532-1543. https://doi.org/10.3115/v1/d14-1162
