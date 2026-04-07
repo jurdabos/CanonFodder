@@ -494,9 +494,9 @@ cycler==0.12.1 \
     --hash=sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30 \
     --hash=sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c
     # via matplotlib
-databricks-sdk==0.92.0 \
-    --hash=sha256:50cbd3fa3757b98779ca28c4c885c671486bf2be8a493cc1e5c44d27c80eba41 \
-    --hash=sha256:6d45bd9e6ee21a639c31239e095ad55215cb2f8c51092950c083693f709c013b
+databricks-sdk==0.102.0 \
+    --hash=sha256:75d1253276ee8f3dd5e7b00d62594b7051838435e618f74a8570a6dbd723ec12 \
+    --hash=sha256:8fa5f82317ee27cc46323c6e2543d2cfefb4468653f92ba558271043c6f72fb9
     # via
     #   mlflow-skinny
     #   mlflow-tracing
