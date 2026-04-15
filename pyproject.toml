@@ -28,6 +28,7 @@ dependencies = [
   "pyasn1>=0.6.3",
   "pygments>=2.20.0",
   "pypopulation>=2020.3",
+  "pytest>=9.0.3",
   "python-dotenv>=1.1",
   "rapidfuzz>=3.14",
   "requests>=2.33.0",
