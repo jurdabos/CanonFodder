@@ -974,8 +974,10 @@ numpy==2.3.2 \
     #   shap
     #   skops
     #   xgboost
-nvidia-cublas-cu12==12.8.4.1 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
-    --hash=sha256:8ac4e771d5a348c551b2a426eda6193c19aa630236b418086020df5ba9667142
+nvidia-cublas-cu12==12.9.2.10 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
+    --hash=sha256:5572131a59c3eebeeb1c4c8144f772d49372c20124916e072a0e3fc30df421d5 \
+    --hash=sha256:623f43027d40d44ceadf0043f002bd25cf353e8f13ce90b9a87057019f560661 \
+    --hash=sha256:e4f53a8ca8c5d6e8c492d0d0a3d565ecb59a751b19cfdaa4f6da0ab2104c1702
     # via
     #   nvidia-cudnn-cu12
     #   nvidia-cusolver-cu12
