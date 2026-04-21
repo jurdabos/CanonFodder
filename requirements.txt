@@ -580,9 +580,9 @@ greenlet==3.2.4 \
     --hash=sha256:ee7a6ec486883397d70eec05059353b8e83eca9168b9f3f9a361971e77e0bcd0 \
     --hash=sha256:f28588772bb5fb869a8eb331374ec06f24a83a9c25bfa1f38b6993afe9c1e968
     # via sqlalchemy
-griffe==1.14.0 \
-    --hash=sha256:0e9d52832cccf0f7188cfe585ba962d2674b241c01916d780925df34873bceb0 \
-    --hash=sha256:9d2a15c1eca966d68e00517de5d69dd1bc5c9f2335ef6c1775362ba5b8651a13
+griffe==2.0.2 \
+    --hash=sha256:2b31816460aee1996af26050a1fc6927a2e5936486856707f55508e4c9b5960b \
+    --hash=sha256:c5d56326d159f274492e9bf93a9895cec101155d944caa66d0fc4e0c13751b92
     # via prefect
 gunicorn==25.1.0 ; sys_platform != 'win32' \
     --hash=sha256:1426611d959fa77e7de89f8c0f32eed6aa03ee735f98c01efba3e281b1c47616 \
