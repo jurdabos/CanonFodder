@@ -1457,9 +1457,9 @@ pygments==2.20.0 \
     #   c9r
     #   pytest
     #   rich
-pyparsing==3.2.3 \
-    --hash=sha256:a749938e02d6fd0b59b356ca504a24982314bb090c383e3cf201c95ef7e2bfcf \
-    --hash=sha256:b9c13f1ab8b3b542f72e28f634bad4de758ab3ce4546e4301970ad6fa77c38be
+pyparsing==3.3.2 \
+    --hash=sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d \
+    --hash=sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc
     # via matplotlib
 pypopulation==2020.3 \
     --hash=sha256:1fe80b99020803fe7b1083ddb5a0ed395325e04a5614650f0e7cd8cb7a2c6371 \
