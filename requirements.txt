@@ -1062,9 +1062,9 @@ opentelemetry-semantic-conventions==0.57b0 \
     --hash=sha256:609a4a79c7891b4620d64c7aac6898f872d790d75f22019913a660756f27ff32 \
     --hash=sha256:757f7e76293294f124c827e514c2a3144f191ef175b069ce8d1211e1e38e9e78
     # via opentelemetry-sdk
-optuna==4.7.0 \
-    --hash=sha256:d91817e2079825557bd2e97de2e8c9ae260bfc99b32712502aef8a5095b2d2c0 \
-    --hash=sha256:e41ec84018cecc10eabf28143573b1f0bde0ba56dba8151631a590ecbebc1186
+optuna==4.8.0 \
+    --hash=sha256:6f7043e9f8ecb5e607af86a7eb00fb5ec2be26c3b08c201209a73d36aff37a38 \
+    --hash=sha256:c57a7682679c36bfc9bca0da430698179e513874074b71bebedb0334964ab930
     # via c9r
 orjson==3.11.7 \
     --hash=sha256:0724e265bc548af1dedebd9cb3d24b4e1c1e685a343be43e87ba922a5c5fff2f \
