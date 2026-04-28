@@ -873,9 +873,9 @@ mlflow-skinny==3.10.0 \
     --hash=sha256:c711653b446214c863023e49e72ac3bae950aa82a5eeca5bdc642680065117af \
     --hash=sha256:d864b14241f8e26a565e60b343a9644db3b2279b5039bd4e5cc2d0a6757bce99
     # via mlflow
-mlflow-tracing==3.10.0 \
-    --hash=sha256:206ca8ed2c25c15935fcfb9c9c5102198b1060a61bb2ce9df4eabb6329f3ddbf \
-    --hash=sha256:eb172a48e8f8078b0387e3e044864bf2c83124f7e773b223d37f6da79227a714
+mlflow-tracing==3.11.1 \
+    --hash=sha256:cb63cee16385d081467ec5bee4807fe1af59ddfdf04be4c79e7a7813b1002193 \
+    --hash=sha256:fa82df64dacf8293b714ae666440fe7c1902c6470c024df389bb91e9de3106d9
     # via mlflow
 mpmath==1.3.0 \
     --hash=sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f \
