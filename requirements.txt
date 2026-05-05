@@ -510,9 +510,9 @@ fonttools==4.61.0 \
 fpdf2==2.8.7 \
     --hash=sha256:7060ccee5a9c7ab0a271fb765a36a23639f83ef8996c34e3d46af0a17ede57f9 \
     --hash=sha256:d391fc508a3ce02fc43a577c830cda4fe6f37646f2d143d489839940932fbc19
-fsspec==2025.9.0 \
-    --hash=sha256:19fd429483d25d28b65ec68f9f4adc16c17ea2c7c7bf54ec61360d478fb19c19 \
-    --hash=sha256:530dc2a2af60a414a832059574df4a6e10cce927f6f4a78209390fe38955cfb7
+fsspec==2026.4.0 \
+    --hash=sha256:11ef7bb35dab8a394fde6e608221d5cf3e8499401c249bebaeaad760a1a8dec2 \
+    --hash=sha256:301d8ac70ae90ef3ad05dcf94d6c3754a097f9b5fe4667d2787aa359ec7df7e4
     # via
     #   prefect
     #   torch
