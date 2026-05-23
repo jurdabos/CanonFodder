@@ -7,6 +7,7 @@ from helpers.query import (
     artist_country_stats,
     artist_info_df,
     scrobble_count,
+    scrobble_counts_for_artist_patterns,
     scrobbles_between,
     top_artists,
     top_albums,
@@ -128,6 +129,103 @@ class TestCanonicalResolution:
         de_row = df[df["country"] == "DE"]
         assert not de_row.empty
         assert int(de_row.iloc[0]["play_count"]) == 5
+
+
+class TestScrobbleCountsForArtistPatterns:
+    """Tests scrobble_counts_for_artist_patterns substring-matching query."""
+
+    @staticmethod
+    def _write_festival_fixtures(pq_dir):
+        """Writes a small scrobble set covering several artists."""
+        import helpers.io as io_mod
+
+        df = pd.DataFrame(
+            {
+                "artist_name": [
+                    "Primal Scream",
+                    "Primal Scream",
+                    "primal scream",  # different casing
+                    "Anna Calvi",
+                    "Kerala Dust",
+                    "Kerala Dust",
+                    "Some Other Band",
+                ],
+                "album_title": ["A"] * 7,
+                "track_title": [f"T{i}" for i in range(7)],
+                "artist_mbid": [None] * 7,
+                "play_time": pd.date_range("2024-06-01", periods=7, freq="5min", tz="UTC"),
+            }
+        )
+        df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
+
+    def test_returns_counts_for_each_label(self, tmp_pq_dir):
+        """Counts each label and returns expected schema."""
+        self._write_festival_fixtures(tmp_pq_dir)
+        df = scrobble_counts_for_artist_patterns(["primal scream", "anna calvi", "kerala dust"])
+        assert set(df.columns) == {"canonical_artist_name", "scrobble_count"}
+        counts = dict(zip(df["canonical_artist_name"], df["scrobble_count"]))
+        assert counts["primal scream"] == 3  # case-insensitive
+        assert counts["anna calvi"] == 1
+        assert counts["kerala dust"] == 2
+
+    def test_returns_zero_for_unmatched_labels(self, tmp_pq_dir):
+        """Labels with no matches still appear in the result with count=0."""
+        self._write_festival_fixtures(tmp_pq_dir)
+        df = scrobble_counts_for_artist_patterns(["primal scream", "nonexistent band"])
+        counts = dict(zip(df["canonical_artist_name"], df["scrobble_count"]))
+        assert counts["primal scream"] == 3
+        assert counts["nonexistent band"] == 0
+
+    def test_orders_by_count_descending(self, tmp_pq_dir):
+        """Matched rows are ordered by scrobble_count descending."""
+        self._write_festival_fixtures(tmp_pq_dir)
+        df = scrobble_counts_for_artist_patterns(["anna calvi", "primal scream", "kerala dust"])
+        matched = df[df["scrobble_count"] > 0].reset_index(drop=True)
+        assert list(matched["scrobble_count"]) == sorted(matched["scrobble_count"], reverse=True)
+
+    def test_substring_matching_works(self, tmp_pq_dir):
+        """Partial substrings match scrobbles whose artist contains the pattern."""
+        self._write_festival_fixtures(tmp_pq_dir)
+        df = scrobble_counts_for_artist_patterns(["calvi"])
+        counts = dict(zip(df["canonical_artist_name"], df["scrobble_count"]))
+        assert counts["calvi"] == 1
+
+    def test_deduplicates_case_insensitively(self, tmp_pq_dir):
+        """Duplicate labels (case-insensitive) are collapsed to the first occurrence."""
+        self._write_festival_fixtures(tmp_pq_dir)
+        df = scrobble_counts_for_artist_patterns(["primal scream", "PRIMAL SCREAM", "Primal Scream"])
+        assert len(df) == 1
+        assert df.iloc[0]["canonical_artist_name"] == "primal scream"
+
+    def test_handles_apostrophes(self, tmp_pq_dir):
+        """Labels with single quotes are escaped properly and still match."""
+        import helpers.io as io_mod
+
+        df = pd.DataFrame(
+            {
+                "artist_name": ["D'Angelo", "D'Angelo", "Other"],
+                "album_title": ["A", "A", "B"],
+                "track_title": ["T1", "T2", "T3"],
+                "artist_mbid": [None] * 3,
+                "play_time": pd.date_range("2024-06-01", periods=3, freq="5min", tz="UTC"),
+            }
+        )
+        df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
+        result = scrobble_counts_for_artist_patterns(["D'Angelo"])
+        counts = dict(zip(result["canonical_artist_name"], result["scrobble_count"]))
+        assert counts["D'Angelo"] == 2
+
+    def test_returns_empty_without_scrobble_data(self, tmp_pq_dir):
+        """Returns an empty DataFrame when no scrobble data exists."""
+        df = scrobble_counts_for_artist_patterns(["anything"])
+        assert df.empty
+        assert set(df.columns) == {"canonical_artist_name", "scrobble_count"}
+
+    def test_returns_empty_with_empty_labels(self, tmp_pq_dir):
+        """Returns an empty DataFrame when all labels are blank."""
+        self._write_festival_fixtures(tmp_pq_dir)
+        df = scrobble_counts_for_artist_patterns(["", "   ", None])  # type: ignore[list-item]
+        assert df.empty
 
 
 class TestArtistCountryStats:

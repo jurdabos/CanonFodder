@@ -8,6 +8,7 @@ scalar.  No persistent DuckDB database file is created.
 
 from __future__ import annotations
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 import duckdb
 import pandas as pd
@@ -471,6 +472,69 @@ def user_country_top_entities(top_n: int = 3) -> dict[str, pd.DataFrame]:
         ORDER BY country_code, rank
     """)
     return {"artists": artists, "albums": albums, "tracks": tracks}
+
+
+def scrobble_counts_for_artist_patterns(labels: Sequence[str]) -> pd.DataFrame:
+    """
+    Returns scrobble counts for the given artist labels via substring matching.
+
+    Each non-empty label is used as a case-insensitive ``ILIKE`` pattern
+    (wrapped in ``%…%``) and doubles as the canonical bucket name in the
+    result.  Useful for quickly tallying recent listening before, e. g., a
+    festival lineup.
+
+    Result columns: canonical_artist_name (str), scrobble_count (int).
+    Rows are ordered by scrobble_count descending.  Labels that did not
+    match any scrobble are returned with scrobble_count = 0 so callers can
+    see the full input set.  Duplicate labels (case-insensitive) are
+    deduplicated; the first occurrence wins.
+    """
+    empty = pd.DataFrame(columns=["canonical_artist_name", "scrobble_count"])
+    if not scrobble_data_exists():
+        return empty
+    # Cleaning and deduplicating labels while preserving user-provided order
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in labels:
+        if raw is None:
+            continue
+        lbl = raw.strip()
+        key = lbl.casefold()
+        if not lbl or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(lbl)
+    if not cleaned:
+        return empty
+
+    def _esc(s: str) -> str:
+        """Escapes single quotes for safe SQL literal embedding."""
+        return s.replace("'", "''")
+
+    case_branches = "\n".join(
+        f"            WHEN artist_name ILIKE '%{_esc(lbl)}%' THEN '{_esc(lbl)}'" for lbl in cleaned
+    )
+    where_predicates = " OR ".join(f"artist_name ILIKE '%{_esc(lbl)}%'" for lbl in cleaned)
+    df = query(f"""
+        SELECT
+            CASE
+{case_branches}
+                ELSE 'Other'
+            END AS canonical_artist_name,
+            COUNT(*) AS scrobble_count
+        FROM {scrobble_duckdb_from()}
+        WHERE artist_name IS NOT NULL AND artist_name != ''
+          AND ({where_predicates})
+        GROUP BY canonical_artist_name
+        ORDER BY scrobble_count DESC
+    """)
+    # Filling in zero-count rows for labels that did not match anything
+    matched = set(df["canonical_artist_name"]) if not df.empty else set()
+    missing = [lbl for lbl in cleaned if lbl not in matched]
+    if missing:
+        zero_df = pd.DataFrame({"canonical_artist_name": missing, "scrobble_count": [0] * len(missing)})
+        df = pd.concat([df, zero_df], ignore_index=True)
+    return df
 
 
 def artist_country_stats() -> pd.DataFrame:

@@ -666,6 +666,59 @@ def dashboard_yearly(top: int) -> None:
             click.echo(f"    [{medal}] {a['name']}  ({a['plays']:,} plays)")
 
 
+@dashboard.command("festival")
+@click.argument("artists", required=False)
+@click.option(
+    "--from-file",
+    "from_file",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Read artist names from a file (one per line, or comma-separated).",
+)
+def dashboard_festival(artists: str | None, from_file: str | None) -> None:
+    """Tally scrobble counts for a comma-separated list of artists.
+
+    Each name is matched case-insensitively against ``artist_name`` using a
+    substring (``ILIKE '%name%'``) so partial / lower-case input works.
+    Handy for sizing up a festival lineup before the gig.
+
+    Examples:
+
+        c9r dashboard festival "the molotovs, primal scream, anna calvi"
+
+        c9r dashboard festival --from-file lineup.txt
+    """
+    from helpers.query import scrobble_counts_for_artist_patterns
+
+    raw_parts: list[str] = []
+    if from_file:
+        from pathlib import Path
+
+        file_text = Path(from_file).read_text(encoding="utf-8")
+        for line in file_text.splitlines():
+            raw_parts.extend(line.split(","))
+    if artists:
+        raw_parts.extend(artists.split(","))
+    labels = [p.strip() for p in raw_parts if p and p.strip()]
+    if not labels:
+        raise click.UsageError("Provide a comma-separated list of artists or --from-file.")
+    df = scrobble_counts_for_artist_patterns(labels)
+    if df.empty:
+        click.echo("No scrobble data available.")
+        return
+    total = int(df["scrobble_count"].sum())
+    matched_labels = int((df["scrobble_count"] > 0).sum())
+    name_width = max(len(str(name)) for name in df["canonical_artist_name"])
+    click.echo(
+        f"Festival lineup tally — {matched_labels}/{len(df)} artist(s) found, "
+        f"{total:,} matching scrobble(s):\n"
+    )
+    for _, row in df.iterrows():
+        marker = " " if row["scrobble_count"] > 0 else "·"  # to flag zero-count rows
+        click.echo(
+            f"  {marker} {row['scrobble_count']:>6,}  {row['canonical_artist_name']:<{name_width}}"
+        )
+
+
 # ── purge
 @cli.command()
 @click.option("--all", "purge_all", is_flag=True, help="Purge all Parquet files.")
