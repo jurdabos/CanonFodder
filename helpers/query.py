@@ -235,17 +235,22 @@ def monthly_scrobble_counts() -> pd.DataFrame:
     """
     if not scrobble_data_exists():
         return pd.DataFrame(columns=["year", "month", "scrobble_count"])
+    # Note: when scrobble data is hive-partitioned on year=YYYY, the source
+    # already exposes a `year` column.  Repeating the EXTRACT expression in
+    # GROUP BY avoids the alias-vs-partition-column ambiguity that triggers
+    # "play_time must appear in the GROUP BY clause" in DuckDB.
     return query(f"""
         SELECT
-            EXTRACT(YEAR  FROM play_time)::INT AS year,
-            EXTRACT(MONTH FROM play_time)::INT AS month,
+            EXTRACT(YEAR  FROM play_time)::INT AS play_year,
+            EXTRACT(MONTH FROM play_time)::INT AS play_month,
             COUNT(*) AS scrobble_count
         FROM {scrobble_duckdb_from()}
         WHERE artist_name IS NOT NULL AND artist_name != ''
           AND play_time IS NOT NULL
-        GROUP BY year, month
-        ORDER BY year, month
-    """)
+        GROUP BY EXTRACT(YEAR  FROM play_time)::INT,
+                 EXTRACT(MONTH FROM play_time)::INT
+        ORDER BY play_year, play_month
+    """).rename(columns={"play_year": "year", "play_month": "month"})
 
 
 def yearly_top_n_artists(top_n: int = 3) -> pd.DataFrame:
@@ -258,27 +263,34 @@ def yearly_top_n_artists(top_n: int = 3) -> pd.DataFrame:
     if not scrobble_data_exists():
         return pd.DataFrame(columns=["year", "rank", "artist_name", "play_count"])
     cte = _canonical_cte()
+    # Note: when scrobble data is hive-partitioned on year=YYYY, the source
+    # already exposes a `year` column.  Repeating the EXTRACT expression in
+    # GROUP BY avoids the alias-vs-partition-column ambiguity that triggers
+    # "play_time must appear in the GROUP BY clause" in DuckDB.
     return query(f"""
         WITH {cte},
         yearly_artists AS (
             SELECT
-                EXTRACT(YEAR FROM s.play_time)::INT AS year,
+                EXTRACT(YEAR FROM s.play_time)::INT AS play_year,
                 COALESCE(cm.canonical_name, s.artist_name) AS artist_name,
                 COUNT(*) AS play_count
             FROM {scrobble_duckdb_from()} s
             LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
             WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
               AND s.play_time IS NOT NULL
-            GROUP BY year, COALESCE(cm.canonical_name, s.artist_name)
+            GROUP BY EXTRACT(YEAR FROM s.play_time)::INT,
+                     COALESCE(cm.canonical_name, s.artist_name)
         ),
         ranked AS (
-            SELECT *,
+            SELECT play_year,
+                   artist_name,
+                   play_count,
                    ROW_NUMBER() OVER (
-                       PARTITION BY year ORDER BY play_count DESC
+                       PARTITION BY play_year ORDER BY play_count DESC
                    ) AS rank
             FROM yearly_artists
         )
-        SELECT year, rank::INT AS rank, artist_name, play_count
+        SELECT play_year AS year, rank::INT AS rank, artist_name, play_count
         FROM ranked
         WHERE rank <= {top_n}
         ORDER BY year, rank
