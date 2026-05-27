@@ -91,6 +91,10 @@ alembic==1.16.5 \
     #   mlflow
     #   optuna
     #   prefect
+amplitude-analytics==1.2.3 \
+    --hash=sha256:4c9525847c391c19675d6e026f4601c27204ffeec71cb92252770d84d4538404 \
+    --hash=sha256:ba2092c1d37ce8a2e3f69d023da145f4e322d02429e20436a5227178b1e594e9
+    # via prefect
 annotated-doc==0.0.4 \
     --hash=sha256:571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320 \
     --hash=sha256:fbcda96e87e9c92ad167c2e53839e57503ecfda18804ea28102353485033faa4
@@ -138,12 +142,28 @@ attrs==25.3.0 \
     --hash=sha256:75d7cefc7fb576747b2c81b4442d4d4a1ce0900973527c011d1030fd3bf4af1b
     # via
     #   aiohttp
+    #   cyclopts
     #   jsonschema
     #   referencing
+beartype==0.22.9 \
+    --hash=sha256:8f82b54aa723a2848a56008d18875f91c1db02c32ef6a62319a002e3e25a975f \
+    --hash=sha256:d16c9bbc61ea14637596c5f6fbff2ee99cbe3573e46a716401734ef50c3060c2
+    # via py-key-value-aio
 blinker==1.9.0 \
     --hash=sha256:b4ce2265a7abece45e7cc896e98dbebe6cead56bcf805a3d23136d145f5445bf \
     --hash=sha256:ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc
     # via flask
+burner-redis==0.1.7 \
+    --hash=sha256:20eba1917e3bca9eea5957d5700ff8defcb5a209e57a7841d005549aa0151f44 \
+    --hash=sha256:39111467059b8a28f15ea061d2414ec25c3e57c65759983f90f4d358e7d6a72d \
+    --hash=sha256:458f88feeddfb40a586cc3fcbd8e9384bbdfd2a4512a695af4900e06052570d4 \
+    --hash=sha256:591a9d20685f9d6d22bf0c863b50b12dfcf328b06111b3f62c33cd3185d48ce0 \
+    --hash=sha256:7474ff092669fd11ef765411572cdafcc3d89b8054aef4ca0617be6d6be4c680 \
+    --hash=sha256:9b5adfe99aeb8407f468078f3769b2a63e9168fea12f7709df5d2a3b152706e4 \
+    --hash=sha256:a3d9569a376b690fb5876d454e4904443332dc3ad5c0057e149fc2ad220bf599 \
+    --hash=sha256:f6cf4ac666766b32fd63940aad0c120847905fd3102c17e5b6b305f91a21d079 \
+    --hash=sha256:f80c866996e0455d584eb3c0f3b067e411c632fb0519eab454e0968edf01e62c
+    # via pydocket
 cachetools==6.2.0 \
     --hash=sha256:1c76a8960c0041fcc21097e357f882197c79da0dbff766e7317890a65d7d8ba6 \
     --hash=sha256:38b328c0889450f05f5e120f56ab68c8abaf424e1275522b138ffc93253f7e32
@@ -151,6 +171,7 @@ cachetools==6.2.0 \
     #   mlflow-skinny
     #   mlflow-tracing
     #   prefect
+    #   py-key-value-aio
 certifi==2025.8.3 \
     --hash=sha256:e564105f78ded564e3ae7c923924435e1daa7463faeab5bb932bc53ffae63407 \
     --hash=sha256:f6c12493cfb1b06ba2ff328595af9350c65d6644968e5d3a2ffd78699af217a5
@@ -262,6 +283,7 @@ cloudpickle==3.1.1 \
     # via
     #   mlflow-skinny
     #   prefect
+    #   pydocket
     #   shap
 colorama==0.4.6 \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
@@ -417,6 +439,9 @@ coverage==7.13.4 \
     --hash=sha256:fb26a934946a6afe0e326aebe0730cdff393a8bc0bbb65a2f41e30feddca399c \
     --hash=sha256:fdfc1e28e7c7cdce44985b3043bc13bbd9c747520f94a4d7164af8260b3d91f0
     # via pytest-cov
+cronsim==2.7 \
+    --hash=sha256:1e1431fa08c51dc7f72e67e571c7c7a09af26420169b607badd4ca9677ffad1e
+    # via pydocket
 cryptography==46.0.7 \
     --hash=sha256:128c5edfe5e5938b86b03941e94fac9ee793a94452ad1365c9fc3f4f62216832 \
     --hash=sha256:1d25aee46d0c6f1a501adcddb2d2fee4b979381346a78558ed13e50aa8a59067 \
@@ -480,6 +505,10 @@ cycler==0.12.1 \
     --hash=sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30 \
     --hash=sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c
     # via matplotlib
+cyclopts==4.16.1 \
+    --hash=sha256:617795392c4113a2c2cc7af716f20244900e87f23daa05442d1268d81472a592 \
+    --hash=sha256:8aa47bf92a5fb33abca5af05e576eecdb0d2f79893ad29238046df78370fc4a8
+    # via prefect
 databricks-sdk==0.92.0 \
     --hash=sha256:50cbd3fa3757b98779ca28c4c885c671486bf2be8a493cc1e5c44d27c80eba41 \
     --hash=sha256:6d45bd9e6ee21a639c31239e095ad55215cb2f8c51092950c083693f709c013b
@@ -500,6 +529,10 @@ docker==7.1.0 \
     # via
     #   mlflow
     #   prefect
+docstring-parser==0.18.0 \
+    --hash=sha256:292510982205c12b1248696f44959db3cdd1740237a968ea1e2e7a900eeb2015 \
+    --hash=sha256:b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b
+    # via cyclopts
 duckdb==1.4.4 \
     --hash=sha256:0509b39ea7af8cff0198a99d206dca753c62844adab54e545984c2e2c1381616 \
     --hash=sha256:0d636ceda422e7babd5e2f7275f6a0d1a3405e6a01873f00d38b72118d30c10b \
@@ -1312,6 +1345,7 @@ opentelemetry-api==1.36.0 \
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   prefect
+    #   pydocket
 opentelemetry-proto==1.39.1 \
     --hash=sha256:22cdc78efd3b3765d09e68bfbd010d4fc254c9818afd0b6b423387d9dee46007 \
     --hash=sha256:6c8e05144fc0d3ed4d22c2289c6b126e03bcd0e6a7da0f16cedd2e1c2772e2c8
@@ -1521,11 +1555,12 @@ pluggy==1.6.0 \
     --hash=sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3 \
     --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746
     # via
+    #   prefect
     #   pytest
     #   pytest-cov
-prefect==3.4.17 \
-    --hash=sha256:665225935a58e162afa4bc14aa5f880a8551d19a3f696e02f6c8dd7aba0cd5a0 \
-    --hash=sha256:962fd837c76bb3ea8350c9d0a60c42a23ea9149227968b3c17c51e4bda8a69c0
+prefect==3.7.3.dev4 \
+    --hash=sha256:b218dc65c28ec671a339cb8756f0e1cd1f55fde89ce9616ca128b78219f4ce8e \
+    --hash=sha256:fe1a31238af30d9767988393e539be7bcbff871d1f64f21473b9c8d5c8247630
     # via c9r
 prettytable==3.17.0 \
     --hash=sha256:59f2590776527f3c9e8cf9fe7b66dd215837cca96a9c39567414cbc632e8ddb0 \
@@ -1534,7 +1569,9 @@ prettytable==3.17.0 \
 prometheus-client==0.22.1 \
     --hash=sha256:190f1331e783cf21eb60bca559354e0a4d4378facecf78f5428c39b675d20d28 \
     --hash=sha256:cca895342e308174341b2cbf99a56bef291fbc0ef7b9e5412a0f26d653ba7094
-    # via prefect
+    # via
+    #   prefect
+    #   pydocket
 propcache==0.5.2 \
     --hash=sha256:01c4fc7480cd0598bb4b57022df55b9ca296da7fc5a8760bd8451a7e63a7d427 \
     --hash=sha256:06187263ddad280d05b4d8a8b3bb7d164cbebd469236544a42e6d9b28ac6a4fa \
@@ -1640,6 +1677,10 @@ protobuf==6.33.5 \
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-proto
+py-key-value-aio==0.4.4 \
+    --hash=sha256:18e17564ecae61b987f909fc2cd41ee2012c84b4b1dcb8c055cf8b4bc1bf3f5d \
+    --hash=sha256:e3012e6243ed7cc09bb05457bd4d03b1ba5c2b1ca8700096b3927db79ffbbe55
+    # via pydocket
 pyarrow==23.0.0 \
     --hash=sha256:068701f6823449b1b6469120f399a1239766b117d211c5d2519d4ed5861f75de \
     --hash=sha256:075c29aeaa685fd1182992a9ed2499c66f084ee54eea47da3eb76e125e06064c \
@@ -1749,6 +1790,10 @@ pydantic-settings==2.10.1 \
     --hash=sha256:06f0062169818d0f5524420a360d632d5857b83cffd4d42fe29597807a1614ee \
     --hash=sha256:a60952460b99cf661dc25c29c0ef171721f98bfcb52ef8d9ea4c943d7c8cc796
     # via prefect
+pydocket==0.21.0 \
+    --hash=sha256:2fcfc67f05a98689505e6af127af7f71b9612c08a139cfe1a690706c43810968 \
+    --hash=sha256:b98f8fcd48fbd5258f6ab0be9080fbc36dcab52a73a9acc0509652de0b445df0
+    # via prefect
 pygments==2.20.0 \
     --hash=sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f \
     --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
@@ -1756,6 +1801,7 @@ pygments==2.20.0 \
     #   c9r
     #   pytest
     #   rich
+    #   rich-rst
 pyparsing==3.2.3 \
     --hash=sha256:a749938e02d6fd0b59b356ca504a24982314bb090c383e3cf201c95ef7e2bfcf \
     --hash=sha256:b9c13f1ab8b3b542f72e28f634bad4de758ab3ce4546e4301970ad6fa77c38be
@@ -1790,13 +1836,13 @@ python-dotenv==1.2.2 \
     #   c9r
     #   mlflow-skinny
     #   pydantic-settings
+python-json-logger==4.1.0 \
+    --hash=sha256:132994765cf75bf44554be9aa49b06ef2345d23661a96720262716438141b6b2 \
+    --hash=sha256:b396b9e3ed782b09ff9d6e4f1683d46c83ad0d35d2e407c09a9ebbf038f88195
+    # via pydocket
 python-slugify==8.0.4 \
     --hash=sha256:276540b79961052b66b7d116620b36518847f52d5fd9e3a70164fc8c50faa6b8 \
     --hash=sha256:59202371d1d05b54a9e7720c5e038f928f45daaffe41dd10822f3907b937c856
-    # via prefect
-python-socks==2.7.2 \
-    --hash=sha256:4c845d4700352bc7e7382f302dfc6baf0af0de34d2a6d70ba356b2539d4dbb62 \
-    --hash=sha256:d311aefbacc0ddfaa1fa1c32096c436d4fe75b899c24d78e677e1b0623c52c48
     # via prefect
 pytz==2025.2 \
     --hash=sha256:360b9e3dbb49a209c21ad61809c7fb453643e048b38924c765813546746e81c3 \
@@ -1948,6 +1994,12 @@ readchar==4.2.1 \
     --hash=sha256:91ce3faf07688de14d800592951e5575e9c7a3213738ed01d394dcc949b79adb \
     --hash=sha256:a769305cd3994bb5fa2764aa4073452dc105a4ec39068ffe6efd3c20c60acc77
     # via prefect
+redis==7.4.0 \
+    --hash=sha256:64a6ea7bf567ad43c964d2c30d82853f8df927c5c9017766c55a1d1ed95d18ad \
+    --hash=sha256:a9c74a5c893a5ef8455a5adb793a31bb70feb821c86eccb62eebef5a19c429ec
+    # via
+    #   py-key-value-aio
+    #   pydocket
 referencing==0.36.2 \
     --hash=sha256:df2e89862cd09deabbdba16944cc3f10feb6b3e6f18e902f7cc25609a34775aa \
     --hash=sha256:e8699adbbf8b5c7de96d8ffa0eb5c158b3beafce084968e2ea8bb08c6794dcd0
@@ -2021,8 +2073,15 @@ rich==14.1.0 \
     --hash=sha256:536f5f1785986d6dbdea3c75205c473f970777b4a0d6c6dd1b696aa05a3fa04f \
     --hash=sha256:e497a48b844b0320d45007cdebfeaeed8db2a4f4bcf49f15e455cfc4af11eaa8
     # via
+    #   cyclopts
     #   prefect
+    #   pydocket
+    #   rich-rst
     #   typer
+rich-rst==2.0.1 \
+    --hash=sha256:7ee15f345ce25fa02b582c272a6cdbaf0c21243e38061cea273cff659bf3ef61 \
+    --hash=sha256:cbe236ed0901d1ec8427cc6a50bf0a34353ba28ad014dc24def68bfe7f3b9e68
+    # via cyclopts
 rpds-py==0.27.1 \
     --hash=sha256:08f1e20bccf73b08d12d804d6e1c22ca5530e71659e6673bce31a6bb71c1e73f \
     --hash=sha256:0b08d152555acf1f455154d498ca855618c1378ec810646fcd7c76416ac6dc60 \
@@ -2109,7 +2168,7 @@ ruamel-yaml==0.18.15 \
     --hash=sha256:148f6488d698b7a5eded5ea793a025308b25eca97208181b6a026037f391f701 \
     --hash=sha256:dbfca74b018c4c3fba0b9cc9ee33e53c371194a9000e694995e620490fd40700
     # via prefect
-ruamel-yaml-clib==0.2.12 ; python_full_version < '3.14' and platform_python_implementation == 'CPython' \
+ruamel-yaml-clib==0.2.12 ; platform_python_implementation == 'CPython' \
     --hash=sha256:0467c5965282c62203273b838ae77c0d29d7638c8a4e3a1c8bdd3602c10904e4 \
     --hash=sha256:0b7e75b4965e1d4690e93021adfcecccbca7d61c7bddd8e22406ef2ff20d74ef \
     --hash=sha256:20b0f8dc160ba83b6dcc0e256846e1a02d044e13f7ea74a3d1d56ede4e48c632 \
@@ -2129,7 +2188,9 @@ ruamel-yaml-clib==0.2.12 ; python_full_version < '3.14' and platform_python_impl
     --hash=sha256:e5b8daf27af0b90da7bb903a876477a9e6d7270be6146906b276605997c7e9a3 \
     --hash=sha256:e7e3736715fbf53e9be2a79eb4db68e4ed857017344d697e8b9749444ae57475 \
     --hash=sha256:e8c4ebfcfd57177b572e2040777b8abc537cdef58a2120e830124946aa9b42c5
-    # via ruamel-yaml
+    # via
+    #   prefect
+    #   ruamel-yaml
 scikit-learn==1.7.2 \
     --hash=sha256:0b7dacaa05e5d76759fb071558a8b5130f4845166d88654a0f9bdf3eb57851b7 \
     --hash=sha256:191e5550980d45449126e23ed1d5e9e24b2c68329ee1f691a3987476e115e09c \
@@ -2371,7 +2432,7 @@ triton==3.6.0 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
 typer==0.17.4 \
     --hash=sha256:015534a6edaa450e7007eba705d5c18c3349dcea50a6ad79a5ed530967575824 \
     --hash=sha256:b77dc07d849312fd2bb5e7f20a7af8985c7ec360c45b051ed5412f64d8dc1580
-    # via prefect
+    # via pydocket
 typing-extensions==4.15.0 \
     --hash=sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466 \
     --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548
@@ -2388,9 +2449,11 @@ typing-extensions==4.15.0 \
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
     #   prefect
+    #   py-key-value-aio
     #   pydantic
     #   pydantic-core
     #   pydantic-extra-types
+    #   pydocket
     #   referencing
     #   shap
     #   sqlalchemy
@@ -2410,12 +2473,17 @@ tzdata==2025.2 \
     # via
     #   pandas
     #   pendulum
+    #   pydocket
     #   tzlocal
     #   whenever
 tzlocal==5.3.1 \
     --hash=sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd \
     --hash=sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d
     # via dateparser
+uncalled-for==0.3.2 \
+    --hash=sha256:0ff60b142c7d1f8070bde9d42afaa70aedc77dcc10998c227687e9c15713418e \
+    --hash=sha256:89f5dbcd71e2b8f47c030b1fa302e6cce2ec795d1ac565eeb6525c5fe55cb8a2
+    # via pydocket
 urllib3==2.7.0 \
     --hash=sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c \
     --hash=sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897
@@ -2423,27 +2491,6 @@ urllib3==2.7.0 \
     #   c9r
     #   docker
     #   requests
-uv==0.11.7 \
-    --hash=sha256:0df59ab0c6a4b14a763e8445e1c303af9abeb53cdfa4428daf9ff9642c0a3cce \
-    --hash=sha256:162fa961a9a081dcea6e889c79f738a5ae56507047e4672964972e33c301bea9 \
-    --hash=sha256:23d457d6731ebdb83f1bffebe4894edab2ef43c1ec5488433c74300db4958924 \
-    --hash=sha256:46d971489b00bdb27e0aa715e4a5cd4ef2c28ea5b6ef78f2b67bf861eb44b405 \
-    --hash=sha256:4e4d5e31bea86e1b6e0f5a0f95e14e80018e6f6c0129256d2915a4b3d793644d \
-    --hash=sha256:553e67cc766d013ce24353fecd4ea5533d2aedcfd35f9fac430e07b1d1f23ed4 \
-    --hash=sha256:5674dfb5944513f4b3735b05c2deba6b1b01151f46729d533d413a9a905f8c5d \
-    --hash=sha256:5985a15a92bd9a170fc1947abb1fbc3e9828c5a430ad85b5bed8356c20b67a71 \
-    --hash=sha256:6158b7e39464f1aa1e040daa0186cae4749a78b5cd80ac769f32ca711b8976b1 \
-    --hash=sha256:750ee5b96959b807cf442b73dd8b55111862d63f258f896787ea5f06b68aaca9 \
-    --hash=sha256:7d6a17507b8139b8803f445a03fd097f732ce8356b1b7b13cdb4dd8ef7f4b2e0 \
-    --hash=sha256:8b2fe1ec6775dad10183e3fdce430a5b37b7857d49763c884f3a67eaa8ca6f8a \
-    --hash=sha256:ceae53b202ea92bc954759bc7c7570cdcd5c3512fce15701198c19fd2dfb8605 \
-    --hash=sha256:dd48823ca4b505124389f49ae50626ba9f57212b9047738efc95126ed5f3844d \
-    --hash=sha256:eb91f52ee67e10d5290f2c2897e2171357f1a10966de38d83eefa93d96843b0c \
-    --hash=sha256:f394331f0507e80ee732cb3df737589de53bed999dd02a6d24682f08c2f8ac4f \
-    --hash=sha256:f422d39530516b1dfb28bb6e90c32bb7dacd50f6a383cd6e40c1a859419fbc8c \
-    --hash=sha256:f97e9f4e4d44fb5c4dfaa05e858ef3414a96416a2e4af270ecd88a3e5fb049a9 \
-    --hash=sha256:fab0bb43fbbc0ee5b5fee212078d2300c371b725faff7cf72eeaafa0bff0606b
-    # via prefect
 uvicorn==0.35.0 \
     --hash=sha256:197535216b25ff9b785e29a0b79199f55222193d47f820816e7da751e9bc8d4a \
     --hash=sha256:bc662f087f7cf2ce11a1d7fd70b90c9f98ef2e2831556dd078d131b96cc94a01
