@@ -479,15 +479,17 @@ def scrobble_counts_for_artist_patterns(labels: Sequence[str]) -> pd.DataFrame:
     Returns scrobble counts for the given artist labels via substring matching.
 
     Each non-empty label is used as a case-insensitive ``ILIKE`` pattern
-    (wrapped in ``%…%``) and doubles as the canonical bucket name in the
-    result.  Useful for quickly tallying recent listening before, e. g., a
-    festival lineup.
+    (wrapped in ``%…%``) to bucket matching scrobbles.  Useful for quickly
+    tallying recent listening before, e. g., a festival lineup.
 
     Result columns: canonical_artist_name (str), scrobble_count (int).
-    Rows are ordered by scrobble_count descending.  Labels that did not
-    match any scrobble are returned with scrobble_count = 0 so callers can
-    see the full input set.  Duplicate labels (case-insensitive) are
-    deduplicated; the first occurrence wins.
+    The ``canonical_artist_name`` is the most-played ``artist_name``
+    variant from the scrobble store that matched the label (preserving the
+    original casing as stored).  Rows are ordered by scrobble_count
+    descending.  Labels that did not match any scrobble are returned with
+    scrobble_count = 0 and the original user-provided label as the
+    canonical name, so callers can see the full input set.  Duplicate
+    labels (case-insensitive) are deduplicated; the first occurrence wins.
     """
     empty = pd.DataFrame(columns=["canonical_artist_name", "scrobble_count"])
     if not scrobble_data_exists():
@@ -511,26 +513,60 @@ def scrobble_counts_for_artist_patterns(labels: Sequence[str]) -> pd.DataFrame:
         """Escapes single quotes for safe SQL literal embedding."""
         return s.replace("'", "''")
 
+    # Bucketing each scrobble by the first label whose ILIKE pattern matches.
     case_branches = "\n".join(
         f"            WHEN artist_name ILIKE '%{_esc(lbl)}%' THEN '{_esc(lbl)}'" for lbl in cleaned
     )
     where_predicates = " OR ".join(f"artist_name ILIKE '%{_esc(lbl)}%'" for lbl in cleaned)
     df = query(f"""
-        SELECT
-            CASE
+        WITH labeled AS (
+            SELECT
+                artist_name,
+                CASE
 {case_branches}
-                ELSE 'Other'
-            END AS canonical_artist_name,
-            COUNT(*) AS scrobble_count
-        FROM {scrobble_duckdb_from()}
-        WHERE artist_name IS NOT NULL AND artist_name != ''
-          AND ({where_predicates})
-        GROUP BY canonical_artist_name
-        ORDER BY scrobble_count DESC
+                END AS bucket_label
+            FROM {scrobble_duckdb_from()}
+            WHERE artist_name IS NOT NULL AND artist_name != ''
+              AND ({where_predicates})
+        ),
+        per_variant AS (
+            SELECT bucket_label, artist_name, COUNT(*) AS variant_count
+            FROM labeled
+            WHERE bucket_label IS NOT NULL
+            GROUP BY bucket_label, artist_name
+        ),
+        ranked AS (
+            SELECT bucket_label, artist_name, variant_count,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY bucket_label
+                       ORDER BY variant_count DESC, artist_name
+                   ) AS rn
+            FROM per_variant
+        ),
+        display_name AS (
+            SELECT bucket_label, artist_name AS canonical_artist_name
+            FROM ranked
+            WHERE rn = 1
+        ),
+        totals AS (
+            SELECT bucket_label, CAST(SUM(variant_count) AS BIGINT) AS scrobble_count
+            FROM per_variant
+            GROUP BY bucket_label
+        )
+        SELECT d.canonical_artist_name,
+               t.scrobble_count,
+               t.bucket_label
+        FROM totals t
+        JOIN display_name d ON d.bucket_label = t.bucket_label
+        ORDER BY t.scrobble_count DESC, d.canonical_artist_name
     """)
     # Filling in zero-count rows for labels that did not match anything
-    matched = set(df["canonical_artist_name"]) if not df.empty else set()
-    missing = [lbl for lbl in cleaned if lbl not in matched]
+    if df.empty:
+        matched_buckets: set[str] = set()
+    else:
+        matched_buckets = set(df["bucket_label"].tolist())
+        df = df.drop(columns=["bucket_label"])
+    missing = [lbl for lbl in cleaned if lbl not in matched_buckets]
     if missing:
         zero_df = pd.DataFrame({"canonical_artist_name": missing, "scrobble_count": [0] * len(missing)})
         df = pd.concat([df, zero_df], ignore_index=True)

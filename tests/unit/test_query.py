@@ -159,21 +159,23 @@ class TestScrobbleCountsForArtistPatterns:
         df.to_parquet(io_mod.SCROBBLE_PQ, index=False)
 
     def test_returns_counts_for_each_label(self, tmp_pq_dir):
-        """Counts each label and returns expected schema."""
+        """Counts each label and returns expected schema with db-cased names."""
         self._write_festival_fixtures(tmp_pq_dir)
         df = scrobble_counts_for_artist_patterns(["primal scream", "anna calvi", "kerala dust"])
         assert set(df.columns) == {"canonical_artist_name", "scrobble_count"}
         counts = dict(zip(df["canonical_artist_name"], df["scrobble_count"]))
-        assert counts["primal scream"] == 3  # case-insensitive
-        assert counts["anna calvi"] == 1
-        assert counts["kerala dust"] == 2
+        # Display names come from the most-played db variant, preserving stored casing.
+        assert counts["Primal Scream"] == 3  # case-insensitive match, db-cased output
+        assert counts["Anna Calvi"] == 1
+        assert counts["Kerala Dust"] == 2
 
     def test_returns_zero_for_unmatched_labels(self, tmp_pq_dir):
         """Labels with no matches still appear in the result with count=0."""
         self._write_festival_fixtures(tmp_pq_dir)
         df = scrobble_counts_for_artist_patterns(["primal scream", "nonexistent band"])
         counts = dict(zip(df["canonical_artist_name"], df["scrobble_count"]))
-        assert counts["primal scream"] == 3
+        assert counts["Primal Scream"] == 3
+        # Unmatched labels fall back to the user-provided label.
         assert counts["nonexistent band"] == 0
 
     def test_orders_by_count_descending(self, tmp_pq_dir):
@@ -188,14 +190,16 @@ class TestScrobbleCountsForArtistPatterns:
         self._write_festival_fixtures(tmp_pq_dir)
         df = scrobble_counts_for_artist_patterns(["calvi"])
         counts = dict(zip(df["canonical_artist_name"], df["scrobble_count"]))
-        assert counts["calvi"] == 1
+        # The matched scrobble's db-cased artist_name is returned, not the lowercase pattern.
+        assert counts["Anna Calvi"] == 1
 
     def test_deduplicates_case_insensitively(self, tmp_pq_dir):
         """Duplicate labels (case-insensitive) are collapsed to the first occurrence."""
         self._write_festival_fixtures(tmp_pq_dir)
         df = scrobble_counts_for_artist_patterns(["primal scream", "PRIMAL SCREAM", "Primal Scream"])
         assert len(df) == 1
-        assert df.iloc[0]["canonical_artist_name"] == "primal scream"
+        # Output uses the most-played db variant ("Primal Scream" appears 2x vs 1x "primal scream").
+        assert df.iloc[0]["canonical_artist_name"] == "Primal Scream"
 
     def test_handles_apostrophes(self, tmp_pq_dir):
         """Labels with single quotes are escaped properly and still match."""
