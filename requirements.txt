@@ -595,8 +595,8 @@ cuda-bindings==12.9.4 ; platform_machine == 'x86_64' and sys_platform == 'linux'
     --hash=sha256:d80bffc357df9988dca279734bc9674c3934a654cab10cadeed27ce17d8635ee \
     --hash=sha256:fda147a344e8eaeca0c6ff113d2851ffca8f7dfc0a6c932374ee5c47caa649c8
     # via torch
-cuda-pathfinder==1.4.0 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
-    --hash=sha256:437079ca59e7b61ae439ecc501d69ed87b3accc34d58153ef1e54815e2c2e118
+cuda-pathfinder==1.5.5 ; platform_machine == 'x86_64' and sys_platform == 'linux' \
+    --hash=sha256:0228c023f95d1480f143ef5c8922d27a2ab052087a942e81dc289c9eb8f91689
     # via cuda-bindings
 cycler==0.12.1 \
     --hash=sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30 \
