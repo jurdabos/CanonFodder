@@ -147,9 +147,9 @@ apache-airflow-providers-common-compat==1.15.0 \
     #   apache-airflow-providers-common-sql
     #   apache-airflow-providers-smtp
     #   apache-airflow-providers-standard
-apache-airflow-providers-common-io==1.7.2 \
-    --hash=sha256:224a9df31086c00a832242c475217273a8eef925c22b8a5b034eea3209d5cfa0 \
-    --hash=sha256:f9b98b4d7df33087b81ea14ee330054583f677e5ac8e9abb211a68388202ffed
+apache-airflow-providers-common-io==1.7.3 \
+    --hash=sha256:dea8a65af9bfa96fcf6a5b018cdd75c73317b9f4abffcfb88f66c1199ad29491 \
+    --hash=sha256:f8857eb33be94e5e23bb854cda269a9c2553f43bc9675755a3dbdb6df4da6694
     # via apache-airflow-core
 apache-airflow-providers-common-sql==2.0.0 \
     --hash=sha256:0012f1c2ad00ccc603c8307fd3e0f92624a07971890c9020df3dd57c5d8ef77f \
