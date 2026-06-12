@@ -3,14 +3,15 @@ Unit tests for helpers.query (DuckDB analytics layer).
 """
 
 import pandas as pd
+
 from helpers.query import (
     artist_country_stats,
     artist_info_df,
     scrobble_count,
     scrobble_counts_for_artist_patterns,
     scrobbles_between,
-    top_artists,
     top_albums,
+    top_artists,
     unique_artists,
     user_country_scrobble_counts,
     user_country_top_entities,

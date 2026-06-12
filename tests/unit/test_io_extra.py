@@ -3,8 +3,10 @@ Unit tests for helpers.io edge cases not covered by test_io.py.
 """
 
 from collections import Counter
+
 import pandas as pd
 import pytest
+
 from helpers.io import normalise_scrobble_df, register_custom_palette, sanitize
 
 

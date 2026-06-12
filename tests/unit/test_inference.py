@@ -4,8 +4,10 @@ Unit tests for helpers.inference (inference-time feature engineering).
 
 import pickle
 from pathlib import Path
+
 import pandas as pd
 import pytest
+
 import helpers.inference as inf_mod
 from helpers.inference import (
     _compute_disco_features,

@@ -2,8 +2,9 @@
 Integration tests for corefunc.workflow (scrobble ingestion pipeline).
 """
 
-import pandas as pd
 from unittest.mock import patch
+
+import pandas as pd
 
 
 class TestRunDataGatheringWorkflow:
@@ -21,8 +22,8 @@ class TestRunDataGatheringWorkflow:
         """Fetches, normalises, and persists scrobbles to Parquet."""
         mock_fetch.return_value = sample_scrobble_df
         mock_country.return_value = False
-        from helpers.io import scrobble_data_exists, read_scrobble_df
         from corefunc.workflow import run_data_gathering_workflow
+        from helpers.io import read_scrobble_df, scrobble_data_exists
 
         n = run_data_gathering_workflow("testuser")
         assert n == 3
@@ -69,8 +70,8 @@ class TestRunDataGatheringWorkflowListenBrainz:
     ):
         """Fetches and persists scrobbles from ListenBrainz."""
         mock_fetch.return_value = sample_scrobble_df
-        from helpers.io import scrobble_data_exists
         from corefunc.workflow import run_data_gathering_workflow
+        from helpers.io import scrobble_data_exists
 
         n = run_data_gathering_workflow("lbuser", source="listenbrainz")
         assert n == 3

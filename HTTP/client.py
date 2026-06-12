@@ -4,8 +4,10 @@ back-off while adding CanonFodder’s User-Agent per API documentation requireme
 """
 
 from __future__ import annotations
-import requests
+
 from time import sleep
+
+import requests
 
 USER_AGENT = "CanonFodder/1.3 (balazs.torda@iu-study.org)"
 

@@ -4,6 +4,27 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-06-12: acidbase CI baseline + `c9r push` integration
+- pyproject.toml — extended `[tool.ruff]` to the canonical a6a config (extend-exclude, `select = ["E", "W", "F", "I"]`, per-file-ignores for tests/scripts/__init__, formatter block); added `acidbase` to the dev dependency group from the public mirror (`git+https://github.com/jurdabos/acidbase`).
+- main.py — attached the shared acidbase `push_command` as `uv run c9r push` (guarded import keeps the CLI usable when acidbase is absent).
+- .github/workflows/lint.yml — new canonical lint workflow: ruff check + format-check via uv, plus the MIT gitleaks CLI pinned at 8.30.1 (full-history scan, `--redact`).
+- .github/workflows/test.yml — removed the duplicate lint job (linting now lives in lint.yml); dropped the `needs: lint` gates.
+- .gitleaks.toml — new canonical secret-scan config (extends default ruleset, ecosystem allowlist).
+- .pre-commit-config.yaml — added ruff + ruff-format hooks; bumped gitleaks hook to v8.30.1; kept repo-specific uv-lock/uv-export hooks.
+- Codebase — 172 ruff autofixes (mostly import sorting) and repo-wide `ruff format` (33 files, line-ending/quote normalisation); wrapped 3 over-long lines in corefunc/canon/tcn_trainer.py and main.py; marked the deliberate post-constant imports in helpers/io.py with `noqa: E402`.
+- tests/unit/test_qa_ml_extra.py — fixed pre-existing `test_verify_mlflow` failure under mlflow ≥ 3.13 by also mocking the function-local mlflow import (the real call hit the deprecated ./mlruns file store).
+- requirements.txt — re-exported (`uv export --frozen`) to include acidbase and the click bump.
+- README.md — documented the new `push` command under CLI Usage.
+
+---
+
+## 2026-06-12: Airflow dependency fully removed
+- pyproject.toml — dropped `apache-airflow>=3.2.0` from dependencies; Prefect (migrated 2025-09) is the sole orchestrator.
+- uv.lock, requirements.txt — re-locked and re-exported via `uv export --frozen --output-file=requirements.txt`; 61 Airflow-related packages removed from the dependency tree.
+- GitHub: dismissed 17 stale Dependabot alerts (reason `not_used`) that were pinned to the deleted `requirements-airflow.txt` manifest — GitHub's dependency graph never auto-resolves alerts when an entire manifest file is deleted.
+
+---
+
 ## 2026-02-28: Prediction log schema and feature quantile drift detection
 - corefunc/canon/workflow.py — `_log_predictions()` now includes a `features_json` column (JSON-serialised ~63-feature dict from `compute_inference_features`) alongside `timestamp`, `variant_a`, `variant_b`, `probability`. Every `canon machine` run now persists the full feature vector for downstream drift detection.
 - corefunc/qa.py — `qa_predictions()` extended with feature quantile drift detection via new `_feature_quantile_drift()` helper. Parses `features_json`, computes per-feature medians for baseline and recent windows, and flags features whose median shift exceeds `DRIFT_FEATURE_QUANTILE_THRESHOLD` (0.15). The report now includes a `feature_quantiles` dict and any feature-level warnings.

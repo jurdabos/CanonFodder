@@ -413,6 +413,22 @@ Options:
 - `-s, --source [lastfm|listenbrainz|lb]` — data source
 - `--full` — fetch full history instead of incremental
 
+### Commit & push workflow (`push`)
+
+```shell
+# Stage, commit, and push everything in one go (pre-commit-hook-aware)
+uv run c9r push -m "feat: my change"
+
+# Preview without making changes
+uv run c9r push --dry-run
+```
+
+Options:
+- `-m, --message TEXT` — commit message (auto-generated fallback when omitted)
+- `--dry-run` — preview without making changes
+
+The command comes from the shared [acidbase](https://github.com/jurdabos/acidbase) toolkit (`acidbase.push.push_command`): it retries the commit when pre-commit hooks modify files, amends when a post-commit hook leaves the tree dirty, and activates DVC ingest and dual-remote publishing automatically when those are configured.
+
 ## Docker
 
 ```shell

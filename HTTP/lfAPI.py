@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import hashlib
 import logging
 import os
@@ -6,12 +7,13 @@ import time
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
-from HTTP.client import make_request, USER_AGENT  # noqa: E402
-from helpers.io import C_PQ, UC_PQ, read_parquet, dump_parquet, read_scrobble_df, dump_scrobble_df  # noqa: E402
+from helpers.io import C_PQ, UC_PQ, dump_parquet, dump_scrobble_df, read_parquet, read_scrobble_df  # noqa: E402
+from HTTP.client import USER_AGENT, make_request  # noqa: E402
 
 log = logging.getLogger("lfAPI")
 LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/"

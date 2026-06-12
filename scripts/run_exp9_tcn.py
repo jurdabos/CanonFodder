@@ -10,32 +10,35 @@ Training data: gs_mb.parquet positives + gs_mb_dbscan.parquet negatives,
 balanced, filtered to WRatio [60, 100).
 Test data: AVC holdout (same 1,172 pairs as Exps 5–8).
 """
+
 from __future__ import annotations
+
 import logging
 import sys
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.nn.utils.parametrizations import weight_norm
-from torch.utils.data import Dataset, DataLoader
 from rapidfuzz import fuzz
 from sklearn.metrics import (
     classification_report,
+    f1_score,
     precision_recall_curve,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
+from torch.nn.utils.parametrizations import weight_norm
+from torch.utils.data import DataLoader, Dataset
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet # noqa: E402
-from helpers import cluster # noqa: E402
+from helpers import cluster  # noqa: E402
+from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -64,33 +67,55 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ═════════════════════════════════════════════════════════════════════════════
 class Chomp1d(nn.Module):
     """Removes trailing padding to maintain causal convolution."""
+
     def __init__(self, chomp_size):
         super().__init__()
         self.chomp_size = chomp_size
 
     def forward(self, x):
-        return x[:, :, :-self.chomp_size].contiguous()
+        return x[:, :, : -self.chomp_size].contiguous()
 
 
 class TemporalBlock(nn.Module):
     """Residual block with two weight-normed causal dilated convolutions."""
+
     def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
         super().__init__()
-        self.conv1 = weight_norm(nn.Conv1d(
-            n_inputs, n_outputs, kernel_size, stride=stride, padding=padding, dilation=dilation,
-        ))
+        self.conv1 = weight_norm(
+            nn.Conv1d(
+                n_inputs,
+                n_outputs,
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+            )
+        )
         self.chomp1 = Chomp1d(padding)
         self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(dropout)
-        self.conv2 = weight_norm(nn.Conv1d(
-            n_outputs, n_outputs, kernel_size, stride=stride, padding=padding, dilation=dilation,
-        ))
+        self.conv2 = weight_norm(
+            nn.Conv1d(
+                n_outputs,
+                n_outputs,
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+            )
+        )
         self.chomp2 = Chomp1d(padding)
         self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(dropout)
         self.net = nn.Sequential(
-            self.conv1, self.chomp1, self.relu1, self.dropout1,
-            self.conv2, self.chomp2, self.relu2, self.dropout2,
+            self.conv1,
+            self.chomp1,
+            self.relu1,
+            self.dropout1,
+            self.conv2,
+            self.chomp2,
+            self.relu2,
+            self.dropout2,
         )
         self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.relu = nn.ReLU()
@@ -111,19 +136,26 @@ class TemporalBlock(nn.Module):
 
 class TemporalConvNet(nn.Module):
     """Stacks TemporalBlocks with exponentially increasing dilation."""
+
     def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2):
         super().__init__()
         layers = []
         num_levels = len(num_channels)
         for i in range(num_levels):
-            dilation_size = 2 ** i
+            dilation_size = 2**i
             in_channels = num_inputs if i == 0 else num_channels[i - 1]
             out_channels = num_channels[i]
-            layers.append(TemporalBlock(
-                in_channels, out_channels, kernel_size, stride=1,
-                dilation=dilation_size, padding=(kernel_size - 1) * dilation_size,
-                dropout=dropout,
-            ))
+            layers.append(
+                TemporalBlock(
+                    in_channels,
+                    out_channels,
+                    kernel_size,
+                    stride=1,
+                    dilation=dilation_size,
+                    padding=(kernel_size - 1) * dilation_size,
+                    dropout=dropout,
+                )
+            )
         self.network = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -139,6 +171,7 @@ class SiameseTCN(nn.Module):
     Each name is encoded via character embedding → shared TCN → global pooling.
     Representations are combined and classified through a FC head.
     """
+
     def __init__(self, vocab_size, embed_dim, tcn_channels, kernel_size, tcn_dropout, fc_dropout):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
@@ -157,9 +190,9 @@ class SiameseTCN(nn.Module):
     def _encode(self, x):
         """Encodes a batch of character index sequences → fixed-size vectors."""
         # x: (batch, seq_len) of int indices
-        emb = self.embedding(x)        # (batch, seq_len, embed_dim)
-        emb = emb.transpose(1, 2)      # (batch, embed_dim, seq_len) — TCN expects channels-first
-        h = self.tcn(emb)              # (batch, channels, seq_len)
+        emb = self.embedding(x)  # (batch, seq_len, embed_dim)
+        emb = emb.transpose(1, 2)  # (batch, embed_dim, seq_len) — TCN expects channels-first
+        h = self.tcn(emb)  # (batch, channels, seq_len)
         # Masking padded positions before pooling
         mask = (x != 0).unsqueeze(1).float()  # (batch, 1, seq_len)
         h_masked = h * mask
@@ -182,6 +215,7 @@ class SiameseTCN(nn.Module):
 # ═════════════════════════════════════════════════════════════════════════════
 class CharVocab:
     """Maps characters to integer indices with PAD=0 and UNK=1."""
+
     PAD = 0
     UNK = 1
 
@@ -218,6 +252,7 @@ class CharVocab:
 # ═════════════════════════════════════════════════════════════════════════════
 class NamePairDataset(Dataset):
     """Wraps a DataFrame of (variant_a, variant_b, to_link) into a PyTorch Dataset."""
+
     def __init__(self, df: pd.DataFrame, vocab: CharVocab, max_len: int):
         self.a = df["variant_a"].astype(str).tolist()
         self.b = df["variant_b"].astype(str).tolist()
@@ -244,7 +279,8 @@ def assemble_training_data() -> pd.DataFrame:
     positives = gs[gs["to_link"].eq(True)].copy()
     # Filtering positives to WRatio [60, 100)
     positives["_wr"] = positives.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
     positives = positives[(positives["_wr"] >= WRATIO_LOWER) & (positives["_wr"] < WRATIO_UPPER)]
     positives = positives.drop(columns=["_wr"])
@@ -255,12 +291,14 @@ def assemble_training_data() -> pd.DataFrame:
     neg_pool = dbscan[dbscan["to_link"].eq(False)]
     negatives = neg_pool.sample(n=min(n_pos, len(neg_pool)), random_state=RANDOM_STATE)
     log.info("Negatives sampled: %d (from %d pool)", len(negatives), len(neg_pool))
-    train = pd.concat([
-        positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-        negatives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
-    ], ignore_index=True)
-    log.info("Training set: %d pairs (pos=%d, neg=%d).",
-             len(train), train["to_link"].sum(), (~train["to_link"]).sum())
+    train = pd.concat(
+        [
+            positives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+            negatives[["variant_a", "variant_b", "to_link"]].reset_index(drop=True),
+        ],
+        ignore_index=True,
+    )
+    log.info("Training set: %d pairs (pos=%d, neg=%d).", len(train), train["to_link"].sum(), (~train["to_link"]).sum())
     return train
 
 
@@ -352,8 +390,9 @@ def train_model(
         val_auc = roc_auc_score(y_val, val_probs)
         history["val_auc"].append(val_auc)
         if epoch % 5 == 0 or epoch == 1:
-            log.info("Epoch %3d | loss=%.4f | val AUC=%.4f | lr=%.2e",
-                     epoch, avg_loss, val_auc, scheduler.get_last_lr()[0])
+            log.info(
+                "Epoch %3d | loss=%.4f | val AUC=%.4f | lr=%.2e", epoch, avg_loss, val_auc, scheduler.get_last_lr()[0]
+            )
         # Early stopping
         if val_auc > best_auc:
             best_auc = val_auc
@@ -362,8 +401,9 @@ def train_model(
         else:
             patience_counter += 1
             if patience_counter >= PATIENCE:
-                log.info("Early stopping at epoch %d (best val AUC=%.4f at epoch %d).",
-                         epoch, best_auc, epoch - PATIENCE)
+                log.info(
+                    "Early stopping at epoch %d (best val AUC=%.4f at epoch %d).", epoch, best_auc, epoch - PATIENCE
+                )
                 break
     # Restoring best checkpoint
     if best_state is not None:
@@ -386,11 +426,15 @@ def main():
     # Step 1: Assembling data
     train_full = assemble_training_data()
     test_df = build_avc_test()
-    log.info("AVC test: %d pairs (pos=%d, neg=%d).",
-             len(test_df), test_df["to_link"].sum(), (~test_df["to_link"]).sum())
+    log.info(
+        "AVC test: %d pairs (pos=%d, neg=%d).", len(test_df), test_df["to_link"].sum(), (~test_df["to_link"]).sum()
+    )
     # Splitting training into train/val (80/20)
     train_df, val_df = train_test_split(
-        train_full, test_size=0.2, stratify=train_full["to_link"], random_state=RANDOM_STATE,
+        train_full,
+        test_size=0.2,
+        stratify=train_full["to_link"],
+        random_state=RANDOM_STATE,
     )
     log.info("Train/val split: %d / %d", len(train_df), len(val_df))
     # Step 2: Building character vocabulary from training names
@@ -416,8 +460,9 @@ def main():
     ).to(DEVICE)
     n_params = sum(p.numel() for p in model.parameters())
     log.info("Model parameters: %s", f"{n_params:,}")
-    log.info("TCN receptive field: %d characters",
-             1 + 2 * (KERNEL_SIZE - 1) * sum(2 ** i for i in range(len(TCN_CHANNELS))))
+    log.info(
+        "TCN receptive field: %d characters", 1 + 2 * (KERNEL_SIZE - 1) * sum(2**i for i in range(len(TCN_CHANNELS)))
+    )
     # Computing pos_weight for BCE loss
     n_pos_train = train_df["to_link"].sum()
     n_neg_train = len(train_df) - n_pos_train
@@ -445,8 +490,12 @@ def main():
     print("=" * 100)
     print(f"AUC:            {auc:.4f}")
     print(f"Default (0.5):  P={default_m['precision']:.4f}  R={default_m['recall']:.4f}  F1={default_m['f1']:.4f}")
-    print(f"Optimal:        P={optimal_m['precision']:.4f}  R={optimal_m['recall']:.4f}  F1={optimal_m['f1']:.4f}  (thr={opt_thr:.3f})")
-    print(f"High-precision: P={best_hi['precision']:.4f}  R={best_hi['recall']:.4f}  F1={best_hi['f1']:.4f}  (thr={best_hi['threshold']:.3f})")
+    print(
+        f"Optimal:        P={optimal_m['precision']:.4f}  R={optimal_m['recall']:.4f}  F1={optimal_m['f1']:.4f}  (thr={opt_thr:.3f})"
+    )
+    print(
+        f"High-precision: P={best_hi['precision']:.4f}  R={best_hi['recall']:.4f}  F1={best_hi['f1']:.4f}  (thr={best_hi['threshold']:.3f})"
+    )
     print("=" * 100)
     # Printing classification report at optimal threshold
     y_pred_opt = (test_probs >= opt_thr).astype(int)
@@ -455,9 +504,11 @@ def main():
     # Comparison with Exp 6 baseline
     print("── Exp 6 baseline (ExtraTrees): AUC=0.8920, opt F1=0.7050 (thr=0.940) ──")
     # Training history summary
-    print(f"\nTraining: {len(history['train_loss'])} epochs, "
-          f"final loss={history['train_loss'][-1]:.4f}, "
-          f"best val AUC={max(history['val_auc']):.4f}")
+    print(
+        f"\nTraining: {len(history['train_loss'])} epochs, "
+        f"final loss={history['train_loss'][-1]:.4f}, "
+        f"best val AUC={max(history['val_auc']):.4f}"
+    )
 
 
 if __name__ == "__main__":

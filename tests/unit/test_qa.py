@@ -3,6 +3,7 @@ Tests for corefunc.qa — post-ingestion scrobble quality checks.
 """
 
 import pandas as pd
+
 from corefunc.qa import (
     _check_duplicates,
     _check_encoding,

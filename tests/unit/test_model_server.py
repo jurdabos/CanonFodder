@@ -6,9 +6,11 @@ so the httpx optional dependency is not required.
 """
 
 from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 from fastapi import HTTPException
+
 import corefunc.model_server as srv
 from corefunc.model_server import (
     PredictBatchRequest,

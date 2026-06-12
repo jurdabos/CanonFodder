@@ -6,9 +6,12 @@ from MB aliases and negative pairs from same-name / fuzzy-similar artists.
 """
 
 from __future__ import annotations
+
 import logging
+
 import pandas as pd
 from rapidfuzz import fuzz, process
+
 from corefunc.mb_local import _psql_csv, check_local_mb
 from helpers.io import GS_MB_PQ, dump_parquet
 

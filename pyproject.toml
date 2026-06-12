@@ -11,7 +11,6 @@ license = "MIT"
 authors = [{name = "Torda Bal\u00e1zs", email = "balazs.torda@iu-study.org"}]
 dependencies = [
   "aiohttp>=3.14.0",
-  "apache-airflow>=3.2.0",
   "click>=8.1",
   "cryptography>=46.0.7",
   "duckdb>=1.2",
@@ -103,12 +102,46 @@ exclude_lines = [
     "raise ImportError",
 ]
 
+# Canonical ruff configuration for the a6a ecosystem (mirrors acidbase templates/pyproject.lint.toml).
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "__pycache__",
+    ".eggs",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+# Conservative starting selection that mirrors the legacy flake8 + isort
+# coverage. Broaden to ["E","W","F","I","B","UP","SIM","RUF"] per repo once
+# the existing code is clean (use `ruff check --fix` / `--unsafe-fixes` first).
+# E,W = pycodestyle       F = pyflakes (incl. F401/F541/F821)       I = isort
+select = ["E", "W", "F", "I"]
+# E203 conflicts with the ruff formatter; ruff itself doesn't emit W503 (that's flake8-only).
+ignore = ["E203"]
+
+[tool.ruff.lint.per-file-ignores]
+# Long string fixtures and import-only test stubs are acceptable.
+"tests/**/*.py" = ["E501", "F401"]
+"**/__init__.py" = ["F401"]
+# Frozen one-off experiment scripts — not worth re-wrapping historical output lines.
+"scripts/**/*.py" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.uv.sources]
+acidbase = { git = "https://github.com/jurdabos/acidbase" }
 
 [dependency-groups]
 dev = [
+    "acidbase",
     "fpdf2>=2.8.7",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",

@@ -2,8 +2,9 @@
 Tests for helpers.experiment — MLflow tracking wrapper.
 """
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
-from unittest.mock import patch, MagicMock
 
 
 class TestInitAndBasicOps:
@@ -150,6 +151,7 @@ class TestGetShapEstimator:
     def test_voting_extracts_sub(self):
         """Extracts tree-based sub-estimator from VotingClassifier."""
         from sklearn.ensemble import VotingClassifier
+
         from helpers.experiment import _get_shap_estimator
 
         sub = MagicMock()
@@ -163,6 +165,7 @@ class TestGetShapEstimator:
         """Extracts tree-based sub-estimator from StackingClassifier."""
         from sklearn.ensemble import StackingClassifier
         from sklearn.linear_model import LogisticRegression
+
         from helpers.experiment import _get_shap_estimator
 
         sub = MagicMock()
@@ -178,6 +181,7 @@ class TestGetShapEstimator:
     def test_bagging_extracts_first(self):
         """Extracts first estimator from BaggingClassifier."""
         from sklearn.ensemble import BaggingClassifier
+
         from helpers.experiment import _get_shap_estimator
 
         sub = MagicMock()
@@ -189,6 +193,7 @@ class TestGetShapEstimator:
     def test_bagging_empty_returns_none(self):
         """Returns None when BaggingClassifier has no fitted estimators."""
         from sklearn.ensemble import BaggingClassifier
+
         from helpers.experiment import _get_shap_estimator
 
         bc = BaggingClassifier()
@@ -198,6 +203,7 @@ class TestGetShapEstimator:
     def test_voting_no_tree_returns_none(self):
         """Returns None when no sub-estimator has feature_importances_."""
         from sklearn.ensemble import VotingClassifier
+
         from helpers.experiment import _get_shap_estimator
 
         sub = MagicMock(spec=[])  # no feature_importances_

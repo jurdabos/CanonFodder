@@ -2,10 +2,12 @@
 Integration tests for corefunc.model_server (FastAPI).
 """
 
-import pytest
 from unittest.mock import MagicMock
+
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
+
 from corefunc.model_server import app
 
 

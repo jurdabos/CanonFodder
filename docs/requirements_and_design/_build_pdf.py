@@ -1,9 +1,11 @@
 """Converts CanonFodder_requirementsanddesigndocumentation.md to PDF via fpdf2."""
+
 from __future__ import annotations
+
 import re
 from pathlib import Path
-from fpdf import FPDF
 
+from fpdf import FPDF
 
 SRC = Path(__file__).parent / "CanonFodder_requirementsanddesigndocumentation.md"
 DST = Path(__file__).parent / "CanonFodder_requirementsanddesigndocumentation.pdf"

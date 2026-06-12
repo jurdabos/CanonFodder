@@ -15,13 +15,16 @@ Steps:
 5. Drop pure whole-string features from training columns
 6. Prune, train all 8 models, threshold sweep against AVC test set
 """
+
 from __future__ import annotations
+
 import itertools
 import logging
 import sys
 import warnings
 from collections import Counter
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz
@@ -29,10 +32,10 @@ from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
     classification_report,
+    f1_score,
     precision_recall_curve,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline
@@ -41,10 +44,10 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet, sanitize # noqa: E402
-from helpers.features import compute_pair_features # noqa: E402
-from helpers import cluster, stats # noqa: E402
-from helpers.device import get_device # noqa: E402
+from helpers import cluster, stats  # noqa: E402
+from helpers.device import get_device  # noqa: E402
+from helpers.features import compute_pair_features  # noqa: E402
+from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet, sanitize  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -57,27 +60,49 @@ N_TARGET = 5000
 
 # ── Feature tier definitions ──────────────────────────────────────────────────
 WHOLE_STRING_FEATURES = [
-    "ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio",
-    "WRatio", "QRatio", "norm_levenshtein", "jaro_winkler",
-    "length_ratio", "abs_len_diff",
+    "ratio",
+    "partial_ratio",
+    "token_sort_ratio",
+    "token_set_ratio",
+    "WRatio",
+    "QRatio",
+    "norm_levenshtein",
+    "jaro_winkler",
+    "length_ratio",
+    "abs_len_diff",
 ]
 NON_WS_FEATURES = [
     # Token-level (5)
-    "token_count_diff", "token_jaccard", "shared_token_ratio",
-    "lcs_token_len", "token_order_displacement",
+    "token_count_diff",
+    "token_jaccard",
+    "shared_token_ratio",
+    "lcs_token_len",
+    "token_order_displacement",
     # Character-level (8)
-    "bigram_jaccard", "trigram_jaccard",
-    "edit_inserts", "edit_deletes", "edit_replaces",
-    "shared_prefix_len", "shared_suffix_len", "script_mismatch",
+    "bigram_jaccard",
+    "trigram_jaccard",
+    "edit_inserts",
+    "edit_deletes",
+    "edit_replaces",
+    "shared_prefix_len",
+    "shared_suffix_len",
+    "script_mismatch",
 ]
 # Bounded [0,1] similarity features suitable for interaction products
 NON_WS_SIMILARITY = [
-    "token_jaccard", "shared_token_ratio", "bigram_jaccard", "trigram_jaccard",
+    "token_jaccard",
+    "shared_token_ratio",
+    "bigram_jaccard",
+    "trigram_jaccard",
 ]
 # Whole-string scores used for cross-tier interactions
 WS_SIM_SCORES = [
-    "ratio", "partial_ratio", "token_sort_ratio", "token_set_ratio",
-    "WRatio", "QRatio",
+    "ratio",
+    "partial_ratio",
+    "token_sort_ratio",
+    "token_set_ratio",
+    "WRatio",
+    "QRatio",
 ]
 
 
@@ -87,7 +112,8 @@ WS_SIM_SCORES = [
 def _compute_wratio_col(df: pd.DataFrame) -> pd.Series:
     """Computes WRatio for each row."""
     return df.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
 
 
@@ -114,10 +140,15 @@ def distribution_match_negatives(
     pos_in_range = pos_wr[(pos_wr >= 60) & (pos_wr < 100)]
     pos_hist, _ = np.histogram(pos_in_range, bins=bin_edges)
     pos_fracs = pos_hist / pos_hist.sum()
-    log.info("Positive WRatio distribution in [60,100): %s", dict(zip(
-        [f"[{bin_edges[i]:.0f},{bin_edges[i+1]:.0f})" for i in range(n_bins)],
-        pos_hist,
-    )))
+    log.info(
+        "Positive WRatio distribution in [60,100): %s",
+        dict(
+            zip(
+                [f"[{bin_edges[i]:.0f},{bin_edges[i + 1]:.0f})" for i in range(n_bins)],
+                pos_hist,
+            )
+        ),
+    )
     # Binning negatives
     neg_pool["_bin"] = pd.cut(neg_pool["_wr"], bins=bin_edges, right=False, labels=False)
     neg_pool = neg_pool.dropna(subset=["_bin"])
@@ -134,8 +165,13 @@ def distribution_match_negatives(
         if len(bin_df) < targets[i]:
             shortfall += targets[i] - len(bin_df)
             sampled_parts.append(bin_df)
-            log.info("  Bin [%.0f,%.0f): target=%d, available=%d (capped)",
-                     bin_edges[i], bin_edges[i + 1], targets[i], len(bin_df))
+            log.info(
+                "  Bin [%.0f,%.0f): target=%d, available=%d (capped)",
+                bin_edges[i],
+                bin_edges[i + 1],
+                targets[i],
+                len(bin_df),
+            )
         else:
             available_bins.append((i, bin_df, targets[i]))
     # Redistributing shortfall proportionally among non-capped bins
@@ -146,13 +182,19 @@ def distribution_match_negatives(
             extra = int(round(shortfall * surplus / max(total_surplus, 1)))
             final_n = min(base_target + extra, len(bin_df))
             sampled_parts.append(bin_df.sample(n=final_n, random_state=RANDOM_STATE))
-            log.info("  Bin [%.0f,%.0f): target=%d+%d=%d, available=%d",
-                     bin_edges[i], bin_edges[i + 1], base_target, extra, final_n, len(bin_df))
+            log.info(
+                "  Bin [%.0f,%.0f): target=%d+%d=%d, available=%d",
+                bin_edges[i],
+                bin_edges[i + 1],
+                base_target,
+                extra,
+                final_n,
+                len(bin_df),
+            )
     else:
         for i, bin_df, target in available_bins:
             sampled_parts.append(bin_df.sample(n=target, random_state=RANDOM_STATE))
-            log.info("  Bin [%.0f,%.0f): target=%d, available=%d",
-                     bin_edges[i], bin_edges[i + 1], target, len(bin_df))
+            log.info("  Bin [%.0f,%.0f): target=%d, available=%d", bin_edges[i], bin_edges[i + 1], target, len(bin_df))
     neg_sampled = pd.concat(sampled_parts, ignore_index=True).drop(columns=["_wr", "_bin"])
     log.info("Distribution-matched negatives: %d (target was %d).", len(neg_sampled), n_target)
     return neg_sampled
@@ -171,12 +213,14 @@ def assemble_training_data() -> pd.DataFrame:
     # Distribution matching
     neg_sampled = distribution_match_negatives(positives, neg_pool)
     # Combining
-    train = pd.concat([
-        positives[["variant_a", "variant_b", "to_link", "source"]].reset_index(drop=True),
-        neg_sampled[["variant_a", "variant_b", "to_link", "source"]].reset_index(drop=True),
-    ], ignore_index=True)
-    log.info("Training set: %d pairs (pos=%d, neg=%d).",
-             len(train), train["to_link"].sum(), (~train["to_link"]).sum())
+    train = pd.concat(
+        [
+            positives[["variant_a", "variant_b", "to_link", "source"]].reset_index(drop=True),
+            neg_sampled[["variant_a", "variant_b", "to_link", "source"]].reset_index(drop=True),
+        ],
+        ignore_index=True,
+    )
+    log.info("Training set: %d pairs (pos=%d, neg=%d).", len(train), train["to_link"].sum(), (~train["to_link"]).sum())
     return train
 
 
@@ -226,9 +270,9 @@ def add_exp8_features(df: pd.DataFrame) -> pd.DataFrame:
     # Computing cross-tier + non-WS interactions
     log.info("Computing cross-tier and non-WS interaction features...")
     interaction_rows = df.apply(
-        lambda r: pd.Series(compute_cross_tier_interactions(
-            compute_pair_features(str(r["variant_a"]), str(r["variant_b"]))
-        )),
+        lambda r: pd.Series(
+            compute_cross_tier_interactions(compute_pair_features(str(r["variant_a"]), str(r["variant_b"])))
+        ),
         axis=1,
     )
     for col in interaction_rows.columns:
@@ -245,10 +289,7 @@ def select_training_columns(df: pd.DataFrame) -> list[str]:
     """Selects numeric columns, excluding whole-string features and metadata."""
     exclude = {"variants", "to_link", "variant_a", "variant_b", "source", "_key"}
     exclude.update(WHOLE_STRING_FEATURES)
-    all_num = [
-        c for c in df.columns
-        if c not in exclude and df[c].dtype in ("float64", "int64", "float32", "int32")
-    ]
+    all_num = [c for c in df.columns if c not in exclude and df[c].dtype in ("float64", "int64", "float32", "int32")]
     log.info("Candidate training features (excl. whole-string): %d", len(all_num))
     return all_num
 
@@ -293,6 +334,7 @@ def prune_features(
 def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list[str]):
     """Trains all 8 models and evaluates with default + optimal thresholds."""
     from corefunc.canon.experiment_runner import _build_model_catalogue
+
     target = "to_link"
     X_train = train_df[num_cols]
     y_train = train_df[target].astype(int).values
@@ -301,15 +343,17 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
     device = get_device()
     spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
     log.info("Train: %d | Test: %d | Features: %d | spw: %.2f", len(X_train), len(X_test), len(num_cols), spw)
-    log.info("Test distribution: pos=%d, neg=%d (%.1f%% positive)",
-             y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean())
+    log.info(
+        "Test distribution: pos=%d, neg=%d (%.1f%% positive)", y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean()
+    )
     catalogue = _build_model_catalogue(spw, device, random_state=RANDOM_STATE)
     results = []
     for model_name, clf in catalogue.items():
         log.info("─── Training %s ───", model_name)
         pre = ColumnTransformer(
             [("num", Pipeline([("scaler", RobustScaler())]), num_cols)],
-            remainder="drop", verbose_feature_names_out=False,
+            remainder="drop",
+            verbose_feature_names_out=False,
         )
         pre.set_output(transform="pandas")
         pipeline = Pipeline([("prep", pre), ("clf", clone(clf))])
@@ -327,17 +371,33 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
             m = _evaluate_at_threshold(y_test, y_prob, t)
             if m["precision"] >= 0.80 and m["f1"] > best_hi["f1"]:
                 best_hi = m
-        results.append({
-            "model": model_name, "auc": auc,
-            "default_f1": default_m["f1"], "default_prec": default_m["precision"], "default_rec": default_m["recall"],
-            "opt_thr": optimal_m["threshold"], "opt_f1": optimal_m["f1"],
-            "opt_prec": optimal_m["precision"], "opt_rec": optimal_m["recall"],
-            "hiprec_thr": best_hi["threshold"], "hiprec_f1": best_hi["f1"],
-            "hiprec_prec": best_hi["precision"], "hiprec_rec": best_hi["recall"],
-        })
-        log.info("%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f) | hi-P F1=%.4f (thr=%.3f)",
-                 model_name, auc, default_m["f1"], optimal_m["f1"], opt_thr,
-                 best_hi["f1"], best_hi["threshold"])
+        results.append(
+            {
+                "model": model_name,
+                "auc": auc,
+                "default_f1": default_m["f1"],
+                "default_prec": default_m["precision"],
+                "default_rec": default_m["recall"],
+                "opt_thr": optimal_m["threshold"],
+                "opt_f1": optimal_m["f1"],
+                "opt_prec": optimal_m["precision"],
+                "opt_rec": optimal_m["recall"],
+                "hiprec_thr": best_hi["threshold"],
+                "hiprec_f1": best_hi["f1"],
+                "hiprec_prec": best_hi["precision"],
+                "hiprec_rec": best_hi["recall"],
+            }
+        )
+        log.info(
+            "%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f) | hi-P F1=%.4f (thr=%.3f)",
+            model_name,
+            auc,
+            default_m["f1"],
+            optimal_m["f1"],
+            opt_thr,
+            best_hi["f1"],
+            best_hi["threshold"],
+        )
         y_pred_opt = (y_prob >= opt_thr).astype(int)
         print(f"\n=== {model_name} (optimal thr={opt_thr:.3f}) ===")
         print(classification_report(y_test, y_pred_opt, target_names=["no link", "link"]))
@@ -351,15 +411,19 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
                     print(f"  {name:<45} {imp:.4f}")
     # Printing summary table
     print("\n" + "=" * 130)
-    print(f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | "
-          f"{'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | "
-          f"{'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}")
+    print(
+        f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | "
+        f"{'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | "
+        f"{'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}"
+    )
     print("-" * 130)
     for r in sorted(results, key=lambda x: x["opt_f1"], reverse=True):
-        print(f"{r['model']:<22} {r['auc']:>6.4f} | "
-              f"{r['default_prec']:>6.4f} {r['default_rec']:>6.4f} {r['default_f1']:>6.4f} | "
-              f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
-              f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}")
+        print(
+            f"{r['model']:<22} {r['auc']:>6.4f} | "
+            f"{r['default_prec']:>6.4f} {r['default_rec']:>6.4f} {r['default_f1']:>6.4f} | "
+            f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
+            f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}"
+        )
     print("=" * 130)
     # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
     best = max(results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
@@ -392,8 +456,12 @@ def main():
     test_raw = pd.DataFrame(test_rows, columns=["variants", "variant_a", "variant_b", "to_link"])
     test_raw["_wr"] = test_raw.apply(lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1)
     test_raw = test_raw[(test_raw["_wr"] >= WRATIO_LOWER) & (test_raw["_wr"] < WRATIO_UPPER)].drop(columns=["_wr"])
-    log.info("AVC test set: %d pairs (pos=%d, neg=%d).",
-             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"].eq(False)).sum())
+    log.info(
+        "AVC test set: %d pairs (pos=%d, neg=%d).",
+        len(test_raw),
+        test_raw["to_link"].sum(),
+        (test_raw["to_link"].eq(False)).sum(),
+    )
     test_df = add_exp8_features(test_raw.reset_index(drop=True))
     # Step 5: Selecting and pruning features (excluding whole-string)
     all_num = select_training_columns(train_df)
@@ -406,8 +474,13 @@ def main():
     cross_tier = [c for c in num_cols if "_mul_" in c and any(ws in c for ws in WS_SIM_SCORES)]
     non_ws_int = [c for c in num_cols if "_mul_" in c and c not in cross_tier]
     base_feats = [c for c in num_cols if c not in cross_tier and c not in non_ws_int]
-    log.info("Final features: %d base, %d cross-tier interactions, %d non-WS interactions = %d total",
-             len(base_feats), len(cross_tier), len(non_ws_int), len(num_cols))
+    log.info(
+        "Final features: %d base, %d cross-tier interactions, %d non-WS interactions = %d total",
+        len(base_feats),
+        len(cross_tier),
+        len(non_ws_int),
+        len(num_cols),
+    )
     # Ensuring test_df has all columns
     missing_in_test = [c for c in num_cols if c not in test_df.columns]
     if missing_in_test:

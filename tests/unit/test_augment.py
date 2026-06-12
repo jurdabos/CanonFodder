@@ -4,7 +4,9 @@ corefunc/canon/augment.py and the augment path in corefunc/canon/model.py.
 """
 
 from __future__ import annotations
+
 from unittest.mock import patch
+
 import pandas as pd
 import pytest
 

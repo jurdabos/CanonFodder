@@ -2,9 +2,10 @@
 Unit tests for corefunc.workflow (data-gathering orchestration).
 """
 
+from unittest.mock import patch
+
 import pandas as pd
 import pytest
-from unittest.mock import patch
 
 
 class TestRunDataGatheringWorkflow:
@@ -95,8 +96,8 @@ class TestGetDevice:
                 dev._CACHED_DEVICE = None
                 # Forcing the CPU path by simulating failure
                 try:
-                    import xgboost as xgb
                     import numpy as np
+                    import xgboost as xgb
 
                     dtrain = xgb.DMatrix(
                         np.array([[1, 2]], dtype=np.float32),

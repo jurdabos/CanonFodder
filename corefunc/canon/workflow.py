@@ -12,21 +12,24 @@ discover_candidates – scans scrobble data for new variant candidates.
 """
 
 from __future__ import annotations
+
 import hashlib
 import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+
 import duckdb
 import pandas as pd
+
 from helpers.io import (
     ALIAS_SEP,
+    ARTIST_INFO_PQ,
     AVC_PQ,
     PQ_DIR,
-    ARTIST_INFO_PQ,
-    read_parquet,
-    dump_parquet,
     append_to_parquet,
+    dump_parquet,
+    read_parquet,
     scrobble_data_exists,
     scrobble_duckdb_from,
 )
@@ -217,6 +220,7 @@ def list_mlflow_runs(experiment_name: str = "c9r-record-linkage") -> list[dict]:
     precision, recall, f1, auc.
     """
     import mlflow
+
     from helpers.experiment import TRACKING_URI
 
     mlflow.set_tracking_uri(TRACKING_URI)
@@ -252,6 +256,7 @@ def list_mlflow_runs(experiment_name: str = "c9r-record-linkage") -> list[dict]:
 def load_run_model(run_id: str):
     """Loads the sklearn Pipeline logged in the given MLflow run."""
     import mlflow
+
     from helpers.experiment import TRACKING_URI
 
     mlflow.set_tracking_uri(TRACKING_URI)
@@ -336,6 +341,7 @@ def discover_candidates(
     Returns a list of dicts with keys: signature, variants, hash, max_prob.
     """
     from rapidfuzz import fuzz, process
+
     from helpers.inference import compute_inference_features, load_model
 
     if model is None:

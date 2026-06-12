@@ -5,16 +5,19 @@ All subprocess calls are mocked so Docker is not required in CI.
 """
 
 from __future__ import annotations
+
 import subprocess
 from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
+
 from corefunc.mb_local import (
+    ARTIST_INFO_COLS,
     _escape_pg,
     _psql_csv,
     check_local_mb,
     enrich_from_local_mb,
-    ARTIST_INFO_COLS,
 )
 
 

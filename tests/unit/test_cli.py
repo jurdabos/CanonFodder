@@ -2,10 +2,12 @@
 Unit tests for the Click CLI (main.py).
 """
 
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
 from click.testing import CliRunner
-from unittest.mock import patch, MagicMock
+
 from main import cli
 
 
@@ -292,6 +294,7 @@ class TestSourceHelpers:
     def test_resolve_user_missing_raises(self):
         """Raises UsageError when neither flag nor env var is set."""
         import click
+
         from main import _resolve_user
 
         with pytest.raises(click.UsageError, match="--user is required"):
@@ -521,6 +524,7 @@ class TestParseRankRanges:
     def test_invalid_string_raises(self):
         """Raises BadParameter for unparseable input."""
         import click
+
         from main import _parse_rank_ranges
 
         with pytest.raises(click.BadParameter, match="Cannot parse"):
@@ -529,6 +533,7 @@ class TestParseRankRanges:
     def test_zero_start_raises(self):
         """Raises BadParameter when start is 0."""
         import click
+
         from main import _parse_rank_ranges
 
         with pytest.raises(click.BadParameter, match="Invalid range"):
@@ -537,6 +542,7 @@ class TestParseRankRanges:
     def test_inverted_range_raises(self):
         """Raises BadParameter when start > end."""
         import click
+
         from main import _parse_rank_ranges
 
         with pytest.raises(click.BadParameter, match="Invalid range"):

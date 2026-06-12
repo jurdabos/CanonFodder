@@ -13,9 +13,11 @@ Retries with exponential back-off are configured per task (FR-10).
 """
 
 from __future__ import annotations
+
 import logging
 import os
 from datetime import UTC, datetime
+
 from dotenv import load_dotenv
 from prefect import flow, get_run_logger, task
 from prefect.tasks import exponential_backoff
@@ -34,8 +36,8 @@ log = logging.getLogger(__name__)
 )
 def fetch_scrobbles(username: str, *, full: bool = False, source: str = "lastfm") -> int:
     """Ingests scrobbles via the workflow helper; returns count."""
-    from corefunc.workflow import run_data_gathering_workflow
     from corefunc.qa import qa_lb_ingest
+    from corefunc.workflow import run_data_gathering_workflow
 
     logger = get_run_logger()
     logger.info("Fetching scrobbles for %s from %s", username, source)

@@ -3,13 +3,14 @@ Wraps assorted clustering utilities including fuzzy string scoring and
 quality metrics.
 """
 
-from functools import partial
 import itertools
+from functools import partial
+from typing import Sequence, Tuple
+
 import numpy as np
 from rapidfuzz import fuzz, process
 from sklearn.cluster import DBSCAN
 from sklearn.tree import _tree
-from typing import Sequence, Tuple
 
 
 def _clf_scorer(x: str, y: str, clf, **kwargs) -> float:
@@ -43,8 +44,8 @@ def calculate_clustering_metrics(name, labels, data, cluster_centers=None, model
     Returns:
         dict containing the four metrics
     """
-    from sklearn.metrics import silhouette_score
     from scipy.spatial.distance import cdist
+    from sklearn.metrics import silhouette_score
 
     non_noise_indices = labels != -1
     clustered_data = data[non_noise_indices].to_numpy()

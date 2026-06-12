@@ -7,17 +7,20 @@ scalar.  No persistent DuckDB database file is created.
 """
 
 from __future__ import annotations
+
 import logging
 from collections.abc import Sequence
 from pathlib import Path
+
 import duckdb
 import pandas as pd
+
 from helpers.io import (
+    ALIAS_SEP,
     ARTIST_INFO_PQ,
     AVC_PQ,
     QA_REPORT_PQ,
     UC_PQ,
-    ALIAS_SEP,
     scrobble_data_exists,
     scrobble_duckdb_from,
 )

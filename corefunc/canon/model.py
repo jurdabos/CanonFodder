@@ -8,20 +8,23 @@ evaluate()      – computes classification report + AUC on a held-out set.
 """
 
 from __future__ import annotations
+
 import json
 import logging
 import pickle
 from pathlib import Path
+
 import pandas as pd
+from lightgbm import LGBMClassifier
 from sklearn.compose import ColumnTransformer
-from sklearn.metrics import classification_report, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.metrics import classification_report, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
-from lightgbm import LGBMClassifier
-from helpers.io import AVC_PQ, GS_MB_PQ, read_parquet
+
 from helpers import cluster, experiment, stats
 from helpers.features import compute_pair_features
+from helpers.io import AVC_PQ, GS_MB_PQ, read_parquet
 
 log = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

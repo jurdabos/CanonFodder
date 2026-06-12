@@ -2,10 +2,12 @@
 Unit tests for corefunc.canon — gold standard builder, LightGBM pipeline.
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
+
 from corefunc.canon.model import _build_gold_standard, evaluate, train_model
 
 
@@ -87,10 +89,10 @@ class TestEvaluate:
 
     def test_returns_metrics_dict(self, capsys):
         """Returns a dict with precision, recall, f1, and auc keys."""
-        from sklearn.pipeline import Pipeline
-        from sklearn.preprocessing import RobustScaler
         from lightgbm import LGBMClassifier
         from sklearn.compose import ColumnTransformer
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import RobustScaler
 
         # Building a tiny trained model
         rng = np.random.default_rng(99)

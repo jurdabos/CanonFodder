@@ -8,6 +8,7 @@ full k-fold CV and logs to MLflow in the same format as ``c9r train``.
 """
 
 from __future__ import annotations
+
 import json
 import logging
 import pickle
@@ -15,38 +16,40 @@ import tempfile
 import warnings
 from pathlib import Path
 from typing import Any
+
 import numpy as np
-import pandas as pd
 import optuna
+import pandas as pd
+from lightgbm import LGBMClassifier
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.metrics import (
     classification_report,
+    f1_score,
     precision_recall_curve,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
-from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
+
 from corefunc.canon.experiment_runner import _safe_get_params
 from corefunc.canon.trainer import (
     RANDOM_STATE,
     _eval_at,
     _fit_with_gpu_fallback,
     _high_precision_threshold,
+    _load_catalogue_lookups,
     _next_experiment_number,
     _optimal_threshold,
     build_training_data,
     compute_all_features,
     prune_feature_columns,
     verify_mlflow,
-    _load_catalogue_lookups,
 )
 from helpers import experiment
 from helpers.device import get_device

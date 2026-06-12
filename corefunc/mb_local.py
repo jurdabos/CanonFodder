@@ -7,6 +7,7 @@ dependencies are needed.
 """
 
 from __future__ import annotations
+
 import io
 import logging
 import os
@@ -14,7 +15,9 @@ import re
 import subprocess
 from collections import Counter, defaultdict
 from typing import Sequence
+
 import pandas as pd
+
 from helpers.io import (
     ARTIST_INFO_COLS,
     ARTIST_INFO_PQ,

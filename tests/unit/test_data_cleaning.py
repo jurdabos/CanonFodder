@@ -1,6 +1,7 @@
 """Unit tests for corefunc.data_cleaning (Parquet-based artist dedup and encoding repair)."""
 
 import pandas as pd
+
 from corefunc.data_cleaning import (
     _repair_text,
     clean_artist_info,

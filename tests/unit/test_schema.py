@@ -3,10 +3,12 @@ Unit tests for helpers.schema (versioned Parquet schema management).
 """
 
 import logging
+
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
 from helpers.schema import (
     current_version,
     migrate_file,

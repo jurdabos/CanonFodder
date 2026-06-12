@@ -5,9 +5,10 @@ Tests targeting remaining coverage gaps to reach 80%:
 - helpers/features.py: unicode_script, script_mismatch, fuzzy_scores shim
 """
 
+from unittest.mock import patch
+
 import pandas as pd
 import pytest
-from unittest.mock import patch
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

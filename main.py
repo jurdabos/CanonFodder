@@ -6,13 +6,20 @@ train, serve, dashboard, purge, flow.
 """
 
 from __future__ import annotations
+
 import logging
 import math
 import os
 import signal
 import sys
+
 import click
 from dotenv import load_dotenv
+
+try:
+    from acidbase.push import push_command
+except ImportError:  # to keep the CLI usable when acidbase is absent
+    push_command = None
 
 load_dotenv()
 log = logging.getLogger("c9r")
@@ -208,6 +215,7 @@ def avc_augment(pos_limit: int, neg_limit: int, similarity_floor: int) -> None:
 def canon_human() -> None:
     """Tackle undecided artist name variants interactively"""
     import re
+
     from corefunc.canon.workflow import undecided_rows, update_avc_decision
 
     pending = undecided_rows()
@@ -298,7 +306,7 @@ def canon_experiment(run_name: str | None, augment: bool, folds: int, models: st
 def canon_machine(cutoff: int, threshold: float, min_plays: int, limit: int) -> None:
     """Finds new artist name variant candidates using ML"""
     from corefunc.canon.workflow import discover_candidates, write_new_candidates
-    from helpers.inference import load_model, MODEL_PATH
+    from helpers.inference import MODEL_PATH, load_model
 
     # Loading the persisted LightGBM pipeline
     try:
@@ -583,7 +591,7 @@ def dashboard(ctx: click.Context) -> None:
 @click.option("--top", "-n", default=10, type=int, help="Number of top artists to show.")
 def dashboard_artist(top: int) -> None:
     """Show top artists by play count"""
-    from helpers.query import scrobble_count, unique_artists, top_artists
+    from helpers.query import scrobble_count, top_artists, unique_artists
 
     total = scrobble_count()
     artists = unique_artists()
@@ -769,7 +777,7 @@ def fix_encoding_cmd() -> None:
 @click.option("--remove-legacy", is_flag=True, help="Delete legacy scrobble.parquet after migration.")
 def migrate_scrobbles_cmd(remove_legacy: bool) -> None:
     """Convert legacy scrobble.parquet to year-partitioned layout"""
-    from helpers.io import migrate_scrobble_to_partitioned, SCROBBLE_PQ
+    from helpers.io import SCROBBLE_PQ, migrate_scrobble_to_partitioned
 
     n = migrate_scrobble_to_partitioned()
     if n == 0:
@@ -1033,7 +1041,8 @@ def qa_gs_mb_cmd() -> None:
     # Printing label distribution and source breakdown
     dist = report.get("label_distribution", {})
     click.echo(
-        f"  Labels: {dist.get('positive', 0):,} positive, {dist.get('negative', 0):,} negative, {dist.get('null', 0):,} null"
+        f"  Labels: {dist.get('positive', 0):,} positive, "
+        f"{dist.get('negative', 0):,} negative, {dist.get('null', 0):,} null"
     )
     src_bk = report.get("source_breakdown", {})
     if src_bk:
@@ -1568,6 +1577,14 @@ def flow(source: str, full: bool) -> None:
         f"{result['flagged_for_review']} flagged, {result['avc_propagated']} propagated, "
         f"{result['gs_rows_written']} GS rows, {result['models_trained']} models trained."
     )
+
+
+# ── push ─────────────────────────────────────────────────────────────────────
+if push_command is not None:
+    # Attaching the shared acidbase commit-and-push workflow as `c9r push`.
+    cli.add_command(push_command)
+else:
+    log.debug("acidbase not installed — `c9r push` is unavailable.")
 
 
 if __name__ == "__main__":

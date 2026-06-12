@@ -2,8 +2,9 @@
 Unit tests for helpers.experiment — MLflow tracking wrapper.
 """
 
-from unittest.mock import patch, MagicMock
-from helpers.experiment import init_experiment, log_params, log_metrics, log_cv_fold, DEFAULT_EXPERIMENT, TRACKING_URI
+from unittest.mock import MagicMock, patch
+
+from helpers.experiment import DEFAULT_EXPERIMENT, TRACKING_URI, init_experiment, log_cv_fold, log_metrics, log_params
 
 
 class TestInitExperiment:

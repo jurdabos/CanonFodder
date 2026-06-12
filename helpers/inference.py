@@ -10,14 +10,17 @@ A convenience ``load_model()`` returns the persisted sklearn Pipeline.
 """
 
 from __future__ import annotations
+
 import itertools
 import logging
 import pickle
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
 import pandas as pd
 from rapidfuzz import fuzz, process
+
 from helpers.features import compute_pair_features
 from helpers.io import PQ_DIR, read_parquet, read_scrobble_df, sanitize
 

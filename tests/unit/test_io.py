@@ -3,6 +3,7 @@ Unit tests for helpers.io (Parquet I/O layer).
 """
 
 import pandas as pd
+
 from helpers.io import (
     append_to_parquet,
     dump_parquet,

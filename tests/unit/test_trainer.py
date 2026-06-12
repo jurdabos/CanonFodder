@@ -3,10 +3,11 @@ Tests for corefunc.canon.trainer — data preparation, feature engineering,
 and feature pruning functions.
 """
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

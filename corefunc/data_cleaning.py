@@ -1,15 +1,18 @@
 """Provides data-cleaning helpers over Parquet files."""
 
 from __future__ import annotations
+
 import logging
 import re
+
 import pandas as pd
+
 from helpers.io import (
     ARTIST_INFO_PQ,
-    read_parquet,
     dump_parquet,
-    read_scrobble_df,
     dump_scrobble_df,
+    read_parquet,
+    read_scrobble_df,
 )
 
 log = logging.getLogger(__name__)

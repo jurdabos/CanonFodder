@@ -6,11 +6,13 @@ Only pure-computation helpers remain.
 """
 
 from __future__ import annotations
+
 import logging
 import re
+
 import numpy as np
 import pandas as pd
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics import classification_report, confusion_matrix
 
 log = logging.getLogger(__name__)
 

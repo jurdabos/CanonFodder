@@ -7,26 +7,29 @@ and character-encoding sanity.
 """
 
 from __future__ import annotations
+
 import json
 import logging
 import re
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
+
 import pandas as pd
+
 from helpers.io import (
-    SCROBBLE_COLS,
     ARTIST_INFO_COLS,
-    AVC_COLS,
-    GS_MB_COLS,
     ARTIST_INFO_PQ,
+    AVC_COLS,
     AVC_PQ,
-    UC_PQ,
+    GS_MB_COLS,
     GS_MB_PQ,
     PQ_DIR,
     QA_REPORT_PQ,
+    SCROBBLE_COLS,
+    UC_PQ,
     UUID_RE,
-    read_parquet,
     append_to_parquet,
+    read_parquet,
     read_scrobble_df,
 )
 

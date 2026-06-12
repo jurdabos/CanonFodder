@@ -2,15 +2,17 @@
 Additional unit tests for HTTP.lfAPI — higher-level functions with mocking.
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
+
 from HTTP.lfAPI import (
     LastFMError,
     _fetch_country_from_lastfm,
+    enrich_artist_mbids,
     fetch_scrobbles_since,
     lastfm_request,
-    enrich_artist_mbids,
 )
 
 

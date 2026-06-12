@@ -4,11 +4,12 @@ corefunc.canon.tuner search spaces and objective, and
 corefunc.canon.experiment_runner CV and GPU fallback.
 """
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
 import torch
-from unittest.mock import patch, MagicMock
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -206,8 +207,9 @@ class TestPredictSiamese:
 
     def test_returns_probabilities(self):
         """Returns an array of sigmoid probabilities."""
-        from corefunc.canon.tcn_trainer import SiameseTCN, CharVocab, NamePairDataset, _predict_siamese
         from torch.utils.data import DataLoader
+
+        from corefunc.canon.tcn_trainer import CharVocab, NamePairDataset, SiameseTCN, _predict_siamese
 
         vocab = CharVocab()
         vocab.fit(["abc", "xyz", "def"])
@@ -239,8 +241,9 @@ class TestPredictHybrid:
 
     def test_returns_probabilities(self):
         """Returns an array of sigmoid probabilities."""
-        from corefunc.canon.tcn_trainer import HybridTCN, CharVocab, HybridDataset, _predict_hybrid
         from torch.utils.data import DataLoader
+
+        from corefunc.canon.tcn_trainer import CharVocab, HybridDataset, HybridTCN, _predict_hybrid
 
         vocab = CharVocab()
         vocab.fit(["abc", "xyz", "def"])
@@ -385,13 +388,14 @@ class TestTrainSiamese:
 
     def test_runs_one_epoch(self):
         """Completes a single epoch without error."""
+        from torch.utils.data import DataLoader
+
         from corefunc.canon.tcn_trainer import (
-            SiameseTCN,
             CharVocab,
             NamePairDataset,
+            SiameseTCN,
             _train_siamese,
         )
-        from torch.utils.data import DataLoader
 
         vocab = CharVocab()
         vocab.fit(["alpha", "beta", "gamma", "delta"])
@@ -436,13 +440,14 @@ class TestTrainHybrid:
 
     def test_runs_one_epoch(self):
         """Completes a single epoch without error."""
+        from torch.utils.data import DataLoader
+
         from corefunc.canon.tcn_trainer import (
-            HybridTCN,
             CharVocab,
             HybridDataset,
+            HybridTCN,
             _train_hybrid,
         )
-        from torch.utils.data import DataLoader
 
         vocab = CharVocab()
         vocab.fit(["alpha", "beta", "gamma", "delta"])
@@ -586,8 +591,9 @@ class TestExperimentRunnerCvEvaluate:
     @patch("corefunc.canon.experiment_runner.experiment")
     def test_returns_mean_metrics(self, mock_exp):
         """Returns cv_mean_* and cv_std_* keys."""
-        from corefunc.canon.experiment_runner import _cv_evaluate
         from sklearn.ensemble import RandomForestClassifier
+
+        from corefunc.canon.experiment_runner import _cv_evaluate
 
         mock_exp.log_cv_fold = MagicMock()
         rng = np.random.default_rng(42)
@@ -619,10 +625,11 @@ class TestExperimentRunnerFitWithGpuFallback:
 
     def test_success_returns_device(self):
         """Returns the original device on success."""
-        from corefunc.canon.experiment_runner import _fit_with_gpu_fallback
+        from sklearn.linear_model import LogisticRegression
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import RobustScaler
-        from sklearn.linear_model import LogisticRegression
+
+        from corefunc.canon.experiment_runner import _fit_with_gpu_fallback
 
         pipe = Pipeline(
             [

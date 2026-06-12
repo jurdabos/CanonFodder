@@ -6,6 +6,7 @@ CPU-only by design — this module only concerns XGBoost's ``device`` param.
 """
 
 from __future__ import annotations
+
 import logging
 
 log = logging.getLogger(__name__)

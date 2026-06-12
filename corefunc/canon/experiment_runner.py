@@ -8,11 +8,14 @@ Optuna-based hyperparameter tuning.
 """
 
 from __future__ import annotations
+
 import logging
 import warnings
 from typing import Any
+
 import numpy as np
 import pandas as pd
+from lightgbm import LGBMClassifier
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import (
@@ -35,7 +38,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
 from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
+
 from helpers import experiment
 from helpers.device import get_device
 

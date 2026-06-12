@@ -3,9 +3,11 @@ Unit tests for HTTP.mbAPI (MusicBrainz API helpers).
 """
 
 from unittest.mock import patch
+
 import pandas as pd
 import pytest
-from HTTP.mbAPI import _split_user_agent, _cache_artist, init
+
+from HTTP.mbAPI import _cache_artist, _split_user_agent, init
 
 
 class TestSplitUserAgent:

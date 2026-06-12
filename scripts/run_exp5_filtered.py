@@ -4,10 +4,13 @@ Runs Experiment 5: WRatio band-filtered holdout experiment.
 Filters both MBDB training data and AVC test data to WRatio ∈ [60, 100),
 then runs the full model catalogue via run_holdout_experiment().
 """
+
 from __future__ import annotations
+
 import logging
 import sys
 from pathlib import Path
+
 import pandas as pd
 from rapidfuzz import fuzz
 
@@ -15,9 +18,9 @@ from rapidfuzz import fuzz
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet # noqa: E402
-from helpers.features import compute_pair_features # noqa: E402
-from helpers import cluster, stats # noqa: E402
+from helpers import cluster, stats  # noqa: E402
+from helpers.features import compute_pair_features  # noqa: E402
+from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -62,7 +65,8 @@ def build_filtered_train() -> pd.DataFrame:
     combined = combined.dropna(subset=["variant_a", "variant_b"])
     # Deduplicating (order-insensitive pair keys)
     combined["_key"] = combined.apply(
-        lambda r: tuple(sorted([str(r["variant_a"]), str(r["variant_b"])])), axis=1,
+        lambda r: tuple(sorted([str(r["variant_a"]), str(r["variant_b"])])),
+        axis=1,
     )
     combined = combined.drop_duplicates(subset=["_key"]).drop(columns=["_key"])
     log.info("Combined MBDB: %d pairs (before filter).", len(combined))
@@ -74,7 +78,11 @@ def build_filtered_train() -> pd.DataFrame:
     neg = len(filtered) - pos
     log.info(
         "Filtered MBDB: %d pairs (pos=%d, neg=%d) in WRatio [%d, %d).",
-        len(filtered), pos, neg, WRATIO_LOWER, WRATIO_UPPER,
+        len(filtered),
+        pos,
+        neg,
+        WRATIO_LOWER,
+        WRATIO_UPPER,
     )
     return filtered.reset_index(drop=True)
 
@@ -101,7 +109,11 @@ def build_filtered_test() -> pd.DataFrame:
     neg = len(filtered) - pos
     log.info(
         "Filtered AVC: %d pairs (pos=%d, neg=%d) in WRatio [%d, %d).",
-        len(filtered), pos, neg, WRATIO_LOWER, WRATIO_UPPER,
+        len(filtered),
+        pos,
+        neg,
+        WRATIO_LOWER,
+        WRATIO_UPPER,
     )
     return filtered.reset_index(drop=True)
 
@@ -120,6 +132,7 @@ def main():
     test_df = _add_features(test_raw)
     # Running holdout experiment
     from corefunc.canon.experiment_runner import run_holdout_experiment
+
     results = run_holdout_experiment(
         train_df=train_df,
         test_df=test_df,

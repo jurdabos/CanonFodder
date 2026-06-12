@@ -2,9 +2,11 @@
 Additional unit tests for HTTP.lblink — LBClient facade and _cli helper.
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
-from HTTP.lblink import LBClient, _RequestsBackend, _cli
+
+from HTTP.lblink import LBClient, _cli, _RequestsBackend
 
 
 class TestLBClientInit:

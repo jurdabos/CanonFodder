@@ -3,6 +3,7 @@ Unit tests for helpers.cli interactive and pure helper functions.
 """
 
 import pandas as pd
+
 from helpers.cli import _apply_canonical, _overlaps, _remember_artist_variant
 
 

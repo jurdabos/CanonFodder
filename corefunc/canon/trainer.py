@@ -17,6 +17,7 @@ Pipeline stages:
 """
 
 from __future__ import annotations
+
 import itertools
 import logging
 import math
@@ -24,22 +25,25 @@ import tempfile
 import warnings
 from collections import Counter
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz, process
 from sklearn.base import clone
+from sklearn.cluster import DBSCAN
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
     classification_report,
+    f1_score,
     precision_recall_curve,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import RobustScaler
+
 from corefunc.canon.experiment_runner import _build_model_catalogue, _safe_get_params
 from helpers import cluster, experiment, stats
 from helpers.device import get_device
@@ -48,12 +52,11 @@ from helpers.io import (
     AVC_PQ,
     GS_MB_PQ,
     PQ_DIR,
+    dump_parquet,
     read_parquet,
     read_scrobble_df,
-    dump_parquet,
     sanitize,
 )
-from sklearn.cluster import DBSCAN
 
 log = logging.getLogger(__name__)
 
@@ -688,7 +691,7 @@ def _build_dbscan_capped_training_data(
             log.info("Loaded gs_mb_dbscan_capped.parquet: %d pairs.", len(cached))
             return cached
     # ── Running capped DBSCAN pipeline ─────────────────────────────────────
-    from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb
+    from corefunc.mb_local import _escape_pg, _psql_csv, check_local_mb
 
     scrobbles = read_scrobble_df()
     artist_names = sorted(scrobbles["artist_name"].dropna().unique().tolist())

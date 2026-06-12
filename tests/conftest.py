@@ -4,6 +4,7 @@ Pytest configuration and shared Parquet-based fixtures for c9r.
 
 import pathlib
 import sys
+
 import pandas as pd
 import pytest
 

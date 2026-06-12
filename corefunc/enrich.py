@@ -11,15 +11,18 @@ into scrobble.parquet.
 """
 
 from __future__ import annotations
+
 import logging
 import time
+
 import pandas as pd
+
 from helpers.io import (
     ARTIST_INFO_PQ,
-    read_parquet,
     append_to_parquet,
-    read_scrobble_df,
     dump_scrobble_df,
+    read_parquet,
+    read_scrobble_df,
 )
 
 log = logging.getLogger(__name__)
@@ -33,7 +36,7 @@ def enrich_artist_country(*, batch: int = 100) -> int:
     Uses the remote MusicBrainz JSON API (via HTTP/mbAPI.py).
     Returns the number of artists enriched.
     """
-    from HTTP.mbAPI import search_artist, _cache_artist
+    from HTTP.mbAPI import _cache_artist, search_artist
 
     scrobbles = read_scrobble_df()
     if scrobbles is None or scrobbles.empty:

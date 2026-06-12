@@ -6,12 +6,15 @@ Builds on Exp 6 but:
 - Subsamples negatives to a target neg:pos ratio for balanced training
 - Reuses interaction features and pruning from Exp 6
 """
+
 from __future__ import annotations
+
 import itertools
 import logging
 import sys
 import warnings
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz, process
@@ -28,21 +31,24 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from corefunc.mb_local import _psql_csv, _escape_pg, check_local_mb # noqa: E402
-from helpers.io import AVC_PQ, PQ_DIR, read_parquet, dump_parquet, SCROBBLE_PQ # noqa: E402
-from helpers import cluster # noqa: E402
-from helpers.device import get_device # noqa: E402
-from scripts.run_exp6_dbscan import ( # noqa: E402
-    add_all_features, prune_features, # noqa: E402
-    _optimal_threshold, _evaluate_at_threshold, # noqa: E402
-    WRATIO_LOWER, WRATIO_UPPER, # noqa: E402
-) # noqa: E402
+from corefunc.mb_local import _escape_pg, _psql_csv, check_local_mb  # noqa: E402
+from helpers import cluster  # noqa: E402
+from helpers.device import get_device  # noqa: E402
+from helpers.io import AVC_PQ, PQ_DIR, SCROBBLE_PQ, dump_parquet, read_parquet  # noqa: E402
+from scripts.run_exp6_dbscan import (  # noqa: E402
+    WRATIO_LOWER,  # noqa: E402
+    WRATIO_UPPER,
+    _evaluate_at_threshold,
+    _optimal_threshold,  # noqa: E402
+    add_all_features,  # noqa: E402
+    prune_features,
+)  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
 
 MAX_CLUSTER_SIZE = 30
-NEG_POS_RATIO = 10       # target negative : positive ratio
+NEG_POS_RATIO = 10  # target negative : positive ratio
 RANDOM_STATE = 47
 GS_DBSCAN_CAPPED_PQ = PQ_DIR / "gs_mb_dbscan_capped.parquet"
 
@@ -97,8 +103,9 @@ def step1_dbscan_capped() -> tuple[float, list[list[str]]]:
     n_raw = len(raw_groups)
     sizes_before = [len(g) for g in raw_groups]
     oversized = sum(1 for s in sizes_before if s > MAX_CLUSTER_SIZE)
-    log.info("Raw clusters: %d (oversized > %d: %d, max size: %d).",
-             n_raw, MAX_CLUSTER_SIZE, oversized, max(sizes_before))
+    log.info(
+        "Raw clusters: %d (oversized > %d: %d, max size: %d).", n_raw, MAX_CLUSTER_SIZE, oversized, max(sizes_before)
+    )
     # Capping: for clusters > MAX_CLUSTER_SIZE, keeping anchor names + random sample of the rest
     rng = np.random.default_rng(RANDOM_STATE)
     capped_groups = []
@@ -118,8 +125,13 @@ def step1_dbscan_capped() -> tuple[float, list[list[str]]]:
             capped_groups.append(capped)
     sizes_after = [len(g) for g in capped_groups]
     total_names = sum(sizes_after)
-    log.info("Capped clusters: %d groups, %d total names (max size: %d, median: %.0f).",
-             len(capped_groups), total_names, max(sizes_after), np.median(sizes_after))
+    log.info(
+        "Capped clusters: %d groups, %d total names (max size: %d, median: %.0f).",
+        len(capped_groups),
+        total_names,
+        max(sizes_after),
+        np.median(sizes_after),
+    )
     return best_eps, capped_groups
 
 
@@ -149,7 +161,7 @@ def step3_mbdb_verify(pairs_df: pd.DataFrame) -> pd.DataFrame:
     name_to_mbids: dict[str, set[str]] = {}
     batch_size = 150
     for i in range(0, len(all_names), batch_size):
-        batch = all_names[i:i + batch_size]
+        batch = all_names[i : i + batch_size]
         values = ",".join(f"'{_escape_pg(n)}'" for n in batch)
         sql = f"""\
 SELECT DISTINCT q.lookup_name, a.gid::text AS mbid
@@ -197,7 +209,8 @@ def step4_filter_and_subsample(verified_df: pd.DataFrame) -> pd.DataFrame:
     """Filters to WRatio [60, 100), then subsamples negatives to target ratio."""
     # Computing WRatio and filtering
     verified_df["_wratio"] = verified_df.apply(
-        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+        lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+        axis=1,
     )
     mask = (verified_df["_wratio"] >= WRATIO_LOWER) & (verified_df["_wratio"] < WRATIO_UPPER)
     filtered = verified_df[mask].copy()
@@ -229,8 +242,13 @@ def step4_filter_and_subsample(verified_df: pd.DataFrame) -> pd.DataFrame:
     combined = pd.concat([pos_df, neg_sampled], ignore_index=True).drop(columns=["_wratio"]).reset_index(drop=True)
     pos_final = combined["to_link"].sum()
     neg_final = len(combined) - pos_final
-    log.info("Final training set: %d pairs (pos=%d, neg=%d, ratio %.1f:1).",
-             len(combined), pos_final, neg_final, neg_final / max(pos_final, 1))
+    log.info(
+        "Final training set: %d pairs (pos=%d, neg=%d, ratio %.1f:1).",
+        len(combined),
+        pos_final,
+        neg_final,
+        neg_final / max(pos_final, 1),
+    )
     dump_parquet(combined, GS_DBSCAN_CAPPED_PQ)
     return combined
 
@@ -241,6 +259,7 @@ def step4_filter_and_subsample(verified_df: pd.DataFrame) -> pd.DataFrame:
 def step5_run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list[str]):
     """Trains all 8 models and evaluates with default + optimal + high-precision thresholds."""
     from corefunc.canon.experiment_runner import _build_model_catalogue
+
     target = "to_link"
     X_train = train_df[num_cols]
     y_train = train_df[target].astype(int).values
@@ -248,17 +267,25 @@ def step5_run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols
     y_test = test_df[target].astype(int).values
     device = get_device()
     spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
-    log.info("Train: %d | Test: %d | Features: %d | spw: %.2f | device: %s",
-             len(X_train), len(X_test), len(num_cols), spw, device)
-    log.info("Test distribution: pos=%d, neg=%d (%.1f%% positive)",
-             y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean())
+    log.info(
+        "Train: %d | Test: %d | Features: %d | spw: %.2f | device: %s",
+        len(X_train),
+        len(X_test),
+        len(num_cols),
+        spw,
+        device,
+    )
+    log.info(
+        "Test distribution: pos=%d, neg=%d (%.1f%% positive)", y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean()
+    )
     catalogue = _build_model_catalogue(spw, device, random_state=RANDOM_STATE)
     results = []
     for model_name, clf in catalogue.items():
         log.info("─── Training %s ───", model_name)
         pre = ColumnTransformer(
             [("num", Pipeline([("scaler", RobustScaler())]), num_cols)],
-            remainder="drop", verbose_feature_names_out=False,
+            remainder="drop",
+            verbose_feature_names_out=False,
         )
         pre.set_output(transform="pandas")
         pipeline = Pipeline([("prep", pre), ("clf", clone(clf))])
@@ -276,17 +303,34 @@ def step5_run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols
             m = _evaluate_at_threshold(y_test, y_prob, t)
             if m["precision"] >= 0.80 and m["f1"] > best_hi["f1"]:
                 best_hi = m
-        results.append({
-            "model": model_name, "auc": auc,
-            "default_f1": default_m["f1"], "default_prec": default_m["precision"], "default_rec": default_m["recall"],
-            "opt_thr": optimal_m["threshold"], "opt_f1": optimal_m["f1"],
-            "opt_prec": optimal_m["precision"], "opt_rec": optimal_m["recall"],
-            "hiprec_thr": best_hi["threshold"], "hiprec_f1": best_hi["f1"],
-            "hiprec_prec": best_hi["precision"], "hiprec_rec": best_hi["recall"],
-        })
-        log.info("%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f) | hi-P F1=%.4f (thr=%.3f, P=%.3f)",
-                 model_name, auc, default_m["f1"], optimal_m["f1"], opt_thr,
-                 best_hi["f1"], best_hi["threshold"], best_hi["precision"])
+        results.append(
+            {
+                "model": model_name,
+                "auc": auc,
+                "default_f1": default_m["f1"],
+                "default_prec": default_m["precision"],
+                "default_rec": default_m["recall"],
+                "opt_thr": optimal_m["threshold"],
+                "opt_f1": optimal_m["f1"],
+                "opt_prec": optimal_m["precision"],
+                "opt_rec": optimal_m["recall"],
+                "hiprec_thr": best_hi["threshold"],
+                "hiprec_f1": best_hi["f1"],
+                "hiprec_prec": best_hi["precision"],
+                "hiprec_rec": best_hi["recall"],
+            }
+        )
+        log.info(
+            "%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f) | hi-P F1=%.4f (thr=%.3f, P=%.3f)",
+            model_name,
+            auc,
+            default_m["f1"],
+            optimal_m["f1"],
+            opt_thr,
+            best_hi["f1"],
+            best_hi["threshold"],
+            best_hi["precision"],
+        )
         y_pred_opt = (y_prob >= opt_thr).astype(int)
         print(f"\n=== {model_name} (optimal thr={opt_thr:.3f}) ===")
         print(classification_report(y_test, y_pred_opt, target_names=["no link", "link"]))
@@ -300,15 +344,19 @@ def step5_run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols
                     print(f"  {name:<40} {imp:.4f}")
     # Printing summary
     print("\n" + "=" * 120)
-    print(f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | "
-          f"{'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | "
-          f"{'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}")
+    print(
+        f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | "
+        f"{'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | "
+        f"{'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}"
+    )
     print("-" * 120)
     for r in sorted(results, key=lambda x: x["opt_f1"], reverse=True):
-        print(f"{r['model']:<22} {r['auc']:>6.4f} | "
-              f"{r['default_prec']:>6.4f} {r['default_rec']:>6.4f} {r['default_f1']:>6.4f} | "
-              f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
-              f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}")
+        print(
+            f"{r['model']:<22} {r['auc']:>6.4f} | "
+            f"{r['default_prec']:>6.4f} {r['default_rec']:>6.4f} {r['default_f1']:>6.4f} | "
+            f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
+            f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}"
+        )
     print("=" * 120)
     # Selecting best model by c9r composite score (0.4×HiP_P + 0.3×HiP_F1 + 0.3×AUC)
     best = max(results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
@@ -322,8 +370,7 @@ def step5_run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols
 # ═════════════════════════════════════════════════════════════════════════════
 def main():
     """Runs Experiment 7: capped DBSCAN + subsampled negatives."""
-    log.info("=== Experiment 7: DBSCAN capped (max %d) + neg subsampling (%d:1) ===",
-             MAX_CLUSTER_SIZE, NEG_POS_RATIO)
+    log.info("=== Experiment 7: DBSCAN capped (max %d) + neg subsampling (%d:1) ===", MAX_CLUSTER_SIZE, NEG_POS_RATIO)
     # Step 1: DBSCAN + capping
     best_eps, capped_groups = step1_dbscan_capped()
     # Step 2: Extract pairs
@@ -348,14 +395,21 @@ def main():
     test_raw = pd.DataFrame(test_rows, columns=["variants", "variant_a", "variant_b", "to_link"])
     test_raw["_wr"] = test_raw.apply(lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1)
     test_raw = test_raw[(test_raw["_wr"] >= WRATIO_LOWER) & (test_raw["_wr"] < WRATIO_UPPER)].drop(columns=["_wr"])
-    log.info("AVC test: %d pairs (pos=%d, neg=%d).",
-             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"].eq(False)).sum())
+    log.info(
+        "AVC test: %d pairs (pos=%d, neg=%d).",
+        len(test_raw),
+        test_raw["to_link"].sum(),
+        (test_raw["to_link"].eq(False)).sum(),
+    )
     test_df = add_all_features(test_raw.reset_index(drop=True))
     # Pruning
     target = "to_link"
     exclude = {"variants", target, "variant_a", "variant_b", "source", "_key"}
-    all_num = [c for c in train_df.columns
-               if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")]
+    all_num = [
+        c
+        for c in train_df.columns
+        if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")
+    ]
     log.info("Pre-pruning features: %d", len(all_num))
     num_cols = prune_features(train_df[all_num])
     missing_in_test = [c for c in num_cols if c not in test_df.columns]

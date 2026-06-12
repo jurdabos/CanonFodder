@@ -13,7 +13,9 @@ decision boundary than string features alone.
 Compares XGBoost, RF, ExtraTrees, LightGBM, GradientBoosting against
 Exp 6 ExtraTrees (AUC=0.892, F1=0.705).
 """
+
 from __future__ import annotations
+
 import itertools
 import logging
 import sys
@@ -21,6 +23,7 @@ import tempfile
 import warnings
 from collections import Counter
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz, process
@@ -28,10 +31,10 @@ from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
     classification_report,
+    f1_score,
     precision_recall_curve,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
@@ -41,11 +44,11 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from corefunc.canon.experiment_runner import _build_model_catalogue, _safe_get_params # noqa: E402
-from helpers.io import AVC_PQ, read_parquet, dump_parquet, sanitize, SCROBBLE_PQ # noqa: E402
-from helpers.features import compute_pair_features # noqa: E402
-from helpers import cluster, experiment, stats # noqa: E402
-from helpers.device import get_device # noqa: E402
+from corefunc.canon.experiment_runner import _build_model_catalogue, _safe_get_params  # noqa: E402
+from helpers import cluster, experiment, stats  # noqa: E402
+from helpers.device import get_device  # noqa: E402
+from helpers.features import compute_pair_features  # noqa: E402
+from helpers.io import AVC_PQ, SCROBBLE_PQ, dump_parquet, read_parquet, sanitize  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -75,14 +78,18 @@ def step1_split_avc() -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     avc = read_parquet(AVC_PQ)
     decided = avc[avc["to_link"].notna()].reset_index(drop=True)
-    log.info("AVC decided rows: %d (pos=%d, neg=%d).",
-             len(decided), decided["to_link"].sum(), (~decided["to_link"]).sum())
+    log.info(
+        "AVC decided rows: %d (pos=%d, neg=%d).", len(decided), decided["to_link"].sum(), (~decided["to_link"]).sum()
+    )
     # Splitting at group level with stratification on to_link
     train_groups, test_groups = train_test_split(
-        decided, test_size=TEST_SIZE, random_state=RANDOM_STATE,
+        decided,
+        test_size=TEST_SIZE,
+        random_state=RANDOM_STATE,
         stratify=decided["to_link"],
     )
     log.info("Train groups: %d | Test groups: %d", len(train_groups), len(test_groups))
+
     # Expanding each split into pairwise combinations
     def _expand(groups_df: pd.DataFrame) -> pd.DataFrame:
         """Expands group-level rows into all pairwise variant combinations."""
@@ -90,23 +97,37 @@ def step1_split_avc() -> tuple[pd.DataFrame, pd.DataFrame]:
         for _, row in groups_df.iterrows():
             rows.extend(cluster.expand_pairs(row))
         return pd.DataFrame(rows, columns=["variants", "variant_a", "variant_b", "to_link"])
+
     train_pairs = _expand(train_groups)
     test_pairs = _expand(test_groups)
     # Filtering to WRatio [60, 100)
     for label, df in [("train", train_pairs), ("test", test_pairs)]:
         df["_wr"] = df.apply(
-            lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])), axis=1,
+            lambda r: fuzz.WRatio(str(r["variant_a"]), str(r["variant_b"])),
+            axis=1,
         )
-    train_pairs = train_pairs[
-        (train_pairs["_wr"] >= WRATIO_LOWER) & (train_pairs["_wr"] < WRATIO_UPPER)
-    ].drop(columns=["_wr"]).reset_index(drop=True)
-    test_pairs = test_pairs[
-        (test_pairs["_wr"] >= WRATIO_LOWER) & (test_pairs["_wr"] < WRATIO_UPPER)
-    ].drop(columns=["_wr"]).reset_index(drop=True)
-    log.info("Train pairs (WRatio-filtered): %d (pos=%d, neg=%d).",
-             len(train_pairs), train_pairs["to_link"].sum(), (~train_pairs["to_link"]).sum())
-    log.info("Test pairs (WRatio-filtered): %d (pos=%d, neg=%d).",
-             len(test_pairs), test_pairs["to_link"].sum(), (~test_pairs["to_link"]).sum())
+    train_pairs = (
+        train_pairs[(train_pairs["_wr"] >= WRATIO_LOWER) & (train_pairs["_wr"] < WRATIO_UPPER)]
+        .drop(columns=["_wr"])
+        .reset_index(drop=True)
+    )
+    test_pairs = (
+        test_pairs[(test_pairs["_wr"] >= WRATIO_LOWER) & (test_pairs["_wr"] < WRATIO_UPPER)]
+        .drop(columns=["_wr"])
+        .reset_index(drop=True)
+    )
+    log.info(
+        "Train pairs (WRatio-filtered): %d (pos=%d, neg=%d).",
+        len(train_pairs),
+        train_pairs["to_link"].sum(),
+        (~train_pairs["to_link"]).sum(),
+    )
+    log.info(
+        "Test pairs (WRatio-filtered): %d (pos=%d, neg=%d).",
+        len(test_pairs),
+        test_pairs["to_link"].sum(),
+        (~test_pairs["to_link"]).sum(),
+    )
     return train_pairs, test_pairs
 
 
@@ -121,18 +142,15 @@ def build_scrobble_lookups() -> tuple[dict[str, list[str]], dict[str, list[str]]
     log.info("Building scrobble discography/melography lookups...")
     scrobbles = read_parquet(SCROBBLE_PQ)
     # Albums: filtering blank titles
-    clean = scrobbles[
-        scrobbles["album_title"].notna() & (scrobbles["album_title"].str.strip() != "")
-    ]
-    name_to_albums = clean.groupby("artist_name")["album_title"].apply(
-        lambda x: sorted(set(x.unique()))
-    ).to_dict()
+    clean = scrobbles[scrobbles["album_title"].notna() & (scrobbles["album_title"].str.strip() != "")]
+    name_to_albums = clean.groupby("artist_name")["album_title"].apply(lambda x: sorted(set(x.unique()))).to_dict()
     # Tracks
-    name_to_tracks = scrobbles.groupby("artist_name")["track_title"].apply(
-        lambda x: sorted({t for t in x.dropna().unique() if t.strip()})
-    ).to_dict()
-    log.info("Scrobble lookups: %d names with albums, %d with tracks.",
-             len(name_to_albums), len(name_to_tracks))
+    name_to_tracks = (
+        scrobbles.groupby("artist_name")["track_title"]
+        .apply(lambda x: sorted({t for t in x.dropna().unique() if t.strip()}))
+        .to_dict()
+    )
+    log.info("Scrobble lookups: %d names with albums, %d with tracks.", len(name_to_albums), len(name_to_tracks))
     return name_to_albums, name_to_tracks
 
 
@@ -148,7 +166,9 @@ def _jaccard(a: set, b: set) -> float:
 
 
 def _fuzzy_overlap(
-    list_a: list[str], list_b: list[str], threshold: int,
+    list_a: list[str],
+    list_b: list[str],
+    threshold: int,
 ) -> tuple[int, float]:
     """Counts items in list_a that fuzzy-match any item in list_b.
 
@@ -160,7 +180,10 @@ def _fuzzy_overlap(
     matched = 0
     for a in list_a:
         result = process.extractOne(
-            a, list_b, scorer=fuzz.token_sort_ratio, score_cutoff=threshold,
+            a,
+            list_b,
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=threshold,
         )
         if result is not None:
             matched += 1
@@ -239,8 +262,11 @@ def add_catalogue_features(
         df[col] = disco_df[col]
     for col in melo_df.columns:
         df[col] = melo_df[col]
-    log.info("  Catalogue features added: %d discography + %d melography columns.",
-             len(disco_df.columns), len(melo_df.columns))
+    log.info(
+        "  Catalogue features added: %d discography + %d melography columns.",
+        len(disco_df.columns),
+        len(melo_df.columns),
+    )
     return df
 
 
@@ -332,12 +358,16 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
     y_test = test_df[target].astype(int).values
     device = get_device()
     spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
-    log.info("Train: %d | Test: %d | Features: %d | spw: %.2f",
-             len(X_train), len(X_test), len(num_cols), spw)
-    log.info("Train distribution: pos=%d, neg=%d (%.1f%% positive)",
-             y_train.sum(), (y_train == 0).sum(), 100 * y_train.mean())
-    log.info("Test distribution: pos=%d, neg=%d (%.1f%% positive)",
-             y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean())
+    log.info("Train: %d | Test: %d | Features: %d | spw: %.2f", len(X_train), len(X_test), len(num_cols), spw)
+    log.info(
+        "Train distribution: pos=%d, neg=%d (%.1f%% positive)",
+        y_train.sum(),
+        (y_train == 0).sum(),
+        100 * y_train.mean(),
+    )
+    log.info(
+        "Test distribution: pos=%d, neg=%d (%.1f%% positive)", y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean()
+    )
     catalogue = _build_model_catalogue(spw, device, random_state=RANDOM_STATE)
     # Filtering to tree-based models only
     catalogue = {k: v for k, v in catalogue.items() if k in _MODELS_TO_RUN}
@@ -345,28 +375,30 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
     experiment.init_experiment()
     results = []
     with experiment.start_run(run_name="exp13_avc_disco_melo"):
-        experiment.log_params({
-            "experiment": 13,
-            "experiment_type": "avc_only_group_split",
-            "random_state": RANDOM_STATE,
-            "test_size": TEST_SIZE,
-            "wratio_lower": WRATIO_LOWER,
-            "wratio_upper": WRATIO_UPPER,
-            "max_tracks": MAX_TRACKS,
-            "max_albums": MAX_ALBUMS,
-            "fuzzy_track_thr": FUZZY_TRACK_THR,
-            "fuzzy_album_thr": FUZZY_ALBUM_THR,
-            "n_features": len(num_cols),
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "train_pos": int(y_train.sum()),
-            "train_neg": int((y_train == 0).sum()),
-            "test_pos": int(y_test.sum()),
-            "test_neg": int((y_test == 0).sum()),
-            "spw": round(spw, 2),
-            "device_probed": device,
-            "model_count": len(catalogue),
-        })
+        experiment.log_params(
+            {
+                "experiment": 13,
+                "experiment_type": "avc_only_group_split",
+                "random_state": RANDOM_STATE,
+                "test_size": TEST_SIZE,
+                "wratio_lower": WRATIO_LOWER,
+                "wratio_upper": WRATIO_UPPER,
+                "max_tracks": MAX_TRACKS,
+                "max_albums": MAX_ALBUMS,
+                "fuzzy_track_thr": FUZZY_TRACK_THR,
+                "fuzzy_album_thr": FUZZY_ALBUM_THR,
+                "n_features": len(num_cols),
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "train_pos": int(y_train.sum()),
+                "train_neg": int((y_train == 0).sum()),
+                "test_pos": int(y_test.sum()),
+                "test_neg": int((y_test == 0).sum()),
+                "spw": round(spw, 2),
+                "device_probed": device,
+                "model_count": len(catalogue),
+            }
+        )
         # Logging train/test splits as artifacts
         with tempfile.TemporaryDirectory() as tmpdir:
             train_path = Path(tmpdir) / "exp13_train.parquet"
@@ -379,13 +411,15 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
             log.info("─── Training %s ───", model_name)
             with experiment.start_run(run_name=model_name, nested=True):
                 import mlflow
+
                 mlflow.set_tag("model_type", model_name)
                 safe_params = _safe_get_params(clf)
                 safe_params["device_used"] = device
                 experiment.log_params(safe_params)
                 pre = ColumnTransformer(
                     [("num", Pipeline([("scaler", RobustScaler())]), num_cols)],
-                    remainder="drop", verbose_feature_names_out=False,
+                    remainder="drop",
+                    verbose_feature_names_out=False,
                 )
                 pre.set_output(transform="pandas")
                 pipeline = Pipeline([("prep", pre), ("clf", clone(clf))])
@@ -403,32 +437,49 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
                     if m["precision"] >= 0.80 and m["f1"] > best_hi["f1"]:
                         best_hi = m
                 # Logging metrics to MLflow
-                experiment.log_metrics({
-                    "auc": auc,
-                    "default_f1": default_m["f1"],
-                    "default_precision": default_m["precision"],
-                    "default_recall": default_m["recall"],
-                    "opt_threshold": optimal_m["threshold"],
-                    "opt_f1": optimal_m["f1"],
-                    "opt_precision": optimal_m["precision"],
-                    "opt_recall": optimal_m["recall"],
-                    "hiprec_threshold": best_hi["threshold"],
-                    "hiprec_f1": best_hi["f1"],
-                    "hiprec_precision": best_hi["precision"],
-                    "hiprec_recall": best_hi["recall"],
-                })
-                results.append({
-                    "model": model_name, "auc": auc,
-                    "default_f1": default_m["f1"], "default_prec": default_m["precision"],
-                    "default_rec": default_m["recall"],
-                    "opt_thr": optimal_m["threshold"], "opt_f1": optimal_m["f1"],
-                    "opt_prec": optimal_m["precision"], "opt_rec": optimal_m["recall"],
-                    "hiprec_thr": best_hi["threshold"], "hiprec_f1": best_hi["f1"],
-                    "hiprec_prec": best_hi["precision"], "hiprec_rec": best_hi["recall"],
-                })
-                log.info("%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f) | hi-P F1=%.4f (thr=%.3f)",
-                         model_name, auc, default_m["f1"], optimal_m["f1"], opt_thr,
-                         best_hi["f1"], best_hi["threshold"])
+                experiment.log_metrics(
+                    {
+                        "auc": auc,
+                        "default_f1": default_m["f1"],
+                        "default_precision": default_m["precision"],
+                        "default_recall": default_m["recall"],
+                        "opt_threshold": optimal_m["threshold"],
+                        "opt_f1": optimal_m["f1"],
+                        "opt_precision": optimal_m["precision"],
+                        "opt_recall": optimal_m["recall"],
+                        "hiprec_threshold": best_hi["threshold"],
+                        "hiprec_f1": best_hi["f1"],
+                        "hiprec_precision": best_hi["precision"],
+                        "hiprec_recall": best_hi["recall"],
+                    }
+                )
+                results.append(
+                    {
+                        "model": model_name,
+                        "auc": auc,
+                        "default_f1": default_m["f1"],
+                        "default_prec": default_m["precision"],
+                        "default_rec": default_m["recall"],
+                        "opt_thr": optimal_m["threshold"],
+                        "opt_f1": optimal_m["f1"],
+                        "opt_prec": optimal_m["precision"],
+                        "opt_rec": optimal_m["recall"],
+                        "hiprec_thr": best_hi["threshold"],
+                        "hiprec_f1": best_hi["f1"],
+                        "hiprec_prec": best_hi["precision"],
+                        "hiprec_rec": best_hi["recall"],
+                    }
+                )
+                log.info(
+                    "%s → AUC=%.4f | def F1=%.4f | opt F1=%.4f (thr=%.3f) | hi-P F1=%.4f (thr=%.3f)",
+                    model_name,
+                    auc,
+                    default_m["f1"],
+                    optimal_m["f1"],
+                    opt_thr,
+                    best_hi["f1"],
+                    best_hi["threshold"],
+                )
                 y_pred_opt = (y_prob >= opt_thr).astype(int)
                 print(f"\n=== {model_name} (optimal thr={opt_thr:.3f}) ===")
                 print(classification_report(y_test, y_pred_opt, target_names=["no link", "link"]))
@@ -441,8 +492,7 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
                 # Printing feature importance to stdout
                 clf_fitted = pipeline.named_steps["clf"]
                 if hasattr(clf_fitted, "feature_importances_"):
-                    imps = sorted(zip(num_cols, clf_fitted.feature_importances_),
-                                  key=lambda x: x[1], reverse=True)
+                    imps = sorted(zip(num_cols, clf_fitted.feature_importances_), key=lambda x: x[1], reverse=True)
                     print(f"Top 15 features ({model_name}):")
                     for name, imp in imps[:15]:
                         print(f"  {name:<40} {imp:.4f}")
@@ -454,15 +504,19 @@ def run_experiment(train_df: pd.DataFrame, test_df: pd.DataFrame, num_cols: list
                             print(f"  {name:<40} {imp:.4f}")
     # Summary table
     print("\n" + "=" * 130)
-    print(f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | "
-          f"{'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | "
-          f"{'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}")
+    print(
+        f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | "
+        f"{'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | "
+        f"{'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}"
+    )
     print("-" * 130)
     for r in sorted(results, key=lambda x: x["opt_f1"], reverse=True):
-        print(f"{r['model']:<22} {r['auc']:>6.4f} | "
-              f"{r['default_prec']:>6.4f} {r['default_rec']:>6.4f} {r['default_f1']:>6.4f} | "
-              f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
-              f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}")
+        print(
+            f"{r['model']:<22} {r['auc']:>6.4f} | "
+            f"{r['default_prec']:>6.4f} {r['default_rec']:>6.4f} {r['default_f1']:>6.4f} | "
+            f"{r['opt_thr']:>7.3f} {r['opt_prec']:>6.4f} {r['opt_rec']:>6.4f} {r['opt_f1']:>6.4f} | "
+            f"{r['hiprec_thr']:>7.3f} {r['hiprec_prec']:>6.4f} {r['hiprec_rec']:>6.4f} {r['hiprec_f1']:>6.4f}"
+        )
     print("=" * 130)
     print("\n── Baselines ──")
     print("Exp 6  ExtraTrees (gs_mb_dbscan, full AVC test):  AUC=0.8920, opt F1=0.7050 (P=0.750, R=0.667, thr=0.940)")
@@ -499,15 +553,22 @@ def main():
     # ── Step 4: Pruning ────────────────────────────────────────────────────
     target = "to_link"
     exclude = {"variants", target, "variant_a", "variant_b", "source", "_key"}
-    all_num = [c for c in train_df.columns
-               if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")]
+    all_num = [
+        c
+        for c in train_df.columns
+        if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")
+    ]
     log.info("Pre-pruning features: %d", len(all_num))
     num_cols = prune_features(train_df[all_num])
     # Reporting disco/melo feature survival
     disco_survived = [c for c in num_cols if c.startswith("disco_")]
     melo_survived = [c for c in num_cols if c.startswith("melo_")]
-    log.info("Post-pruning: %d features (%d disco, %d melo survived).",
-             len(num_cols), len(disco_survived), len(melo_survived))
+    log.info(
+        "Post-pruning: %d features (%d disco, %d melo survived).",
+        len(num_cols),
+        len(disco_survived),
+        len(melo_survived),
+    )
     # Ensuring test_df has the same columns
     missing = [c for c in num_cols if c not in test_df.columns]
     if missing:

@@ -9,13 +9,16 @@ POST /predict_batch   – batch prediction
 """
 
 from __future__ import annotations
+
 import logging
+from importlib.metadata import version as pkg_version
 from typing import Dict, List, Optional, Union
+
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from importlib.metadata import version as pkg_version
-from helpers.inference import load_model, MODEL_PATH
+
+from helpers.inference import MODEL_PATH, load_model
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="c9r model server", version=pkg_version("c9r"))

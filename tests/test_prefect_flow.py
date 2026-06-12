@@ -6,8 +6,9 @@ Requires the prefect optional dependency.
 """
 
 import logging
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 prefect = pytest.importorskip("prefect")
 

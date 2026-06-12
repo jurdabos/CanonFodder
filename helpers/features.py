@@ -9,11 +9,13 @@ The single entry point is ``compute_pair_features(a, b) -> dict``.
 """
 
 from __future__ import annotations
+
 import logging
 import unicodedata
 from itertools import combinations
+
 from rapidfuzz import fuzz
-from rapidfuzz.distance import Levenshtein, JaroWinkler
+from rapidfuzz.distance import JaroWinkler, Levenshtein
 
 log = logging.getLogger(__name__)
 

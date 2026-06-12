@@ -7,9 +7,11 @@ so readers can detect stale files and apply migrations.
 """
 
 from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import Any, Callable
+
 import pyarrow as pa
 import pyarrow.parquet as pq
 

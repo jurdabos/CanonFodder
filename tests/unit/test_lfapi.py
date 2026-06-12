@@ -3,6 +3,7 @@ Unit tests for HTTP.lfAPI (Last.fm API helpers).
 """
 
 import pandas as pd
+
 from HTTP.lfAPI import (
     _clean_track,
     _normalise_tracks,
@@ -119,8 +120,9 @@ class TestUpdateUserCountry:
 
     def test_no_change_same_country(self, tmp_pq_dir):
         """Returns False when the country hasn't changed."""
-        import helpers.io as io_mod
         from datetime import date
+
+        import helpers.io as io_mod
 
         today = str(date.today())
         existing = pd.DataFrame([{"country_code": "HU", "start_date": today, "end_date": None}])

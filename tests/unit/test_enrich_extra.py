@@ -2,10 +2,11 @@
 Tests for corefunc.enrich and corefunc.canon.workflow extras, and TCN building blocks.
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import patch
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -40,7 +41,7 @@ class TestBackfillMbids:
                 "play_time": pd.to_datetime(["2024-01-01", "2024-01-02"], utc=True),
             }
         )
-        from helpers.io import dump_scrobble_df, dump_parquet, ARTIST_INFO_PQ, read_scrobble_df
+        from helpers.io import ARTIST_INFO_PQ, dump_parquet, dump_scrobble_df, read_scrobble_df
 
         dump_scrobble_df(scrobbles)
         dump_parquet(sample_artist_info_df, ARTIST_INFO_PQ)
@@ -54,7 +55,7 @@ class TestBackfillMbids:
 
     def test_nothing_to_backfill(self, tmp_pq_dir, sample_scrobble_df, sample_artist_info_df):
         """Returns 0 when all MBIDs are already present."""
-        from helpers.io import dump_scrobble_df, dump_parquet, ARTIST_INFO_PQ
+        from helpers.io import ARTIST_INFO_PQ, dump_parquet, dump_scrobble_df
 
         dump_scrobble_df(sample_scrobble_df)
         dump_parquet(sample_artist_info_df, ARTIST_INFO_PQ)
@@ -127,7 +128,7 @@ class TestCanonWorkflowHelpers:
 
     def test_build_exclusion_set(self, tmp_pq_dir, sample_artist_info_df):
         """Gathers names from avc + artist_info."""
-        from helpers.io import dump_parquet, AVC_PQ, ARTIST_INFO_PQ
+        from helpers.io import ARTIST_INFO_PQ, AVC_PQ, dump_parquet
 
         avc = pd.DataFrame(
             {
@@ -151,7 +152,8 @@ class TestCanonWorkflowHelpers:
     def test_log_predictions(self, tmp_pq_dir):
         """Appends prediction records to predictions_log.parquet."""
         import json
-        from corefunc.canon.workflow import _log_predictions, PREDICTIONS_LOG_PQ
+
+        from corefunc.canon.workflow import PREDICTIONS_LOG_PQ, _log_predictions
 
         rows = [
             {
@@ -170,7 +172,7 @@ class TestCanonWorkflowHelpers:
 
     def test_log_predictions_empty(self, tmp_pq_dir):
         """Does nothing for empty prediction list."""
-        from corefunc.canon.workflow import _log_predictions, PREDICTIONS_LOG_PQ
+        from corefunc.canon.workflow import PREDICTIONS_LOG_PQ, _log_predictions
 
         # Ensuring clean state
         if PREDICTIONS_LOG_PQ.exists():
@@ -239,6 +241,7 @@ class TestTemporalBlocks:
     def test_chomp1d(self):
         """Removes trailing padding from tensor."""
         import torch
+
         from corefunc.canon.tcn_trainer import Chomp1d
 
         chomp = Chomp1d(2)
@@ -249,6 +252,7 @@ class TestTemporalBlocks:
     def test_temporal_block_forward(self):
         """Runs a forward pass through a TemporalBlock."""
         import torch
+
         from corefunc.canon.tcn_trainer import TemporalBlock
 
         block = TemporalBlock(4, 8, kernel_size=3, stride=1, dilation=1, padding=2, dropout=0.0)
@@ -259,6 +263,7 @@ class TestTemporalBlocks:
     def test_temporal_conv_net(self):
         """Runs a forward pass through a full TemporalConvNet."""
         import torch
+
         from corefunc.canon.tcn_trainer import TemporalConvNet
 
         tcn = TemporalConvNet(num_inputs=4, num_channels=[8, 8], kernel_size=3, dropout=0.0)
@@ -269,6 +274,7 @@ class TestTemporalBlocks:
     def test_temporal_conv_net_with_layer_norm(self):
         """Runs TCN with layer norm enabled."""
         import torch
+
         from corefunc.canon.tcn_trainer import TemporalConvNet
 
         tcn = TemporalConvNet(
@@ -289,6 +295,7 @@ class TestNamePairDataset:
     def test_len_and_getitem(self):
         """Returns correct length and item shapes."""
         import torch
+
         from corefunc.canon.tcn_trainer import CharVocab, NamePairDataset
 
         vocab = CharVocab()

@@ -6,26 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Linting and secret scanning live in lint.yml (canonical a6a baseline).
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@0ca8f610542aa7f4acaf39e65cf4eb3c35091883  # v7
-
-    - name: Lint Python code
-      run: uvx ruff check HTTP/ corefunc/ helpers/ flows/ main.py tests/
-
-    - name: Check Python formatting
-      run: uvx ruff format --check HTTP/ corefunc/ helpers/ flows/ main.py tests/
-
   unit-test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    needs: lint
 
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
@@ -57,7 +42,6 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: lint
 
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4

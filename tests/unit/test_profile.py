@@ -3,6 +3,7 @@ Tests for corefunc.profile — data profiling functions.
 """
 
 import pandas as pd
+
 from corefunc.profile import (
     country_breakdown,
     overview_stats,

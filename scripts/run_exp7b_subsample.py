@@ -5,11 +5,14 @@ Loads gs_mb_dbscan.parquet (388K pairs, 180 pos) from Exp 6, subsamples
 negatives to various ratios, and re-runs the holdout experiment.
 Avoids re-running the expensive DBSCAN + MBDB pipeline.
 """
+
 from __future__ import annotations
+
 import logging
 import sys
 import warnings
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz
@@ -24,14 +27,18 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from helpers.io import AVC_PQ, read_parquet # noqa: E402
-from helpers import cluster # noqa: E402
-from helpers.device import get_device # noqa: E402
-from scripts.run_exp6_dbscan import ( # noqa: E402
-    add_all_features, prune_features, # noqa: E402
-    _optimal_threshold, _evaluate_at_threshold, # noqa: E402
-    GS_DBSCAN_PQ, WRATIO_LOWER, WRATIO_UPPER, # noqa: E402
-) # noqa: E402
+from helpers import cluster  # noqa: E402
+from helpers.device import get_device  # noqa: E402
+from helpers.io import AVC_PQ, read_parquet  # noqa: E402
+from scripts.run_exp6_dbscan import (  # noqa: E402
+    GS_DBSCAN_PQ,  # noqa: E402
+    WRATIO_LOWER,
+    WRATIO_UPPER,
+    _evaluate_at_threshold,
+    _optimal_threshold,  # noqa: E402
+    add_all_features,  # noqa: E402
+    prune_features,
+)  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -81,6 +88,7 @@ def build_avc_test() -> pd.DataFrame:
 def run_single_ratio(train_df, test_df, num_cols, ratio_label):
     """Trains all 8 models for a single ratio configuration."""
     from corefunc.canon.experiment_runner import _build_model_catalogue
+
     target = "to_link"
     X_train = train_df[num_cols]
     y_train = train_df[target].astype(int).values
@@ -94,7 +102,8 @@ def run_single_ratio(train_df, test_df, num_cols, ratio_label):
     for model_name, clf in catalogue.items():
         pre = ColumnTransformer(
             [("num", Pipeline([("scaler", RobustScaler())]), num_cols)],
-            remainder="drop", verbose_feature_names_out=False,
+            remainder="drop",
+            verbose_feature_names_out=False,
         )
         pre.set_output(transform="pandas")
         pipeline = Pipeline([("prep", pre), ("clf", clone(clf))])
@@ -111,14 +120,21 @@ def run_single_ratio(train_df, test_df, num_cols, ratio_label):
             m = _evaluate_at_threshold(y_test, y_prob, t)
             if m["precision"] >= 0.80 and m["f1"] > best_hi["f1"]:
                 best_hi = m
-        results.append({
-            "ratio": ratio_label, "model": model_name, "auc": auc,
-            "default_f1": default_m["f1"],
-            "opt_thr": optimal_m["threshold"], "opt_f1": optimal_m["f1"],
-            "opt_prec": optimal_m["precision"], "opt_rec": optimal_m["recall"],
-            "hiprec_thr": best_hi["threshold"], "hiprec_f1": best_hi["f1"],
-            "hiprec_prec": best_hi["precision"],
-        })
+        results.append(
+            {
+                "ratio": ratio_label,
+                "model": model_name,
+                "auc": auc,
+                "default_f1": default_m["f1"],
+                "opt_thr": optimal_m["threshold"],
+                "opt_f1": optimal_m["f1"],
+                "opt_prec": optimal_m["precision"],
+                "opt_rec": optimal_m["recall"],
+                "hiprec_thr": best_hi["threshold"],
+                "hiprec_f1": best_hi["f1"],
+                "hiprec_prec": best_hi["precision"],
+            }
+        )
     return results
 
 
@@ -129,11 +145,17 @@ def main():
     full_train = read_parquet(GS_DBSCAN_PQ)
     n_pos = full_train["to_link"].sum()
     n_neg = len(full_train) - n_pos
-    log.info("Exp 6 data: %d pairs (pos=%d, neg=%d, ratio %.0f:1).", len(full_train), n_pos, n_neg, n_neg / max(n_pos, 1))
+    log.info(
+        "Exp 6 data: %d pairs (pos=%d, neg=%d, ratio %.0f:1).", len(full_train), n_pos, n_neg, n_neg / max(n_pos, 1)
+    )
     # Building AVC test
     test_raw = build_avc_test()
-    log.info("AVC test: %d pairs (pos=%d, neg=%d).",
-             len(test_raw), test_raw["to_link"].sum(), (test_raw["to_link"].eq(False)).sum())
+    log.info(
+        "AVC test: %d pairs (pos=%d, neg=%d).",
+        len(test_raw),
+        test_raw["to_link"].sum(),
+        (test_raw["to_link"].eq(False)).sum(),
+    )
     # Pre-computing test features once
     log.info("Computing AVC test features...")
     test_df = add_all_features(test_raw)
@@ -155,8 +177,11 @@ def main():
         # Pruning
         target = "to_link"
         exclude = {"variants", target, "variant_a", "variant_b", "source", "_key"}
-        all_num = [c for c in train_df.columns
-                   if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")]
+        all_num = [
+            c
+            for c in train_df.columns
+            if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")
+        ]
         num_cols = prune_features(train_df[all_num])
         missing = [c for c in num_cols if c not in test_df.columns]
         for c in missing:
@@ -168,7 +193,9 @@ def main():
     print("\n" + "=" * 100)
     print("CROSS-RATIO COMPARISON (best model per ratio)")
     print("=" * 100)
-    print(f"{'Ratio':<15} {'Model':<22} {'AUC':>6} {'Def F1':>7} {'Opt thr':>8} {'Opt F1':>7} {'Opt P':>6} {'Opt R':>6} {'HiP F1':>7} {'HiP P':>6}")
+    print(
+        f"{'Ratio':<15} {'Model':<22} {'AUC':>6} {'Def F1':>7} {'Opt thr':>8} {'Opt F1':>7} {'Opt P':>6} {'Opt R':>6} {'HiP F1':>7} {'HiP P':>6}"
+    )
     print("-" * 100)
     ratios_seen = []
     for r in all_results:
@@ -177,17 +204,21 @@ def main():
     for ratio in ratios_seen:
         ratio_results = [r for r in all_results if r["ratio"] == ratio]
         best = max(ratio_results, key=lambda x: 0.4 * x["hiprec_prec"] + 0.3 * x["hiprec_f1"] + 0.3 * x["auc"])
-        print(f"{best['ratio']:<15} {best['model']:<22} {best['auc']:>6.4f} {best['default_f1']:>7.4f} "
-              f"{best['opt_thr']:>8.3f} {best['opt_f1']:>7.4f} {best['opt_prec']:>6.3f} {best['opt_rec']:>6.3f} "
-              f"{best['hiprec_f1']:>7.4f} {best['hiprec_prec']:>6.3f}")
+        print(
+            f"{best['ratio']:<15} {best['model']:<22} {best['auc']:>6.4f} {best['default_f1']:>7.4f} "
+            f"{best['opt_thr']:>8.3f} {best['opt_f1']:>7.4f} {best['opt_prec']:>6.3f} {best['opt_rec']:>6.3f} "
+            f"{best['hiprec_f1']:>7.4f} {best['hiprec_prec']:>6.3f}"
+        )
     print("=" * 100)
     # Printing full table for each ratio
     for ratio in ratios_seen:
         ratio_results = sorted([r for r in all_results if r["ratio"] == ratio], key=lambda x: x["opt_f1"], reverse=True)
         print(f"\n── {ratio} ──")
         for r in ratio_results:
-            print(f"  {r['model']:<22} AUC={r['auc']:.4f}  defF1={r['default_f1']:.4f}  "
-                  f"optF1={r['opt_f1']:.4f} (thr={r['opt_thr']:.3f})  hiPF1={r['hiprec_f1']:.4f}")
+            print(
+                f"  {r['model']:<22} AUC={r['auc']:.4f}  defF1={r['default_f1']:.4f}  "
+                f"optF1={r['opt_f1']:.4f} (thr={r['opt_thr']:.3f})  hiPF1={r['hiprec_f1']:.4f}"
+            )
     return all_results
 
 

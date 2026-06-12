@@ -2,9 +2,11 @@
 Unit tests for HTTP.lfAPI pagination and higher-level fetch helpers.
 """
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
+
 from HTTP.lfAPI import (
     _paginate,
     fetch_recent,

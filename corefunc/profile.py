@@ -6,22 +6,27 @@ using DuckDB queries and RapidFuzz for fuzzy name matching.
 """
 
 from __future__ import annotations
+
 import calendar
 import logging
-from datetime import datetime, UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
 import duckdb
 import pandas as pd
+
 from helpers.io import ARTIST_INFO_PQ, AVC_PQ, C_PQ, scrobble_data_exists, scrobble_duckdb_from
 from helpers.query import (
     _canonical_cte,
     artist_country_stats,
     daily_scrobble_dates,
-    listening_clock as _listening_clock_query,
     monthly_scrobble_counts,
     user_country_scrobble_counts,
     user_country_top_entities,
     yearly_top_n_artists,
+)
+from helpers.query import (
+    listening_clock as _listening_clock_query,
 )
 
 logger = logging.getLogger(__name__)

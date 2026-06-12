@@ -5,9 +5,11 @@ Keeps MLflow concerns out of canon.py so the training logic stays readable.
 """
 
 from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import Any
+
 import mlflow
 
 log = logging.getLogger(__name__)
@@ -67,7 +69,7 @@ def log_confusion_matrix(y_true, y_pred, labels: list[str] | None = None) -> Non
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+    from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 
     cm = confusion_matrix(y_true, y_pred)
     disp = ConfusionMatrixDisplay(cm, display_labels=labels or ["no link", "link"])
@@ -129,6 +131,7 @@ def _get_shap_estimator(estimator):
     Returns None if no suitable estimator is found.
     """
     import copy
+
     from sklearn.ensemble import BaggingClassifier, StackingClassifier, VotingClassifier
 
     # Extracting a tree-based sub-estimator from ensemble wrappers

@@ -5,11 +5,14 @@ Reuses the band-filtered data from Exp 5, but instead of the default 0.5
 threshold, sweeps thresholds to find the optimal F1 for each model on the
 AVC holdout set.  Reports metrics at both default and optimal thresholds.
 """
+
 from __future__ import annotations
+
 import logging
 import sys
 import warnings
 from pathlib import Path
+
 import numpy as np
 from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
@@ -27,8 +30,8 @@ from sklearn.preprocessing import RobustScaler
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.run_exp5_filtered import build_filtered_test, build_filtered_train, _add_features # noqa: E402
-from helpers.device import get_device # noqa: E402
+from helpers.device import get_device  # noqa: E402
+from scripts.run_exp5_filtered import _add_features, build_filtered_test, build_filtered_train  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(name)s | %(message)s")
 log = logging.getLogger(__name__)
@@ -73,7 +76,8 @@ def main():
     target = "to_link"
     exclude = {"variants", target, "variant_a", "variant_b", "source", "_key"}
     num_cols = [
-        c for c in train_df.columns
+        c
+        for c in train_df.columns
         if c not in exclude and train_df[c].dtype in ("float64", "int64", "float32", "int32")
     ]
     X_train = train_df[num_cols]
@@ -83,9 +87,12 @@ def main():
     device = get_device()
     spw = float(np.sum(y_train == 0) / max(np.sum(y_train == 1), 1))
     log.info("Train: %d | Test: %d | Features: %d | spw: %.2f", len(X_train), len(X_test), len(num_cols), spw)
-    log.info("Test distribution: pos=%d, neg=%d (%.1f%% positive)", y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean())
+    log.info(
+        "Test distribution: pos=%d, neg=%d (%.1f%% positive)", y_test.sum(), (y_test == 0).sum(), 100 * y_test.mean()
+    )
     # Building model catalogue
     from corefunc.canon.experiment_runner import _build_model_catalogue
+
     catalogue = _build_model_catalogue(spw, device, random_state=47)
     # Training and evaluating each model
     results = []
@@ -115,27 +122,33 @@ def main():
             m = _evaluate_at_threshold(y_test, y_prob, t)
             if m["precision"] >= 0.80 and m["f1"] > best_hi_prec["f1"]:
                 best_hi_prec = m
-        results.append({
-            "model": model_name,
-            "auc": auc,
-            "default_f1": default_metrics["f1"],
-            "default_prec": default_metrics["precision"],
-            "default_rec": default_metrics["recall"],
-            "opt_thr": optimal_metrics["threshold"],
-            "opt_f1": optimal_metrics["f1"],
-            "opt_prec": optimal_metrics["precision"],
-            "opt_rec": optimal_metrics["recall"],
-            "hiprec_thr": best_hi_prec["threshold"],
-            "hiprec_f1": best_hi_prec["f1"],
-            "hiprec_prec": best_hi_prec["precision"],
-            "hiprec_rec": best_hi_prec["recall"],
-        })
+        results.append(
+            {
+                "model": model_name,
+                "auc": auc,
+                "default_f1": default_metrics["f1"],
+                "default_prec": default_metrics["precision"],
+                "default_rec": default_metrics["recall"],
+                "opt_thr": optimal_metrics["threshold"],
+                "opt_f1": optimal_metrics["f1"],
+                "opt_prec": optimal_metrics["precision"],
+                "opt_rec": optimal_metrics["recall"],
+                "hiprec_thr": best_hi_prec["threshold"],
+                "hiprec_f1": best_hi_prec["f1"],
+                "hiprec_prec": best_hi_prec["precision"],
+                "hiprec_rec": best_hi_prec["recall"],
+            }
+        )
         log.info(
             "%s → AUC=%.4f | default F1=%.4f | optimal F1=%.4f (thr=%.3f) | hi-prec F1=%.4f (thr=%.3f, P=%.3f)",
-            model_name, auc,
+            model_name,
+            auc,
             default_metrics["f1"],
-            optimal_metrics["f1"], opt_thr,
-            best_hi_prec["f1"], best_hi_prec["threshold"], best_hi_prec["precision"],
+            optimal_metrics["f1"],
+            opt_thr,
+            best_hi_prec["f1"],
+            best_hi_prec["threshold"],
+            best_hi_prec["precision"],
         )
         # Printing classification report at optimal threshold
         y_pred_opt = (y_prob >= opt_thr).astype(int)
@@ -143,7 +156,9 @@ def main():
         print(classification_report(y_test, y_pred_opt, target_names=["no link", "link"]))
     # Printing summary table
     print("\n" + "=" * 120)
-    print(f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | {'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | {'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}")
+    print(
+        f"{'Model':<22} {'AUC':>6} | {'Def P':>6} {'Def R':>6} {'Def F1':>6} | {'Opt thr':>7} {'Opt P':>6} {'Opt R':>6} {'Opt F1':>6} | {'HiP thr':>7} {'HiP P':>6} {'HiP R':>6} {'HiP F1':>6}"
+    )
     print("-" * 120)
     for r in sorted(results, key=lambda x: x["opt_f1"], reverse=True):
         print(

@@ -3,10 +3,11 @@ Tests for QA functions, experiment runner helpers, tuner search spaces,
 and helpers/schema.py.
 """
 
-import numpy as np
 import json
+from unittest.mock import MagicMock, patch
+
+import numpy as np
 import pandas as pd
-from unittest.mock import patch, MagicMock
 
 _SAMPLE_FEATS = json.dumps({"wratio": 0.85, "partial_ratio": 0.9, "token_sort": 0.8})
 
@@ -26,7 +27,7 @@ class TestQaAvc:
 
     def test_qa_avc_valid(self, tmp_pq_dir):
         """Returns pass for valid avc data."""
-        from helpers.io import dump_parquet, AVC_PQ
+        from helpers.io import AVC_PQ, dump_parquet
 
         df = pd.DataFrame(
             {
@@ -59,7 +60,7 @@ class TestQaGsMb:
 
     def test_qa_gs_mb_valid(self, tmp_pq_dir):
         """Returns pass for valid gs_mb data."""
-        from helpers.io import dump_parquet, GS_MB_PQ
+        from helpers.io import GS_MB_PQ, dump_parquet
 
         df = pd.DataFrame(
             {
@@ -90,7 +91,7 @@ class TestQaUc:
 
     def test_qa_uc_valid(self, tmp_pq_dir):
         """Returns report for valid uc data."""
-        from helpers.io import dump_parquet, UC_PQ
+        from helpers.io import UC_PQ, dump_parquet
 
         df = pd.DataFrame(
             {
@@ -119,7 +120,7 @@ class TestQaPredictions:
 
     def test_insufficient_data(self, tmp_pq_dir):
         """Returns insufficient_data when baseline or recent is empty."""
-        from corefunc.qa import qa_predictions, PREDICTIONS_LOG_PQ
+        from corefunc.qa import PREDICTIONS_LOG_PQ, qa_predictions
         from helpers.io import dump_parquet
 
         # All predictions are recent
@@ -139,7 +140,7 @@ class TestQaPredictions:
 
     def test_no_drift(self, tmp_pq_dir):
         """Returns passed when no drift detected."""
-        from corefunc.qa import qa_predictions, PREDICTIONS_LOG_PQ
+        from corefunc.qa import PREDICTIONS_LOG_PQ, qa_predictions
         from helpers.io import dump_parquet
 
         now = pd.Timestamp.now(tz="UTC")
@@ -167,7 +168,7 @@ class TestQaPredictions:
 
     def test_drift_detected(self, tmp_pq_dir):
         """Returns warnings when mean probability shifts significantly."""
-        from corefunc.qa import qa_predictions, PREDICTIONS_LOG_PQ
+        from corefunc.qa import PREDICTIONS_LOG_PQ, qa_predictions
         from helpers.io import dump_parquet
 
         now = pd.Timestamp.now(tz="UTC")
@@ -224,8 +225,9 @@ class TestSafeGetParams:
 
     def test_extracts_primitive_params(self):
         """Returns only str/int/float/bool params."""
-        from corefunc.canon.experiment_runner import _safe_get_params
         from lightgbm import LGBMClassifier
+
+        from corefunc.canon.experiment_runner import _safe_get_params
 
         clf = LGBMClassifier(n_estimators=100, verbosity=-1)
         params = _safe_get_params(clf)
@@ -244,8 +246,9 @@ class TestEvaluate:
 
     def test_computes_metrics(self):
         """Returns precision, recall, f1, auc."""
-        from corefunc.canon.experiment_runner import _evaluate
         from sklearn.linear_model import LogisticRegression
+
+        from corefunc.canon.experiment_runner import _evaluate
 
         X = np.array([[1, 0], [0, 1], [1, 1], [0, 0], [1, 0], [0, 1]])
         y = np.array([1, 0, 1, 0, 1, 0])
@@ -303,8 +306,8 @@ class TestSchemaValidation:
 
     def test_validate_schema_scrobble(self, populated_pq):
         """Validates a scrobble parquet file."""
-        from helpers.schema import validate_schema
         from helpers.io import SCROBBLE_PQ
+        from helpers.schema import validate_schema
 
         info = validate_schema(SCROBBLE_PQ)
         assert "table" in info
@@ -313,8 +316,8 @@ class TestSchemaValidation:
 
     def test_validate_schema_artist_info(self, populated_pq):
         """Validates an artist_info parquet file."""
-        from helpers.schema import validate_schema
         from helpers.io import ARTIST_INFO_PQ
+        from helpers.schema import validate_schema
 
         info = validate_schema(ARTIST_INFO_PQ)
         assert "table" in info
@@ -328,8 +331,8 @@ class TestSchemaValidation:
 
     def test_read_file_version(self, populated_pq):
         """Reads version from file metadata."""
-        from helpers.schema import read_file_version
         from helpers.io import SCROBBLE_PQ
+        from helpers.schema import read_file_version
 
         result = read_file_version(SCROBBLE_PQ)
         # Returns a tuple (table_name_or_None, version_int)
@@ -338,8 +341,8 @@ class TestSchemaValidation:
 
     def test_migrate_all(self, populated_pq):
         """Runs migration on a populated PQ dir."""
-        from helpers.schema import migrate_all
         from helpers.io import PQ_DIR
+        from helpers.schema import migrate_all
 
         results = migrate_all(PQ_DIR)
         assert isinstance(results, dict)
@@ -388,8 +391,11 @@ class TestTrainerHelpers:
         mock_mlflow.get_tracking_uri.return_value = "sqlite:///test.db"
         from corefunc.canon.trainer import verify_mlflow
 
-        # Should not raise
-        verify_mlflow()
+        # Mocking the function-local mlflow import too — mlflow >= 3.13 raises
+        # on the default ./mlruns file store, which the unmocked call would hit.
+        with patch("mlflow.start_run"), patch("mlflow.log_param"):
+            # Should not raise
+            verify_mlflow()
 
     def test_next_experiment_number(self):
         """Returns an integer >= 1."""
@@ -408,10 +414,11 @@ class TestTrainerFitGpuFallback:
 
     def test_cpu_success(self):
         """Succeeds on CPU without fallback."""
-        from corefunc.canon.trainer import _fit_with_gpu_fallback
         from sklearn.linear_model import LogisticRegression
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import RobustScaler
+
+        from corefunc.canon.trainer import _fit_with_gpu_fallback
 
         pipe = Pipeline([("scaler", RobustScaler()), ("clf", LogisticRegression(max_iter=200))])
         X = np.array([[1, 0], [0, 1], [1, 1], [0, 0]])
@@ -425,7 +432,7 @@ class TestTrainerLoadCatalogueLookups:
 
     def test_returns_tuple_of_dicts(self, tmp_pq_dir, sample_artist_info_df):
         """Returns a tuple of lookup dicts from artist_info."""
-        from helpers.io import dump_parquet, ARTIST_INFO_PQ
+        from helpers.io import ARTIST_INFO_PQ, dump_parquet
 
         dump_parquet(sample_artist_info_df, ARTIST_INFO_PQ)
         from corefunc.canon.trainer import _load_catalogue_lookups

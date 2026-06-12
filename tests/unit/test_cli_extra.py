@@ -2,10 +2,12 @@
 Tests for uncovered CLI commands and helper functions in main.py.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
 import pytest
 from click.testing import CliRunner
-from unittest.mock import patch, MagicMock
+
 from main import cli
 
 
@@ -619,6 +621,7 @@ class TestParseRankRanges:
     def test_invalid_format(self):
         """Raises BadParameter for unparseable input."""
         import click
+
         from main import _parse_rank_ranges
 
         with pytest.raises(click.BadParameter):
@@ -627,6 +630,7 @@ class TestParseRankRanges:
     def test_invalid_range(self):
         """Raises BadParameter for end < start."""
         import click
+
         from main import _parse_rank_ranges
 
         with pytest.raises(click.BadParameter, match="Invalid range"):
@@ -807,6 +811,7 @@ class TestParseCategories:
     def test_invalid_raises(self):
         """Raises BadParameter for unknown categories."""
         import click
+
         from main import _parse_categories
 
         with pytest.raises(click.BadParameter):

@@ -4,8 +4,10 @@ corefunc/canonize.py and corefunc/avc_seed.py.
 """
 
 from __future__ import annotations
+
 import hashlib
 from unittest.mock import patch
+
 import pandas as pd
 import pytest
 

@@ -32,20 +32,23 @@ MB_PASSWORD=my_mb_password
 """
 
 from __future__ import annotations
+
 import logging
 import os
 import re
 import time
 from functools import wraps
 from typing import Any, Dict
+
 import musicbrainzngs as mb
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
-from HTTP.client import USER_AGENT as DEFAULT_UA  # noqa: E402
-from helpers.io import ARTIST_INFO_PQ, read_parquet, append_to_parquet  # noqa: E402
 from tenacity import retry, stop_after_attempt, wait_exponential  # noqa: E402
+
+from helpers.io import ARTIST_INFO_PQ, append_to_parquet, read_parquet  # noqa: E402
+from HTTP.client import USER_AGENT as DEFAULT_UA  # noqa: E402
 
 _RETRY = retry(
     reraise=True,

@@ -9,28 +9,31 @@ Generic Convolutional and Recurrent Networks for Sequence Modeling."
 """
 
 from __future__ import annotations
+
 import logging
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.nn.utils.parametrizations import weight_norm
-from torch.utils.data import Dataset, DataLoader
 from rapidfuzz import fuzz
 from sklearn.metrics import (
     classification_report,
+    f1_score,
     precision_recall_curve,
     precision_score,
     recall_score,
-    f1_score,
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
-from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet
-from helpers.features import compute_pair_features
-from helpers.stats import length_stats
+from torch.nn.utils.parametrizations import weight_norm
+from torch.utils.data import DataLoader, Dataset
+
 from helpers import cluster, experiment
+from helpers.features import compute_pair_features
+from helpers.io import AVC_PQ, GS_MB_PQ, PQ_DIR, read_parquet
+from helpers.stats import length_stats
 
 log = logging.getLogger(__name__)
 
@@ -758,10 +761,12 @@ def run_tcn_training(
     print(f"AUC:            {auc:.4f}")
     print(f"Default (0.5):  P={default_m['precision']:.4f}  R={default_m['recall']:.4f}  F1={default_m['f1']:.4f}")
     print(
-        f"Optimal:        P={optimal_m['precision']:.4f}  R={optimal_m['recall']:.4f}  F1={optimal_m['f1']:.4f}  (thr={opt_thr:.3f})"
+        f"Optimal:        P={optimal_m['precision']:.4f}  R={optimal_m['recall']:.4f}  "
+        f"F1={optimal_m['f1']:.4f}  (thr={opt_thr:.3f})"
     )
     print(
-        f"High-precision: P={best_hi['precision']:.4f}  R={best_hi['recall']:.4f}  F1={best_hi['f1']:.4f}  (thr={best_hi['threshold']:.3f})"
+        f"High-precision: P={best_hi['precision']:.4f}  R={best_hi['recall']:.4f}  "
+        f"F1={best_hi['f1']:.4f}  (thr={best_hi['threshold']:.3f})"
     )
     print(f"{'=' * 100}")
     y_pred_opt = (test_probs >= opt_thr).astype(int)

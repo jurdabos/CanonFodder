@@ -3,7 +3,9 @@ Unit tests for corefunc.enrich (artist enrichment via MusicBrainz).
 """
 
 from unittest.mock import patch
+
 import pandas as pd
+
 from corefunc.enrich import enrich_artist_country
 
 

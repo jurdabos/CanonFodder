@@ -3,10 +3,11 @@ Tests for corefunc.canon.trainer — utility, data-building, feature dispatch,
 evaluation helpers, CV loop, GPU fallback, and MLflow integration.
 """
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -471,8 +472,9 @@ class TestCvEvaluate:
     @patch("corefunc.canon.trainer.experiment")
     def test_returns_mean_metrics(self, mock_exp):
         """Returns cv_mean_* and cv_std_* keys."""
-        from corefunc.canon.trainer import _cv_evaluate
         from sklearn.ensemble import RandomForestClassifier
+
+        from corefunc.canon.trainer import _cv_evaluate
 
         mock_exp.log_cv_fold = MagicMock()
         rng = np.random.default_rng(42)
@@ -506,10 +508,11 @@ class TestFitWithGpuFallback:
 
     def test_success_on_cpu(self):
         """Fits normally and returns same device on success."""
-        from corefunc.canon.trainer import _fit_with_gpu_fallback
+        from sklearn.linear_model import LogisticRegression
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import RobustScaler
-        from sklearn.linear_model import LogisticRegression
+
+        from corefunc.canon.trainer import _fit_with_gpu_fallback
 
         pipe = Pipeline(
             [

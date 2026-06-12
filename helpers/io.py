@@ -7,15 +7,17 @@ Application-layer deduplication is performed before every append.
 """
 
 from __future__ import annotations
+
 import logging
 import os
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Sequence
+
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +40,17 @@ GS_MB_PQ = PQ_DIR / "gs_mb.parquet"
 ALIAS_SEP = "{"
 
 # ── PyArrow schemas (canonical definitions live in helpers.schema) ─────────────
+from helpers.schema import (  # noqa: E402 — deliberately placed after path constants
+    current_version as _current_version,
+)
+from helpers.schema import (  # noqa: E402 — deliberately placed after path constants
+    read_file_version as _read_file_version,
+)
 from helpers.schema import (  # noqa: E402 — re-exported for backward compat
     stamp_metadata as _stamp_metadata,
+)
+from helpers.schema import (  # noqa: E402 — deliberately placed after path constants
     table_name_for_path as _table_name_for_path,
-    read_file_version as _read_file_version,
-    current_version as _current_version,
 )
 
 # ── Column aliases (Last.fm API → c9r canonical names) ────────────────────────
