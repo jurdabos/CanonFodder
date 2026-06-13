@@ -4,6 +4,13 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-06-13: Pin CI to Python 3.12 (unblocks lint workflow)
+- .python-version — added with `3.12`; the new lint.yml runs `uv python install` without an argument, which previously picked CPython 3.14.6 on the GitHub runner.
+- pyproject.toml — tightened `requires-python` from `>=3.12` to `>=3.12,<3.14`. `ruamel-yaml-clib==0.2.12` (transitive via `prefect`) does `from ast import Str` in its setup.py, which 3.12 removed and 3.14 still doesn't reinstate; without the upper bound, any contributor or future CI job running bare `uv python install` would re-hit the same build failure.
+- uv.lock, requirements.txt — re-locked and re-exported against the new constraint (no transitive version changes; only the metadata bound moved).
+
+---
+
 ## 2026-06-12: acidbase CI baseline + `c9r push` integration
 - pyproject.toml — extended `[tool.ruff]` to the canonical a6a config (extend-exclude, `select = ["E", "W", "F", "I"]`, per-file-ignores for tests/scripts/__init__, formatter block); added `acidbase` to the dev dependency group from the public mirror (`git+https://github.com/jurdabos/acidbase`).
 - main.py — attached the shared acidbase `push_command` as `uv run c9r push` (guarded import keeps the CLI usable when acidbase is absent).
