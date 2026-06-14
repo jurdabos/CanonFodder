@@ -4,6 +4,11 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-06-14: Fix DuckDB `year` GROUP BY collision in profile.py
+- corefunc/profile.py — `trusted_companions()` (`c9r profile companions`) and `overview_stats()` (`c9r profile overview`) grouped by the bare `year` alias. Since the scrobble source is hive-partitioned on `year=YYYY`, DuckDB bound that identifier to the partition column instead of the `EXTRACT(YEAR FROM play_time)` projection, raising `BinderException: column "play_time" must appear in the GROUP BY clause`. Both now group by the explicit `EXTRACT(...)` expression, matching the idiom already used in helpers/query.py. The fix is also correct for the legacy single-file fallback (no `year` column).
+
+---
+
 ## 2026-06-13: Pin CI to Python 3.12 (unblocks lint workflow)
 - .python-version — added with `3.12`; the new lint.yml runs `uv python install` without an argument, which previously picked CPython 3.14.6 on the GitHub runner.
 - pyproject.toml — tightened `requires-python` from `>=3.12` to `>=3.12,<3.14`. `ruamel-yaml-clib==0.2.12` (transitive via `prefect`) does `from ast import Str` in its setup.py, which 3.12 removed and 3.14 still doesn't reinstate; without the upper bound, any contributor or future CI job running bare `uv python install` would re-hit the same build failure.

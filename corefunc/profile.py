@@ -71,11 +71,15 @@ def overview_stats() -> dict:
         """).df()
         row = basics.iloc[0]
         # Yearly totals
+        # Grouping by the explicit EXTRACT expression (not the `year` alias) to
+        # avoid colliding with the hive `year` partition column exposed by the
+        # partitioned scrobble source, which otherwise triggers a DuckDB binder
+        # error ("play_time must appear in the GROUP BY clause").
         yearly = con.execute(f"""
             SELECT EXTRACT(YEAR FROM play_time) AS year, COUNT(*) AS plays
             FROM {scrobble_duckdb_from()}
             WHERE artist_name IS NOT NULL AND artist_name != ''
-            GROUP BY year
+            GROUP BY EXTRACT(YEAR FROM play_time)
             ORDER BY year
         """).df()
         # Play-count distribution per artist
@@ -311,6 +315,10 @@ def trusted_companions(*, start_year: int = 2006, end_year: int = 2025) -> dict:
             return {"years": [], "companions": []}
         num_years = len(years)
         # Finding artists present in every year
+        # Grouping by the explicit EXTRACT expression (not the `year` alias) to
+        # avoid colliding with the hive `year` partition column exposed by the
+        # partitioned scrobble source, which otherwise triggers a DuckDB binder
+        # error ("play_time must appear in the GROUP BY clause").
         companions_df = con.execute(f"""
             WITH {cte},
             yearly AS (
@@ -322,7 +330,8 @@ def trusted_companions(*, start_year: int = 2006, end_year: int = 2025) -> dict:
                 LEFT JOIN canonical_map cm ON s.artist_name = cm.variant_name
                 WHERE s.artist_name IS NOT NULL AND s.artist_name != ''
                   AND EXTRACT(YEAR FROM s.play_time) BETWEEN {start_year} AND {end_year}
-                GROUP BY COALESCE(cm.canonical_name, s.artist_name), year
+                GROUP BY COALESCE(cm.canonical_name, s.artist_name),
+                         EXTRACT(YEAR FROM s.play_time)::INT
             ),
             coverage AS (
                 SELECT artist_name, COUNT(DISTINCT year) AS year_count
