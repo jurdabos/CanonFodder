@@ -4,6 +4,16 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-06-14: Unify artist alias separator on the canonical `{` (ALIAS_SEP)
+- corefunc/mb_local.py — the local-MB enrichment SQL aggregated aliases with `string_agg(aa.name, ',' ...)`. Changed to the canonical `ALIAS_SEP` (`{`). This was the root cause of `profile top --canonized` (and the other canonised views) silently failing to pool variants: `helpers.query._canonical_cte` splits `artist_info.aliases` on `{`, so comma-joined aliases were parsed as one giant unmatchable token. Commas can't be the separator because many artist names contain them (e.g. "Lustmord, Bohren & Der Club Of Gore").
+- corefunc/enrich.py — remote-MB-API enrichment joined aliases with `','`; now uses `ALIAS_SEP`.
+- HTTP/mbAPI.py — `_cache_artist` and `get_complete_artist_info` already used a literal `{`; switched both to the imported `ALIAS_SEP` constant so there is a single source of truth.
+- Readers unchanged — `helpers.query._canonical_cte` and `corefunc/canon/workflow.py:propagate_avc` already split/join on `ALIAS_SEP`.
+- tests — added regression guards (`test_mb_local.py::TestAliasSeparator`, `test_enrich.py::test_aliases_joined_with_canonical_sep`) and updated alias fixtures to the canonical `{`.
+- DATA REMEDIATION REQUIRED: existing `artist_info.parquet` rows written before this change still carry comma-joined aliases, and they CANNOT be blindly migrated (a comma inside an alias name is indistinguishable from a separator). To repair, re-run enrichment so aliases are re-aggregated with `{`, then re-apply decisions: `uv run c9r enrich --rebuild` followed by `uv run c9r canon avc propagate`. The propagate step also removes standalone variant rows that otherwise shadow the alias mapping via the priority-1 self-map in `_canonical_cte`.
+
+---
+
 ## 2026-06-14: Fix DuckDB `year` GROUP BY collision in profile.py
 - corefunc/profile.py — `trusted_companions()` (`c9r profile companions`) and `overview_stats()` (`c9r profile overview`) grouped by the bare `year` alias. Since the scrobble source is hive-partitioned on `year=YYYY`, DuckDB bound that identifier to the partition column instead of the `EXTRACT(YEAR FROM play_time)` projection, raising `BinderException: column "play_time" must appear in the GROUP BY clause`. Both now group by the explicit `EXTRACT(...)` expression, matching the idiom already used in helpers/query.py. The fix is also correct for the legacy single-file fallback (no `year` column).
 

@@ -97,7 +97,20 @@ class TestPsqlCsv:
             _psql_csv("SELECT 1")
 
 
-# ── enrich_from_local_mb ──────────────────────────────────────────────────────
+# ── alias separator convention ──────────────────────────────────────────────
+class TestAliasSeparator:
+    """Tests that the MB SQL aggregates aliases with the canonical separator."""
+
+    def test_artist_select_uses_alias_sep(self):
+        """string_agg joins aliases with ALIAS_SEP ('{'), never a comma."""
+        from corefunc.mb_local import _ARTIST_SELECT
+        from helpers.io import ALIAS_SEP
+
+        assert f"string_agg(aa.name, '{ALIAS_SEP}'" in _ARTIST_SELECT
+        assert "string_agg(aa.name, ','" not in _ARTIST_SELECT
+
+
+# ── enrich_from_local_mb ───────────────────────────────────────────────────────────────
 class TestEnrichFromLocalMb:
     """Tests the main orchestrator with mocked queries."""
 
@@ -163,7 +176,7 @@ class TestEnrichFromLocalMb:
                 "mbid": [mbid],
                 "country": ["GB"],
                 "disambiguation_comment": ["punk"],
-                "aliases": ["TB,Test Band"],
+                "aliases": ["TB{Test Band"],
             }
         )
         mock_name.return_value = pd.DataFrame(columns=ARTIST_INFO_COLS)
@@ -172,7 +185,7 @@ class TestEnrichFromLocalMb:
         mock_mbid.assert_called_once()
         result = pd.read_parquet(io_mod.ARTIST_INFO_PQ)
         assert result.iloc[0]["country"] == "GB"
-        assert result.iloc[0]["aliases"] == "TB,Test Band"
+        assert result.iloc[0]["aliases"] == "TB{Test Band"
 
     @patch("corefunc.mb_local._enrich_by_name")
     @patch("corefunc.mb_local._enrich_by_mbid")

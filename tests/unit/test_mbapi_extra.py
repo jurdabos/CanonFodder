@@ -124,7 +124,7 @@ class TestGetCompleteArtistInfo:
                 "mbid": ["abc-123"],
                 "country": ["DE"],
                 "disambiguation_comment": ["rock"],
-                "aliases": ["Alt1,Alt2"],
+                "aliases": ["Alt1{Alt2"],
             }
         )
         mock_read.return_value = cached

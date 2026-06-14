@@ -67,6 +67,31 @@ class TestEnrichArtistCountry:
         mock_sleep.assert_called()
 
     @patch("corefunc.enrich.time.sleep")
+    @patch("HTTP.mbAPI._cache_artist")
+    @patch("HTTP.mbAPI.search_artist")
+    def test_aliases_joined_with_canonical_sep(self, mock_search, mock_cache, mock_sleep, tmp_pq_dir):
+        """Multi-alias candidates are stored joined by the canonical ALIAS_SEP, not commas."""
+        import helpers.io as io_mod
+        from helpers.io import ALIAS_SEP
+
+        scrobbles = pd.DataFrame(
+            {
+                "artist_name": ["MultiAlias"],
+                "album_title": ["Al"],
+                "track_title": ["T"],
+                "artist_mbid": [None],
+                "play_time": pd.to_datetime(["2024-06-01"], utc=True),
+            }
+        )
+        scrobbles.to_parquet(io_mod.SCROBBLE_PQ, index=False)
+        mock_search.return_value = [
+            {"id": "mb-1", "country": "DE", "disambiguation": "", "aliases": ["Alt One", "Alt Two"]}
+        ]
+        assert enrich_artist_country() == 1
+        df = pd.read_parquet(io_mod.ARTIST_INFO_PQ)
+        assert df.iloc[0]["aliases"] == f"Alt One{ALIAS_SEP}Alt Two"
+
+    @patch("corefunc.enrich.time.sleep")
     @patch("HTTP.mbAPI.search_artist")
     def test_artist_with_mbid_skips_search(self, mock_search, mock_sleep, tmp_pq_dir):
         """Skips MB search for artists that already have an MBID in scrobbles."""

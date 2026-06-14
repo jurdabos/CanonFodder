@@ -18,6 +18,7 @@ import time
 import pandas as pd
 
 from helpers.io import (
+    ALIAS_SEP,
     ARTIST_INFO_PQ,
     append_to_parquet,
     dump_scrobble_df,
@@ -65,7 +66,7 @@ def enrich_artist_country(*, batch: int = 100) -> int:
                     "mbid": cand.get("id", ""),
                     "country": cand.get("country", ""),
                     "disambiguation_comment": cand.get("disambiguation", ""),
-                    "aliases": ",".join(cand.get("aliases", [])) if isinstance(cand.get("aliases"), list) else "",
+                    "aliases": ALIAS_SEP.join(cand.get("aliases", [])) if isinstance(cand.get("aliases"), list) else "",
                 }
             )
         else:

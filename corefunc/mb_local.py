@@ -19,6 +19,7 @@ from typing import Sequence
 import pandas as pd
 
 from helpers.io import (
+    ALIAS_SEP,
     ARTIST_INFO_COLS,
     ARTIST_INFO_PQ,
     PQ_DIR,
@@ -47,14 +48,18 @@ _DOMINANCE_THRESHOLD = 0.6
 _SOLO_DISCO_PQ = PQ_DIR / "mbdb_discography_solo.parquet"
 
 # ── SQL template ──────────────────────────────────────────────────────────────
-_ARTIST_SELECT = """\
+# Aliases are aggregated with the canonical ALIAS_SEP ('{'), NOT a comma: many
+# artist names legitimately contain commas (e.g. "Lustmord, Bohren & Der Club Of
+# Gore"), so a comma separator would be indistinguishable from an in-name comma
+# and would break alias parsing in helpers.query._canonical_cte.
+_ARTIST_SELECT = f"""\
 SELECT
     a.name          AS artist_name,
     a.gid::text     AS mbid,
     COALESCE(iso.code, '')  AS country,
     COALESCE(a.comment, '') AS disambiguation_comment,
     COALESCE(
-        (SELECT string_agg(aa.name, ',' ORDER BY aa.name)
+        (SELECT string_agg(aa.name, '{ALIAS_SEP}' ORDER BY aa.name)
          FROM musicbrainz.artist_alias aa
          WHERE aa.artist = a.id),
         ''
