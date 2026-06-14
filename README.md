@@ -330,7 +330,7 @@ uv run c9r profile clock                # hour-of-day and day-of-week patterns
 - `--custom TEXT` — custom rank ranges, e.g. `"(1,5),(27,29)"`
 
 `profile variants` options:
-- `-t, --threshold INTEGER` — minimum fuzzy similarity score (0–100)
+- `-t, --threshold INTEGER` — minimum fuzzy similarity score (0–100) (default: 91)
 - `-m, --min-plays INTEGER` — minimum play count to consider
 - `-l, --limit INTEGER` — max artists to compare
 - `-n, --top INTEGER` — number of results to show

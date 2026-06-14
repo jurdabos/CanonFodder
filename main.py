@@ -1210,7 +1210,7 @@ def overview() -> None:
 
 
 @profile.command()
-@click.option("--threshold", "-t", default=85, type=int, help="Minimum fuzzy similarity score (0-100).")
+@click.option("--threshold", "-t", default=91, type=int, help="Minimum fuzzy similarity score (0-100).")
 @click.option("--min-plays", "-m", default=3, type=int, help="Minimum play count to consider.")
 @click.option("--limit", "-l", default=500, type=int, help="Max artists to compare.")
 @click.option("--top", "-n", default=20, type=int, help="Number of results to show.")

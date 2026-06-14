@@ -4,6 +4,11 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-06-14: Raise `profile variants` default threshold to 91
+- main.py — the `c9r profile variants` `-t/--threshold` default changed from 85 to 91, so the near-duplicate scan surfaces only high-confidence pairs by default (lower thresholds still available explicitly).
+
+---
+
 ## 2026-06-14: Unify artist alias separator on the canonical `{` (ALIAS_SEP)
 - corefunc/mb_local.py — the local-MB enrichment SQL aggregated aliases with `string_agg(aa.name, ',' ...)`. Changed to the canonical `ALIAS_SEP` (`{`). This was the root cause of `profile top --canonized` (and the other canonised views) silently failing to pool variants: `helpers.query._canonical_cte` splits `artist_info.aliases` on `{`, so comma-joined aliases were parsed as one giant unmatchable token. Commas can't be the separator because many artist names contain them (e.g. "Lustmord, Bohren & Der Club Of Gore").
 - corefunc/enrich.py — remote-MB-API enrichment joined aliases with `','`; now uses `ALIAS_SEP`.
