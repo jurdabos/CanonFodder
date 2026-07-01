@@ -32,6 +32,7 @@ dependencies = [
   "prefect>=3.6.28.dev2",
   "pyarrow>=23.0.1",
   "pyasn1>=0.6.3",
+  "pydantic-settings>=2.14.2",
   "pygments>=2.20.0",
   "pypopulation>=2020.3",
   "pytest>=9.0.3",
