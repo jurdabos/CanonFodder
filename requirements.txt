@@ -86,9 +86,9 @@ anyio==4.10.0 \
     #   httpx
     #   prefect
     #   starlette
-apprise==1.9.4 \
-    --hash=sha256:17dca8ad0a5b2063f6bae707979a51ca2cb374fcc66b0dd5c05a9d286dd40069 \
-    --hash=sha256:483122aee19a89a7b075ecd48ef11ae37d79744f7aeb450bcf985a9a6c28c988
+apprise==1.12.0 \
+    --hash=sha256:28edabfec5a9d5dbcd9aa28bdfd8928ecb68764e40214b6e648eab6d974b5a93 \
+    --hash=sha256:ffe9860d99cbde05fd156c610d4bcb49d953200c4ed3cb2db001ed50722fc142
     # via prefect
 asgi-lifespan==2.1.0 \
     --hash=sha256:5e2effaf0bfe39829cf2d64e7ecc47c7d86d676a6599f7afba378c31f5e3a308 \
