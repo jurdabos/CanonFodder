@@ -44,7 +44,6 @@ dependencies = [
   "shap>=0.46",
   "starlette>=1.3.1",
   "tenacity>=9.1",
-  "torch>=2.13.0",
   "urllib3>=2.7.0",
   "uvicorn>=0.34",
   "xgboost>=3.0",
@@ -140,8 +139,25 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
+[tool.uv]
+# Keeping plain `uv sync` identical to the historical behaviour: dev tooling plus CUDA torch.
+default-groups = ["dev", "gpu"]
+# torch builds are mutually exclusive per environment; CI picks cpu, local dev picks gpu.
+conflicts = [[{ group = "gpu" }, { group = "cpu" }]]
+# Dropping xgboost's nvidia-nccl-cu12: it ships the same nvidia/nccl/lib/libnccl.so.2 path as
+# torch's nvidia-nccl-cu13 but lacks the ncclCommResume symbol, so the install-order race
+# breaks torch wherever cu12 wins (CI run #230). xgboost only dlopens NCCL for distributed
+# GPU training and works without it.
+override-dependencies = ["nvidia-nccl-cu12 ; sys_platform == 'never'"]
+
 [tool.uv.sources]
 acidbase = { git = "https://github.com/jurdabos/acidbase" }
+torch = [{ index = "pytorch-cpu", group = "cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = [
@@ -150,4 +166,8 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
 ]
+# CUDA-13 build from PyPI (default index) — local development default.
+gpu = ["torch>=2.13.0"]
+# CPU-only build from the pytorch-cpu index — CI and CUDA-less machines.
+cpu = ["torch>=2.13.0"]
 
