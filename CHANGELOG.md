@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml`: torch moved from `[project.dependencies]` into mutually exclusive `gpu`/`cpu` dependency groups (uv's documented PyTorch pattern) with `default-groups = ["dev", "gpu"]`, so plain `uv sync` still installs the CUDA build from PyPI; the `cpu` group resolves `torch==2.13.0+cpu` from the new explicit `pytorch-cpu` index (`download.pytorch.org/whl/cpu`). `override-dependencies` drops `nvidia-nccl-cu12` entirely so exactly one NCCL provider exists per environment — xgboost only dlopens NCCL for distributed GPU training and imports fine without it (verified in a CPU-only env). `requirements.txt` re-exported accordingly by the `uv-export` pre-commit hook.
 - `.github/workflows/test.yml`: both jobs now install with `uv sync --frozen --extra all --no-group gpu --group cpu` (`--frozen --extra all` retained from 6bcd441 to match `lint.yml`), putting CPU-only torch on the CUDA-less runners — no CUDA/NCCL wheels at all, roughly 5 GB less to install per run, and no shared-file race left to lose.
 
+### Security
+
+- `pyproject.toml`, `uv.lock`, `requirements.txt`: bumped `cryptography` `>=48.0.1` → `>=50.0.0` (locked `48.0.1` → `50.0.0`) to remediate CVE-2026-69247. The `acidbase patch` `uv add` failed with `UVADDFAIL` because every published mlflow (<= 3.15.1, pre-releases included) caps `cryptography < 50`; appended `"cryptography>=50.0.0"` to the existing `[tool.uv] override-dependencies` to lift the transitive cap — drop it once an mlflow release allows `cryptography >= 50`.
+
 ### Notes / clarifications
 
 - Recreating a GPU venv that previously contained both NCCL packages needs `uv sync --reinstall` once: uninstalling `nvidia-nccl-cu12` deletes the shared `libnccl.so.2`/cudnn files that the surviving cu13 packages still claim.
+- The Windows-side `acidbase patch` run (Windows uv over `\\wsl.localhost\...`) gutted the Linux `.venv` while trying to recreate it (removed `lib/`, leaving a dangling `lib64` symlink Windows could not delete); the remnant was removed and the CVE bump applied with `uv add --no-sync` from inside WSL — run `uv sync` in WSL (with `--reinstall` if shared NCCL/cudnn files complain) to rebuild the venv.

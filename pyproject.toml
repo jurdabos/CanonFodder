@@ -14,7 +14,7 @@ authors = [{name = "Torda Bal\u00e1zs", email = "balazs.torda@iu-study.org"}]
 dependencies = [
   "aiohttp>=3.14.0",
   "click>=8.1",
-  "cryptography>=48.0.1",
+  "cryptography>=50.0.0",
   "duckdb>=1.2",
   "fastapi>=0.115",
   "gitpython>=3.1.57",
@@ -149,7 +149,12 @@ conflicts = [[{ group = "gpu" }, { group = "cpu" }]]
 # torch's nvidia-nccl-cu13 but lacks the ncclCommResume symbol, so the install-order race
 # breaks torch wherever cu12 wins (CI run #230). xgboost only dlopens NCCL for distributed
 # GPU training and works without it.
-override-dependencies = ["nvidia-nccl-cu12 ; sys_platform == 'never'"]
+override-dependencies = [
+    "nvidia-nccl-cu12 ; sys_platform == 'never'",
+    # Lifting mlflow's transitive cap (every published mlflow <= 3.15.1 pins cryptography < 50)
+    # so the CVE-2026-69247 fix can resolve; dropping once an mlflow release allows cryptography >= 50.
+    "cryptography>=50.0.0",
+]
 
 [tool.uv.sources]
 acidbase = { git = "https://github.com/jurdabos/acidbase" }
