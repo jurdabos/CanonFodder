@@ -17,8 +17,10 @@ import click
 from dotenv import load_dotenv
 
 try:
+    from acidbase.cli_utils import group
     from acidbase.push import push_command
 except ImportError:  # to keep the CLI usable when acidbase is absent
+    group = click.group  # plain click help formatting as the fallback
     push_command = None
 
 load_dotenv()
@@ -44,7 +46,7 @@ def _resolve_user(source: str, user: str | None) -> str:
     return val
 
 
-@click.group()
+@group()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
 def cli(verbose: bool) -> None:
     """c9r — scrobble ingestion, enrichment, and canonisation toolkit."""
