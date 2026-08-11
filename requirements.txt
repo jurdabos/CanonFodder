@@ -1331,9 +1331,9 @@ protobuf==6.33.5 \
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-proto
-py-key-value-aio==0.4.4 \
-    --hash=sha256:18e17564ecae61b987f909fc2cd41ee2012c84b4b1dcb8c055cf8b4bc1bf3f5d \
-    --hash=sha256:e3012e6243ed7cc09bb05457bd4d03b1ba5c2b1ca8700096b3927db79ffbbe55
+py-key-value-aio==0.4.5 \
+    --hash=sha256:ab862adbcb8c72547d1c57821f22cbbb71ab86509039c96f36e914e0336c8dd7 \
+    --hash=sha256:c6563a2c6abe5da5e20f4f9e875c2a9b425a2244a54fadbf46cf140a9eea45d7
     # via pydocket
 pyarrow==24.0.0 \
     --hash=sha256:02b001b3ed4723caa44f6cd1af2d5c86aa2cf9971dacc2ffa55b21237713dfba \
