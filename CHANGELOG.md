@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+
+- `flows/cf_ingest.py`: an in-flow zombie janitor plus a flow timeout, closing the hole where serve()-executed runs stayed `Running` in Prefect Cloud indefinitely after a host/process death (three corpses from April–June 2026 accumulated unnoticed until 2026-08-19). New `crash_zombie_runs()` helper marks `c9r_ingest` runs in Running/Pending older than 6 h as Crashed (plain transition, `force=True` fallback, per-run failures logged and skipped, calling run exempt); the new `janitor_zombie_runs` task runs it first in `weekly_ingest_flow` via `SyncPrefectClient`, swallowing any client failure to a warning so housekeeping can never kill the pipeline; the flow also gained `timeout_seconds=8700` (2 h 25 min) so live-but-hung runs fail instead of lingering. Result dict gained `zombies_crashed`. Tests in `tests/test_prefect_flow.py` (`TestJanitorZombieRuns`: stale-crashed/fresh-spared, self-exemption, force-retry semantics, guardrail, timeout); `docs/PREFECT_SETUP.md` updated.
+
 ### Changed
 - Adopted the canonical non-truncating CLI help from acidbase: the top-level command group is now built with `acidbase.cli_utils.group` (a `click.Group` subclass) instead of `click.group`. Click's default group listing truncates each command's short help at 45 characters, so longer descriptions ended in `...`; the shared group wraps the full first paragraph onto aligned continuation lines instead. `RichGroup.main` also routes output through `ensure_unicode_safe_streams()`, so non-ASCII help (em dashes, accented words) survives on Windows consoles using a legacy code page. `uv.lock` pins acidbase at the commit providing `cli_utils`.
 

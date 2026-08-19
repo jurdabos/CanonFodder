@@ -75,8 +75,9 @@ Running the file directly starts a Prefect `.serve()` deployment with a weekly c
 
 ## Flow Structure
 
-`flows/cf_ingest.py` defines one flow (`c9r_ingest`) with seven tasks, covering functional requirements FR-01 through FR-07 and FR-10:
+`flows/cf_ingest.py` defines one flow (`c9r_ingest`) with a housekeeping step plus eight tasks, covering functional requirements FR-01 through FR-07 and FR-10:
 
+0. **janitor_zombie_runs** — marks `c9r_ingest` runs stuck in Running/Pending for over 6 h as Crashed (a serve() runner only writes a run's final state while its process is alive, so host/process deaths would otherwise leave zombies forever). Exempts the calling run; failures only log a warning.
 1. **fetch_scrobbles** (FR-01→03) — ingests scrobbles from the selected source; persists to year-partitioned `PQ/scrobble/year=YYYY/`. Runs post-ingestion QA checks (schema, timestamps, duplicates, encoding). Retries: 8, exponential backoff (factor 10) + jitter.
 2. **fix_encoding_task** — repairs encoding-corrupted strings in scrobble and artist_info. Retries: 3.
 3. **enrich_artists** (FR-04) — looks up country/MBID for unresolved artists via the local MusicBrainz mirror; persists to `artist_info.parquet`. Retries: 8, exponential backoff (factor 10) + jitter.
@@ -88,7 +89,7 @@ Running the file directly starts a Prefect `.serve()` deployment with a weekly c
 
 ## Scheduling
 
-The default deployment (via `python flows/cf_ingest.py`) uses `cron="0 3 * * 1"` (Mondays at 03:00 UTC).
+The default deployment (via `python flows/cf_ingest.py`) uses `cron="0 3 * * 1"` (Mondays at 03:00 UTC). The flow carries `timeout_seconds=8700` (2 h 25 min), so a hung run fails instead of lingering.
 
 Common cron patterns for `flow.serve(cron=...)`:
 - Weekly (Monday 03:00 UTC): `"0 3 * * 1"`
@@ -106,6 +107,7 @@ The flow returns a dict with these keys:
 - `avc_propagated` / `avc_aliases_added` — propagation stats
 - `gs_rows_written` — gold-standard refresh count
 - `models_trained` — retraining count
+- `zombies_crashed` — stale runs marked Crashed by the janitor
 - `duration` — wall-clock time
 
 ## Troubleshooting
