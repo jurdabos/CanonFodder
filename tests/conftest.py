@@ -47,7 +47,7 @@ def tmp_pq_dir(monkeypatch, tmp_path):
         ("corefunc.canon", ["AVC_PQ"]),
         ("corefunc.canon.workflow", ["AVC_PQ", "ARTIST_INFO_PQ", "PQ_DIR", "PREDICTIONS_LOG_PQ"]),
         ("corefunc.qa", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "UC_PQ", "GS_MB_PQ", "QA_REPORT_PQ"]),
-        ("corefunc.profile", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "C_PQ"]),
+        ("corefunc.profile", ["SCROBBLE_PQ", "ARTIST_INFO_PQ", "AVC_PQ", "C_PQ", "UC_PQ"]),
         ("helpers.cli", ["PQ_DIR", "AVC_PQ", "UC_PQ"]),
         ("HTTP.lfAPI", ["C_PQ", "UC_PQ", "SCROBBLE_PQ"]),
         ("HTTP.mbAPI", ["ARTIST_INFO_PQ"]),

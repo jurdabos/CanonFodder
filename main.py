@@ -1532,8 +1532,62 @@ def _parse_categories(raw: str) -> list[str]:
     type=str,
     help="Categories to display: artist, album, track, e.g. '(artist, track)'.",
 )
-def profile_uc(n: int, ucn: int, countries_raw: str | None, show_raw: str | None) -> None:
+@click.option(
+    "--import",
+    "import_path",
+    default=None,
+    type=str,
+    help="Import the country timeline from the canonical SQL-VALUES txt into uc.parquet. "
+    "Under WSL, Windows drive paths (D:\\… or D:/…) are converted to /mnt/d/… automatically.",
+)
+@click.option("--timeline", is_flag=True, help="Print the stored country timeline from uc.parquet.")
+def profile_uc(
+    n: int, ucn: int, countries_raw: str | None, show_raw: str | None, import_path: str | None, timeline: bool
+) -> None:
     """Show medal tables per user-country (artists, albums, tracks)"""
+    if timeline:
+        # Printing the stored timeline instead of showing medals
+        from corefunc.profile import user_country_timeline
+
+        result = user_country_timeline()
+        if "error" in result:
+            click.echo(f"Error: {result['error']}")
+            return
+        click.echo(f"User-country timeline ({len(result['entries'])} entries):\n")
+        for e in result["entries"]:
+            end = e["end"] or "now"
+            marker = "  ← current" if e["current"] else ""
+            row = f"  {e['idx']:>3}.  {e['country']:<4} {e['start']} → {end:<10}  {e['days']:>5} days  {e['name']}"
+            click.echo(row + marker)
+        return
+    if import_path is not None:
+        # Importing the timeline from the canonical txt instead of showing medals
+        import re
+
+        from helpers.paths import to_wsl_mounted
+
+        resolved = to_wsl_mounted(import_path)
+        if not resolved.exists():
+            hint = ""
+            if re.match(r"^[A-Za-z]:", import_path) and "\\" not in import_path and "/" not in import_path:
+                hint = (
+                    " — the shell stripped your backslashes; "
+                    "quote the path ('D:\\dir\\file.txt') or use D:/dir/file.txt"
+                )
+            click.echo(f"Error: source file not found: {resolved}{hint}")
+            return
+        from corefunc.profile import import_user_country_timeline
+
+        result = import_user_country_timeline(resolved)
+        if "error" in result:
+            click.echo(f"Error: {result['error']}")
+            return
+        click.echo(f"Imported {result['rows']} rows into uc.parquet (previously {result['previous_rows'] or 0}).")
+        if result["backup"]:
+            click.echo(f"Backup of the previous table: {result['backup']}")
+        if result["open_country"]:
+            click.echo(f"Current country: {result['open_country']} (since {result['open_since']}).")
+        return
     from corefunc.profile import user_country_medal_profile
 
     country_codes = _parse_country_codes(countries_raw) if countries_raw else None

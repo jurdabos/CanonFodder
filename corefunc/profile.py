@@ -9,13 +9,24 @@ from __future__ import annotations
 
 import calendar
 import logging
+import re
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import duckdb
 import pandas as pd
 
-from helpers.io import ARTIST_INFO_PQ, AVC_PQ, C_PQ, scrobble_data_exists, scrobble_duckdb_from
+from helpers.io import (
+    ARTIST_INFO_PQ,
+    AVC_PQ,
+    C_PQ,
+    UC_PQ,
+    dump_parquet,
+    read_parquet,
+    scrobble_data_exists,
+    scrobble_duckdb_from,
+)
 from helpers.query import (
     _canonical_cte,
     artist_country_stats,
@@ -814,3 +825,119 @@ def user_country_medal_profile(
             }
         )
     return {"countries": countries, "top_n": top_n, "ucn": len(top_codes)}
+
+
+# ── User-country timeline import ──────────────────────────────────────────────
+UC_OPEN_SENTINEL = "9999-12-31"
+_UC_ROW_RE = re.compile(r"\('([A-Z]{2})', '(\d{4}-\d{2}-\d{2})', '(\d{4}-\d{2}-\d{2})'\)")
+
+
+def import_user_country_timeline(source: Path) -> dict:
+    """Imports the user-country timeline from the canonical SQL-VALUES txt into uc.parquet.
+
+    The source lists `('CC', 'YYYY-MM-DD', 'YYYY-MM-DD')` tuples; the sentinel
+    end date 9999-12-31 marks the open (current) interval. The write is refused
+    when no rows parse, when the timeline is not gapless (each start must be
+    the day after the previous end), or when a code is absent from c.parquet.
+    An existing uc.parquet is backed up to uc.parquet.bak first.
+
+    Returns a summary dict, or {"error": ...} on validation failure.
+    """
+    source = Path(source)
+    if not source.exists():
+        return {"error": f"Source file not found: {source}"}
+    # Parsing ('CC', 'start', 'end') tuples
+    rows: list[tuple[str, str, str]] = []
+    for line in source.read_text(encoding="utf-8").splitlines():
+        m = _UC_ROW_RE.match(line.strip().rstrip(",;"))
+        if m:
+            rows.append(m.groups())
+    if not rows:
+        return {"error": f"No ('CC', 'start', 'end') rows parsed from {source.name}."}
+    df = pd.DataFrame(rows, columns=["country_code", "start_date", "end_date"])
+    df["start_date"] = pd.to_datetime(df["start_date"])
+    df["end_date"] = pd.to_datetime(df["end_date"].replace({UC_OPEN_SENTINEL: None}))
+    # Validating gaplessness: each interval starts the day after the previous ends
+    violations: list[str] = []
+    for i in range(1, len(df)):
+        prev_end = df.at[i - 1, "end_date"]
+        if pd.isna(prev_end):
+            violations.append(f"row {i}: previous interval is open before the timeline ends")
+            break
+        expected = prev_end + timedelta(days=1)
+        if df.at[i, "start_date"] != expected:
+            violations.append(f"row {i + 1}: starts {df.at[i, 'start_date'].date()}, expected {expected.date()}")
+    if violations:
+        shown = "; ".join(violations[:3])
+        more = f" (+{len(violations) - 3} more)" if len(violations) > 3 else ""
+        return {"error": f"Timeline is not gapless — {shown}{more}. Fix the source file first."}
+    # Validating codes against the c.parquet reference table
+    if C_PQ.exists():
+        ref = read_parquet(C_PQ)
+        if ref is not None and not ref.empty:
+            known = set(ref["ISO-2"])
+            unknown = sorted(set(df["country_code"]) - known)
+            if unknown:
+                msg = f"Unknown country code(s) {unknown} — not in c.parquet. Fix the source or the reference table."
+                return {"error": msg}
+    df.insert(0, "id", range(1, len(df) + 1))
+    # Backing up any existing table, then writing with schema metadata
+    backup_name: str | None = None
+    previous_rows: int | None = None
+    if UC_PQ.exists():
+        previous = read_parquet(UC_PQ)
+        previous_rows = 0 if previous is None else len(previous)
+        backup_path = UC_PQ.with_suffix(".parquet.bak")
+        shutil.copy2(UC_PQ, backup_path)
+        backup_name = backup_path.name
+    dump_parquet(df, UC_PQ)
+    open_rows = df[df["end_date"].isna()]
+    open_country = None
+    open_since = None
+    if not open_rows.empty:
+        open_country = open_rows.iloc[0]["country_code"]
+        open_since = str(open_rows.iloc[0]["start_date"].date())
+    logger.info("Imported %d user-country rows from %s → %s", len(df), source, UC_PQ)
+    return {
+        "rows": len(df),
+        "previous_rows": previous_rows,
+        "backup": backup_name,
+        "open_country": open_country,
+        "open_since": open_since,
+    }
+
+
+def user_country_timeline() -> dict:
+    """Returns the stored user-country timeline from uc.parquet for display.
+
+    Each entry carries the row number, ISO-2 code, English name (from
+    c.parquet), start/end dates (None when the interval is open), and the
+    day count. Returns {"error": ...} when the table is missing or empty.
+    """
+    if not UC_PQ.exists():
+        return {"error": "uc.parquet not found — import the timeline first (c9r profile uc --import <file>)."}
+    df = read_parquet(UC_PQ)
+    if df is None or df.empty:
+        return {"error": "uc.parquet is empty."}
+    name_map = _country_name_map()
+    now = pd.Timestamp.now()
+    entries: list[dict] = []
+    for i, (_, row) in enumerate(df.iterrows(), 1):
+        start = pd.Timestamp(row["start_date"])
+        end = row["end_date"]
+        is_open = pd.isna(end)
+        days = int(((now if is_open else pd.Timestamp(end)) - start).days)
+        cc = str(row["country_code"])
+        entries.append(
+            {
+                "idx": i,
+                "country": cc,
+                "name": name_map.get(cc, ""),
+                "start": str(start.date()),
+                "end": None if is_open else str(pd.Timestamp(end).date()),
+                "days": days,
+                "current": is_open,
+            }
+        )
+    current = next((e["country"] for e in entries if e["current"]), None)
+    return {"entries": entries, "current": current}

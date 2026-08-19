@@ -73,10 +73,10 @@ def _country_codes_df() -> pd.DataFrame:
     """Builds a minimal c.parquet with ISO-2 to English name mapping."""
     return pd.DataFrame(
         {
-            "ISO-2": ["DE", "GB", "US"],
-            "ISO-3": ["DEU", "GBR", "USA"],
-            "en_name": ["Germany", "United Kingdom", "United States"],
-            "hu_name": ["Németország", "Egyesült Királyság", "Egyesült Államok"],
+            "ISO-2": ["DE", "GB", "US", "HU"],
+            "ISO-3": ["DEU", "GBR", "USA", "HUN"],
+            "en_name": ["Germany", "United Kingdom", "United States", "Hungary"],
+            "hu_name": ["Németország", "Egyesült Királyság", "Egyesült Államok", "Magyarország"],
         }
     )
 
@@ -475,6 +475,132 @@ class TestUserCountryMedalProfile:
         codes = [c["country"] for c in result["countries"]]
         assert codes == ["HU"]
         assert result["ucn"] == 1
+
+
+# ── User-country timeline import ─────────────────────────────────────────────
+UC_TXT = """INSERT INTO tbl (country_name, start_date, end_date)
+VALUES
+('HU', '2020-01-01', '2020-01-31'),
+('ES', '2020-02-01', '9999-12-31');
+"""
+
+
+def _write_c_ref(pq_dir, codes=("HU", "ES")):
+    """Writes a minimal c.parquet reference with the given ISO-2 codes."""
+    pd.DataFrame({"ISO-2": list(codes), "en_name": list(codes)}).to_parquet(pq_dir / "c.parquet", index=False)
+
+
+class TestImportUserCountryTimeline:
+    """Tests for import_user_country_timeline."""
+
+    @staticmethod
+    def _targets(tmp_path, monkeypatch, with_ref=True):
+        """Points UC_PQ/C_PQ at tmp paths and returns them."""
+        import corefunc.profile as profile_mod
+
+        uc = tmp_path / "uc.parquet"
+        c = tmp_path / "c.parquet"
+        monkeypatch.setattr(profile_mod, "UC_PQ", uc)
+        monkeypatch.setattr(profile_mod, "C_PQ", c)
+        if with_ref:
+            _write_c_ref(tmp_path)
+        return uc, c
+
+    def test_happy_path(self, tmp_path, monkeypatch):
+        """Parses tuples, maps the sentinel to an open interval, and writes uc.parquet."""
+        from corefunc.profile import import_user_country_timeline
+
+        uc, _ = self._targets(tmp_path, monkeypatch)
+        src = tmp_path / "countries.txt"
+        src.write_text(UC_TXT, encoding="utf-8")
+        result = import_user_country_timeline(src)
+        assert result["rows"] == 2
+        assert result["previous_rows"] is None
+        assert result["backup"] is None
+        assert result["open_country"] == "ES"
+        assert result["open_since"] == "2020-02-01"
+        df = pd.read_parquet(uc)
+        assert df["id"].tolist() == [1, 2]
+        assert df.at[1, "end_date"] is pd.NaT or pd.isna(df.at[1, "end_date"])
+
+    def test_continuity_violation_refused(self, tmp_path, monkeypatch):
+        """Refuses to write when the timeline has a gap."""
+        from corefunc.profile import import_user_country_timeline
+
+        uc, _ = self._targets(tmp_path, monkeypatch)
+        src = tmp_path / "bad.txt"
+        src.write_text("('HU', '2020-01-01', '2020-01-31'),\n('ES', '2020-02-02', '9999-12-31');", encoding="utf-8")
+        result = import_user_country_timeline(src)
+        assert "not gapless" in result["error"]
+        assert not uc.exists()
+
+    def test_unknown_code_refused(self, tmp_path, monkeypatch):
+        """Refuses codes absent from c.parquet."""
+        from corefunc.profile import import_user_country_timeline
+
+        uc, _ = self._targets(tmp_path, monkeypatch)
+        src = tmp_path / "unknown.txt"
+        src.write_text("('HU', '2020-01-01', '2020-01-31'),\n('XX', '2020-02-01', '9999-12-31');", encoding="utf-8")
+        result = import_user_country_timeline(src)
+        assert "Unknown country code" in result["error"]
+        assert not uc.exists()
+
+    def test_backup_on_existing(self, tmp_path, monkeypatch):
+        """Backs up an existing uc.parquet before overwriting."""
+        from corefunc.profile import import_user_country_timeline
+
+        uc, _ = self._targets(tmp_path, monkeypatch)
+        pd.DataFrame(
+            {
+                "id": [1],
+                "country_code": ["HU"],
+                "start_date": pd.to_datetime(["2019-01-01"]),
+                "end_date": pd.to_datetime(["2019-12-31"]),
+            }
+        ).to_parquet(uc, index=False)
+        src = tmp_path / "countries.txt"
+        src.write_text(UC_TXT, encoding="utf-8")
+        result = import_user_country_timeline(src)
+        assert result["previous_rows"] == 1
+        assert result["backup"] == "uc.parquet.bak"
+        assert (tmp_path / "uc.parquet.bak").exists()
+
+    def test_missing_source(self, tmp_path, monkeypatch):
+        """Reports an error for a nonexistent source file."""
+        from corefunc.profile import import_user_country_timeline
+
+        self._targets(tmp_path, monkeypatch)
+        result = import_user_country_timeline(tmp_path / "nope.txt")
+        assert "not found" in result["error"]
+
+
+class TestUserCountryTimeline:
+    """Tests for user_country_timeline."""
+
+    def test_missing_uc(self, tmp_pq_dir):
+        """Returns error dict when uc.parquet is absent."""
+        from corefunc.profile import user_country_timeline
+
+        result = user_country_timeline()
+        assert "error" in result
+
+    def test_returns_entries(self, tmp_pq_dir):
+        """Returns dated entries with names, day counts, and the current marker."""
+        from corefunc.profile import user_country_timeline
+
+        _write_uc_fixtures(tmp_pq_dir)
+        result = user_country_timeline()
+        assert len(result["entries"]) == 2
+        first, second = result["entries"]
+        assert first["country"] == "DE"
+        assert first["end"] is not None
+        assert not first["current"]
+        assert second["country"] == "HU"
+        assert second["end"] is None
+        assert second["current"]
+        assert result["current"] == "HU"
+        assert all(e["days"] > 0 for e in result["entries"])
+        assert all(e["name"] for e in result["entries"])
 
     def test_country_codes_ignores_unknown(self, tmp_pq_dir):
         """Unknown codes are silently dropped from the output."""

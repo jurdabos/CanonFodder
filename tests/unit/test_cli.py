@@ -719,6 +719,72 @@ class TestProfileUc:
         assert "Albums" in result.output
         assert "Tracks" in result.output
 
+    def test_uc_import(self, runner, tmp_path, monkeypatch):
+        """The --import flag imports the timeline txt into uc.parquet."""
+        import corefunc.profile as profile_mod
+        from tests.unit.test_profile import UC_TXT, _write_c_ref
+
+        monkeypatch.setattr(profile_mod, "UC_PQ", tmp_path / "uc.parquet")
+        monkeypatch.setattr(profile_mod, "C_PQ", tmp_path / "c.parquet")
+        _write_c_ref(tmp_path)
+        src = tmp_path / "countries.txt"
+        src.write_text(UC_TXT, encoding="utf-8")
+        result = runner.invoke(cli, ["profile", "uc", "--import", str(src)])
+        assert result.exit_code == 0
+        assert "Imported 2 rows" in result.output
+        assert "Current country: ES" in result.output
+        assert (tmp_path / "uc.parquet").exists()
+
+    def test_uc_import_missing_file(self, runner):
+        """The --import flag reports a friendly error for a nonexistent file."""
+        result = runner.invoke(cli, ["profile", "uc", "--import", "/nonexistent/nope.txt"])
+        assert result.exit_code == 0
+        assert "Error" in result.output
+        assert "not found" in result.output
+
+    def test_uc_import_windows_path_in_wsl(self, runner, tmp_path, monkeypatch):
+        """Under WSL, D:\\… resolves to the /mnt/d/… mount automatically."""
+        import corefunc.profile as profile_mod
+        import helpers.paths as paths_mod
+        from tests.unit.test_profile import UC_TXT, _write_c_ref
+
+        monkeypatch.setattr(paths_mod, "is_wsl", lambda: True)
+        monkeypatch.setattr(paths_mod, "WSL_MOUNT_ROOT", str(tmp_path / "mnt"))
+        src = tmp_path / "mnt" / "d" / "adat" / "mikormelyikcountry.txt"
+        src.parent.mkdir(parents=True)
+        src.write_text(UC_TXT, encoding="utf-8")
+        monkeypatch.setattr(profile_mod, "UC_PQ", tmp_path / "uc.parquet")
+        monkeypatch.setattr(profile_mod, "C_PQ", tmp_path / "c.parquet")
+        _write_c_ref(tmp_path)
+        result = runner.invoke(cli, ["profile", "uc", "--import", "D:\\adat\\mikormelyikcountry.txt"])
+        assert result.exit_code == 0
+        assert "Imported 2 rows" in result.output
+
+    def test_uc_import_mangled_path_hint(self, runner):
+        """A backslash-stripped D:… input gets a quoting hint."""
+        result = runner.invoke(cli, ["profile", "uc", "--import", "D:adatmikormelyikcountry.txt"])
+        assert result.exit_code == 0
+        assert "Error" in result.output
+        assert "quote" in result.output
+
+    def test_uc_timeline_error_no_data(self, runner, tmp_pq_dir):
+        """The --timeline flag reports an error when uc.parquet is missing."""
+        result = runner.invoke(cli, ["profile", "uc", "--timeline"])
+        assert result.exit_code == 0
+        assert "Error" in result.output
+
+    def test_uc_timeline_with_data(self, runner, tmp_pq_dir):
+        """The --timeline flag prints entries with the current country marked."""
+        from tests.unit.test_profile import _write_uc_fixtures
+
+        _write_uc_fixtures(tmp_pq_dir)
+        result = runner.invoke(cli, ["profile", "uc", "--timeline"])
+        assert result.exit_code == 0
+        assert "entries" in result.output
+        assert "DE" in result.output
+        assert "HU" in result.output
+        assert "current" in result.output
+
     def test_uc_show_default_all(self, runner, tmp_pq_dir):
         """Without -s, all three categories are shown."""
         from tests.unit.test_profile import _write_uc_fixtures
