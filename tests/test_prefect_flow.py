@@ -187,3 +187,196 @@ class TestWeeklyIngestFlow:
         assert result["cleaned"] == 0
         assert result["remaining"] == 2
         assert "duration" in result
+
+
+class TestJanitorTaskPaths:
+    """Tests janitor_zombie_runs_task success and empty paths with a mocked client."""
+
+    @staticmethod
+    def _ctx():
+        """Builds a fake run context exposing the current flow-run ID."""
+        return SimpleNamespace(flow_run=SimpleNamespace(id="self-id"))
+
+    def test_crashes_and_counts(self):
+        """Crashes the zombies the helper reports and returns their count."""
+        from flows.cf_ingest import janitor_zombie_runs_task
+
+        client = MagicMock()
+        cm = MagicMock()
+        cm.__enter__.return_value = client
+        with (
+            patch("prefect.context.get_run_context", return_value=self._ctx()),
+            patch("prefect.client.orchestration.SyncPrefectClient", return_value=cm),
+            patch("flows.cf_ingest.crash_zombie_runs", return_value=["z1", "z2"]) as mock_crash,
+        ):
+            assert janitor_zombie_runs_task.fn() == 2
+        mock_crash.assert_called_once_with(client, current_run_id="self-id")
+
+    def test_no_zombies_returns_zero(self):
+        """Returns 0 and logs the info line when nothing is stale."""
+        from flows.cf_ingest import janitor_zombie_runs_task
+
+        cm = MagicMock()
+        cm.__enter__.return_value = MagicMock()
+        with (
+            patch("prefect.context.get_run_context", return_value=self._ctx()),
+            patch("prefect.client.orchestration.SyncPrefectClient", return_value=cm),
+            patch("flows.cf_ingest.crash_zombie_runs", return_value=[]),
+        ):
+            assert janitor_zombie_runs_task.fn() == 0
+
+
+class TestFetchScrobblesQABranches:
+    """Tests the QA passed/failed logging branches of fetch_scrobbles."""
+
+    @patch("corefunc.workflow.run_data_gathering_workflow", return_value=3)
+    @patch("corefunc.qa.qa_lb_ingest")
+    def test_qa_passed(self, mock_qa, mock_gather):
+        """Logs the pass line when QA succeeds."""
+        from flows.cf_ingest import fetch_scrobbles
+
+        mock_qa.return_value = {"status": "ok", "passed": True, "row_count": 3}
+        assert fetch_scrobbles.fn("testuser") == 3
+
+    @patch("corefunc.workflow.run_data_gathering_workflow", return_value=3)
+    @patch("corefunc.qa.qa_lb_ingest")
+    def test_qa_failed_logs_all_issue_kinds(self, mock_qa, mock_gather):
+        """Exercises schema/timestamp/duplicate/encoding warning branches."""
+        from flows.cf_ingest import fetch_scrobbles
+
+        mock_qa.return_value = {
+            "status": "ok",
+            "passed": False,
+            "row_count": 3,
+            "schema": {"pass": False, "missing": ["artist_mbid"], "unexpected": ["extra"]},
+            "timestamps": {"issues": ["future timestamp"]},
+            "duplicates": {"pass": False, "duplicate_count": 2, "duplicate_pct": 66.7},
+            "encoding": {"pass": False, "bad_char_rows": 1},
+        }
+        assert fetch_scrobbles.fn("testuser") == 3
+
+
+class TestFixEncodingTask:
+    """Tests the fix_encoding task wrapper."""
+
+    @patch("corefunc.data_cleaning.fix_encoding", return_value={"scrobble": (2, 10), "artist_info": (0, 5)})
+    def test_returns_results(self, mock_fix):
+        """Returns the per-file repair counts unchanged."""
+        from flows.cf_ingest import fix_encoding_task
+
+        assert fix_encoding_task.fn() == {"scrobble": (2, 10), "artist_info": (0, 5)}
+
+
+class TestPropagateAvcTask:
+    """Tests the propagate_avc task wrapper."""
+
+    @patch("corefunc.canon.workflow.propagate_avc", return_value={"updated": 5, "aliases_added": 1})
+    def test_returns_summary(self, mock_prop):
+        """Returns the propagation summary unchanged."""
+        from flows.cf_ingest import propagate_avc_task
+
+        assert propagate_avc_task.fn() == {"updated": 5, "aliases_added": 1}
+
+
+class TestAugmentGsTask:
+    """Tests both paths of the gold-standard augmentation task."""
+
+    @patch("corefunc.mb_local.check_local_mb", return_value=False)
+    def test_skips_when_mirror_unreachable(self, mock_mb):
+        """Skips gracefully without the local MB mirror."""
+        from flows.cf_ingest import augment_gs_task
+
+        assert augment_gs_task.fn() == {"rows_written": 0, "skipped": True}
+
+    @patch("corefunc.mb_local.check_local_mb", return_value=True)
+    @patch("corefunc.canon.augment.augment_gold_standard", return_value=9998)
+    def test_writes_rows_when_mirror_up(self, mock_augment, mock_mb):
+        """Reports the written row count when the mirror is reachable."""
+        from flows.cf_ingest import augment_gs_task
+
+        assert augment_gs_task.fn() == {"rows_written": 9998, "skipped": False}
+
+
+class TestRetrainModelTask:
+    """Tests the skip and success paths of the retrain task."""
+
+    @patch("helpers.io.read_parquet", return_value=None)
+    def test_skips_without_avc(self, mock_read):
+        """Skips when the AVC parquet is missing."""
+        from flows.cf_ingest import retrain_model_task
+
+        assert retrain_model_task.fn() == {"models_trained": 0, "skipped": True}
+
+    @patch("helpers.io.read_parquet")
+    def test_skips_below_decided_threshold(self, mock_read):
+        """Skips with fewer than 20 decided AVC rows."""
+        import pandas as pd
+
+        from flows.cf_ingest import retrain_model_task
+
+        mock_read.return_value = pd.DataFrame({"to_link": [None] * 5})
+        assert retrain_model_task.fn() == {"models_trained": 0, "skipped": True}
+
+    @patch("corefunc.canon.tuner.save_best_historical_models", return_value={"lightgbm": "ML/lightgbm_best.pkl"})
+    @patch("corefunc.canon.trainer.run_training", return_value=[{"model": "lgbm"}])
+    @patch("helpers.io.read_parquet")
+    def test_trains_and_exports(self, mock_read, mock_train, mock_save):
+        """Trains and exports pickles when enough decided rows exist."""
+        import pandas as pd
+
+        from flows.cf_ingest import retrain_model_task
+
+        mock_read.return_value = pd.DataFrame({"to_link": [True] * 25})
+        assert retrain_model_task.fn() == {"models_trained": 1, "skipped": False}
+        mock_train.assert_called_once_with(run_name="flow_retrain")
+        mock_save.assert_called_once_with()
+
+
+class TestCanoniseBatchTask:
+    """Tests the model-missing, no-candidates, and candidates paths."""
+
+    @patch("helpers.inference.load_model", side_effect=FileNotFoundError("no pickle"))
+    def test_skips_when_model_missing(self, mock_load):
+        """Skips gracefully without the model pickle."""
+        from flows.cf_ingest import canonise_batch
+
+        assert canonise_batch.fn() == {"flagged_for_review": 0, "skipped": 0}
+
+    @patch("corefunc.canon.workflow.discover_candidates", return_value=[])
+    @patch("helpers.inference.load_model")
+    def test_no_candidates(self, mock_load, mock_discover):
+        """Reports zeroes when discovery finds nothing."""
+        from flows.cf_ingest import canonise_batch
+
+        mock_load.return_value = MagicMock(feature_names_in_=[f"f{i}" for i in range(46)])
+        assert canonise_batch.fn() == {"flagged_for_review": 0, "skipped": 0}
+
+    @patch("corefunc.canon.workflow.write_new_candidates", return_value=2)
+    @patch("corefunc.canon.workflow.discover_candidates", return_value=[{"a": 1}])
+    @patch("helpers.inference.load_model")
+    def test_flags_candidates(self, mock_load, mock_discover, mock_write):
+        """Flags the written candidate groups for review."""
+        from flows.cf_ingest import canonise_batch
+
+        mock_load.return_value = MagicMock(feature_names_in_=[f"f{i}" for i in range(46)])
+        assert canonise_batch.fn() == {"flagged_for_review": 2, "skipped": 0}
+
+
+class TestFlowUserValidation:
+    """Tests the username env-var guards of weekly_ingest_flow."""
+
+    def test_requires_lastfm_user(self, monkeypatch):
+        """Raises ValueError when LASTFM_USER is unset for lastfm."""
+        from flows.cf_ingest import weekly_ingest_flow
+
+        monkeypatch.delenv("LASTFM_USER", raising=False)
+        with pytest.raises(ValueError, match="LASTFM_USER"):
+            weekly_ingest_flow.fn(source="lastfm")
+
+    def test_requires_lb_user(self, monkeypatch):
+        """Raises ValueError when LB_USER is unset for listenbrainz."""
+        from flows.cf_ingest import weekly_ingest_flow
+
+        monkeypatch.delenv("LB_USER", raising=False)
+        with pytest.raises(ValueError, match="LB_USER"):
+            weekly_ingest_flow.fn(source="listenbrainz")
