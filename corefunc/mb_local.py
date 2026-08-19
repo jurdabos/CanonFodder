@@ -157,6 +157,35 @@ def _enrich_by_name(names: Sequence[str]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=ARTIST_INFO_COLS)
 
 
+# ── Gender lookup ─────────────────────────────────────────────────────────────
+def lookup_artist_genders(mbids: Sequence[str]) -> dict[str, str]:
+    """Batch-queries the local MB mirror for artist gender by MBID.
+
+    Returns mbid → gender name, with "(unknown)" when the artist row exists
+    without a gender; MBIDs absent from the mirror are simply not keys.
+    """
+    mapping: dict[str, str] = {}
+    mbid_list = list(dict.fromkeys(mbids))
+    for i in range(0, len(mbid_list), _MBID_BATCH):
+        batch = mbid_list[i : i + _MBID_BATCH]
+        values = ",".join(f"'{m}'" for m in batch)
+        sql = f"""\
+SELECT a.gid::text AS mbid, COALESCE(g.name, '(unknown)') AS gender
+FROM musicbrainz.artist a
+LEFT JOIN musicbrainz.gender g ON a.gender = g.id
+WHERE a.gid IN ({values})"""
+        df = _psql_csv(sql)
+        if not df.empty:
+            mapping.update(zip(df["mbid"], df["gender"]))
+        log.info(
+            "Gender batch %d–%d: %d resolved.",
+            i + 1,
+            min(i + _MBID_BATCH, len(mbid_list)),
+            len(df),
+        )
+    return mapping
+
+
 # ── Tier 3: catalogue-based MBID resolution ──────────────────────────────────
 def _build_track_reverse_index(
     scrobbles: pd.DataFrame,

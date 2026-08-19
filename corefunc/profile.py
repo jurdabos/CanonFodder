@@ -11,12 +11,14 @@ import calendar
 import logging
 import re
 import shutil
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import duckdb
 import pandas as pd
 
+from corefunc.mb_local import check_local_mb, lookup_artist_genders
 from helpers.io import (
     ARTIST_INFO_PQ,
     AVC_PQ,
@@ -24,6 +26,7 @@ from helpers.io import (
     UC_PQ,
     dump_parquet,
     read_parquet,
+    read_scrobble_df,
     scrobble_data_exists,
     scrobble_duckdb_from,
 )
@@ -941,3 +944,83 @@ def user_country_timeline() -> dict:
         )
     current = next((e["country"] for e in entries if e["current"]), None)
     return {"entries": entries, "current": current}
+
+
+# ── Artist-gender breakdown ──────────────────────────────────────────────────
+_COVERAGE_BUCKETS = ("(unknown)", "(no MBID)", "(not in mirror)")
+
+
+def gender_breakdown(min_plays: int = 1) -> dict:
+    """Breaks down the scrobbled library by MusicBrainz artist gender.
+
+    Joins scrobbled artists — via scrobble MBIDs first, then artist_info MBIDs —
+    to the local MusicBrainz mirror's artist.gender. Weights the result both per
+    unique artist (library composition) and per scrobble (actual listening).
+    Percentages of the gendered share are computed only for rows with a real
+    gender value; the coverage buckets never enter it.
+
+    Returns {"error": ...} when there is no scrobble data, no MBIDs, or the
+    mirror is unreachable.
+    """
+    if not scrobble_data_exists():
+        return {"error": "scrobble.parquet not found"}
+    scrobbles = read_scrobble_df()
+    if scrobbles is None or scrobbles.empty:
+        return {"error": "scrobble.parquet not found"}
+    scrobbles = scrobbles[scrobbles["artist_name"].notna() & (scrobbles["artist_name"] != "")]
+    artist_plays = scrobbles.groupby("artist_name").size()
+    artist_plays = artist_plays[artist_plays >= min_plays]
+    if artist_plays.empty:
+        return {"error": f"no artists with ≥{min_plays} plays"}
+    # Mapping artist name → MBID: scrobble column first, artist_info as fallback
+    name_to_mbid: dict[str, str] = {}
+    with_mbid = scrobbles[scrobbles["artist_mbid"].fillna("").str.len() == 36]
+    for name, grp in with_mbid.groupby("artist_name"):
+        name_to_mbid[name] = grp["artist_mbid"].iloc[0]
+    ai = read_parquet(ARTIST_INFO_PQ)
+    if ai is not None and not ai.empty:
+        for name, mbid in zip(ai["artist_name"], ai["mbid"]):
+            if name not in name_to_mbid and isinstance(mbid, str) and len(mbid) == 36:
+                name_to_mbid[name] = mbid
+    if not name_to_mbid:
+        return {"error": "no artist MBIDs available — run enrich first"}
+    if not check_local_mb():
+        return {"error": "local MusicBrainz mirror unreachable — start musicbrainz-docker"}
+    genders = lookup_artist_genders(sorted(set(name_to_mbid.values())))
+    # Aggregating per gender bucket, both weightings
+    per_gender: dict[str, dict[str, int]] = defaultdict(lambda: {"artists": 0, "scrobbles": 0})
+    for name, plays in artist_plays.items():
+        mbid = name_to_mbid.get(name)
+        if mbid is None:
+            bucket = "(no MBID)"
+        elif mbid not in genders:
+            bucket = "(not in mirror)"
+        else:
+            bucket = genders[mbid]
+        per_gender[bucket]["artists"] += 1
+        per_gender[bucket]["scrobbles"] += int(plays)
+    total_artists = int(artist_plays.size)
+    total_plays = int(artist_plays.sum())
+    gendered_plays = sum(v["scrobbles"] for k, v in per_gender.items() if k not in _COVERAGE_BUCKETS)
+    rows: list[dict] = []
+    for gender, v in sorted(per_gender.items(), key=lambda kv: kv[1]["scrobbles"], reverse=True):
+        is_real_gender = gender not in _COVERAGE_BUCKETS and gendered_plays > 0
+        rows.append(
+            {
+                "gender": gender,
+                "artists": v["artists"],
+                "pct_artists": round(100.0 * v["artists"] / total_artists, 1),
+                "scrobbles": v["scrobbles"],
+                "pct_scrobbles": round(100.0 * v["scrobbles"] / total_plays, 1),
+                "pct_gendered_plays": (round(100.0 * v["scrobbles"] / gendered_plays, 1) if is_real_gender else None),
+            }
+        )
+    matched_artists = sum(1 for n in artist_plays.index if name_to_mbid.get(n))
+    return {
+        "rows": rows,
+        "total_artists": total_artists,
+        "total_scrobbles": total_plays,
+        "mbid_share": round(100.0 * matched_artists / total_artists, 1),
+        "known_share": round(100.0 * gendered_plays / total_plays, 1),
+        "min_plays": min_plays,
+    }

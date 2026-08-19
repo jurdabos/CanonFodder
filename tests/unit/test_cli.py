@@ -785,6 +785,31 @@ class TestProfileUc:
         assert "HU" in result.output
         assert "current" in result.output
 
+
+class TestProfileGender:
+    """Tests the 'profile gender' CLI command."""
+
+    def test_gender_error_no_data(self, runner, tmp_pq_dir):
+        """Reports error when no scrobble data exists."""
+        result = runner.invoke(cli, ["profile", "gender"])
+        assert result.exit_code == 0
+        assert "Error" in result.output
+
+    def test_gender_with_data(self, runner, tmp_pq_dir, monkeypatch):
+        """Displays the breakdown table with gendered-share column."""
+        import corefunc.profile as profile_mod
+        from tests.unit.test_profile import _mbid, _write_gender_scrobbles
+
+        _write_gender_scrobbles(tmp_pq_dir)
+        monkeypatch.setattr(profile_mod, "check_local_mb", lambda: True)
+        monkeypatch.setattr(profile_mod, "lookup_artist_genders", lambda mbids: {_mbid(1): "Female", _mbid(2): "Male"})
+        result = runner.invoke(cli, ["profile", "gender"])
+        assert result.exit_code == 0
+        assert "Gender breakdown" in result.output
+        assert "Female" in result.output
+        assert "Male" in result.output
+        assert "(no MBID)" in result.output
+
     def test_uc_show_default_all(self, runner, tmp_pq_dir):
         """Without -s, all three categories are shown."""
         from tests.unit.test_profile import _write_uc_fixtures

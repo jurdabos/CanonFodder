@@ -1458,6 +1458,28 @@ def population(n: int) -> None:
         )
 
 
+@profile.command()
+@click.option("--min-plays", "min_plays", default=1, type=int, help="Minimum scrobbles for an artist to count.")
+def gender(min_plays: int) -> None:
+    """Break down your library by MusicBrainz artist gender"""
+    from corefunc.profile import gender_breakdown
+
+    result = gender_breakdown(min_plays=min_plays)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}")
+        return
+    click.echo(
+        f"Gender breakdown: {result['total_scrobbles']:,} scrobbles / {result['total_artists']:,} artists "
+        f"(MBID-matched {result['mbid_share']}% of artists, gender known for {result['known_share']}% of plays)\n"
+    )
+    click.echo(f"  {'gender':<16} {'artists':>8} {'%art':>7} {'scrobbles':>10} {'%scr':>7} {'%gendered':>10}")
+    click.echo(f"  {'─' * 16} {'─' * 8} {'─' * 7} {'─' * 10} {'─' * 7} {'─' * 10}")
+    for r in result["rows"]:
+        pg = f"{r['pct_gendered_plays']:>9.1f}%" if r["pct_gendered_plays"] is not None else "        —"
+        row = f"  {r['gender']:<16} {r['artists']:>8,} {r['pct_artists']:>6.1f}% "
+        click.echo(row + f"{r['scrobbles']:>10,} {r['pct_scrobbles']:>6.1f}% {pg}")
+
+
 @profile.command("where")
 @click.option("-n", default=10, type=int, help="Number of top countries to show.")
 def profile_where(n: int) -> None:

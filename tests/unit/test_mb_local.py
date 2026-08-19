@@ -277,3 +277,44 @@ class TestEnrichFromLocalMb:
         # Rebuild should only contain the new artist, not OldBand
         assert len(result) == 1
         assert result.iloc[0]["artist_name"] == "NewBand"
+
+
+class TestLookupArtistGenders:
+    """Tests lookup_artist_genders batching and mapping."""
+
+    def test_maps_genders(self):
+        """Returns mbid → gender mapping from the mirror response."""
+        from corefunc.mb_local import lookup_artist_genders
+
+        df = pd.DataFrame({"mbid": ["m1", "m2"], "gender": ["Male", "(unknown)"]})
+        with patch("corefunc.mb_local._psql_csv", return_value=df) as mock_sql:
+            result = lookup_artist_genders(["m1", "m2"])
+        assert result == {"m1": "Male", "m2": "(unknown)"}
+        assert "gender" in mock_sql.call_args[0][0]
+
+    def test_dedupes_input(self):
+        """Duplicate MBIDs are queried once."""
+        from corefunc.mb_local import lookup_artist_genders
+
+        df = pd.DataFrame({"mbid": ["m1"], "gender": ["Female"]})
+        with patch("corefunc.mb_local._psql_csv", return_value=df) as mock_sql:
+            result = lookup_artist_genders(["m1", "m1", "m1"])
+        assert result == {"m1": "Female"}
+        assert mock_sql.call_count == 1
+
+    def test_batches_over_500(self):
+        """More than one batch of MBIDs triggers multiple queries."""
+        from corefunc.mb_local import lookup_artist_genders
+
+        mbids = [f"00000000-0000-0000-0000-{i:012d}" for i in range(501)]
+        empty = pd.DataFrame(columns=["mbid", "gender"])
+        with patch("corefunc.mb_local._psql_csv", return_value=empty) as mock_sql:
+            assert lookup_artist_genders(mbids) == {}
+        assert mock_sql.call_count == 2
+
+    def test_empty_mirror_response(self):
+        """Returns {} when the mirror has no matching rows."""
+        from corefunc.mb_local import lookup_artist_genders
+
+        with patch("corefunc.mb_local._psql_csv", return_value=pd.DataFrame(columns=["mbid", "gender"])):
+            assert lookup_artist_genders(["m1"]) == {}

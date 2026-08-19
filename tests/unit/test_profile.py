@@ -602,6 +602,93 @@ class TestUserCountryTimeline:
         assert all(e["days"] > 0 for e in result["entries"])
         assert all(e["name"] for e in result["entries"])
 
+
+# ── Artist-gender breakdown ───────────────────────────────────────────────────
+def _mbid(i: int) -> str:
+    """Returns a synthetic 36-char MBID."""
+    return f"00000000-0000-0000-0000-{i:012d}"
+
+
+def _write_gender_scrobbles(pq_dir):
+    """Writes scrobbles: artist A (mbid, 3 plays), B (mbid, 2), C (no mbid, 1)."""
+    rows = []
+    for name, mbid, plays in [("A", _mbid(1), 3), ("B", _mbid(2), 2), ("C", None, 1)]:
+        for _ in range(plays):
+            rows.append(
+                {
+                    "artist_name": name,
+                    "album_title": "Al",
+                    "track_title": "T",
+                    "artist_mbid": mbid,
+                    "play_time": pd.Timestamp("2024-01-01", tz="UTC"),
+                }
+            )
+    pd.DataFrame(rows).to_parquet(pq_dir / "scrobble.parquet", index=False)
+
+
+class TestGenderBreakdown:
+    """Tests for gender_breakdown."""
+
+    def test_missing_scrobbles(self, tmp_pq_dir):
+        """Returns error dict when scrobble data is absent."""
+        from corefunc.profile import gender_breakdown
+
+        assert "error" in gender_breakdown()
+
+    def test_mirror_down(self, tmp_pq_dir, monkeypatch):
+        """Returns a friendly error when the local mirror is unreachable."""
+        import corefunc.profile as profile_mod
+        from corefunc.profile import gender_breakdown
+
+        _write_gender_scrobbles(tmp_pq_dir)
+        monkeypatch.setattr(profile_mod, "check_local_mb", lambda: False)
+        result = gender_breakdown()
+        assert "mirror" in result["error"]
+
+    def test_happy_path_buckets_and_percentages(self, tmp_pq_dir, monkeypatch):
+        """Buckets artists by gender with both weightings; coverage rows leave the gendered share."""
+        import corefunc.profile as profile_mod
+        from corefunc.profile import gender_breakdown
+
+        _write_gender_scrobbles(tmp_pq_dir)
+        monkeypatch.setattr(profile_mod, "check_local_mb", lambda: True)
+        monkeypatch.setattr(profile_mod, "lookup_artist_genders", lambda mbids: {_mbid(1): "Female", _mbid(2): "Male"})
+        result = gender_breakdown()
+        rows = {r["gender"]: r for r in result["rows"]}
+        assert rows["Female"]["artists"] == 1
+        assert rows["Female"]["scrobbles"] == 3
+        assert rows["Female"]["pct_scrobbles"] == 50.0
+        assert rows["Male"]["pct_gendered_plays"] == 40.0
+        assert rows["(no MBID)"]["artists"] == 1
+        assert rows["(no MBID)"]["pct_gendered_plays"] is None
+        assert result["total_scrobbles"] == 6
+        assert result["mbid_share"] == 66.7
+
+    def test_not_in_mirror_bucket(self, tmp_pq_dir, monkeypatch):
+        """MBIDs absent from the mirror land in their own bucket."""
+        import corefunc.profile as profile_mod
+        from corefunc.profile import gender_breakdown
+
+        _write_gender_scrobbles(tmp_pq_dir)
+        monkeypatch.setattr(profile_mod, "check_local_mb", lambda: True)
+        monkeypatch.setattr(profile_mod, "lookup_artist_genders", lambda mbids: {})
+        result = gender_breakdown()
+        rows = {r["gender"]: r for r in result["rows"]}
+        assert "(not in mirror)" in rows
+        assert rows["(not in mirror)"]["pct_gendered_plays"] is None
+
+    def test_min_plays_filters(self, tmp_pq_dir, monkeypatch):
+        """Artists below min_plays are excluded from all counts."""
+        import corefunc.profile as profile_mod
+        from corefunc.profile import gender_breakdown
+
+        _write_gender_scrobbles(tmp_pq_dir)
+        monkeypatch.setattr(profile_mod, "check_local_mb", lambda: True)
+        monkeypatch.setattr(profile_mod, "lookup_artist_genders", lambda mbids: {_mbid(1): "Female", _mbid(2): "Male"})
+        result = gender_breakdown(min_plays=2)
+        assert result["total_artists"] == 2
+        assert "(no MBID)" not in {r["gender"] for r in result["rows"]}
+
     def test_country_codes_ignores_unknown(self, tmp_pq_dir):
         """Unknown codes are silently dropped from the output."""
         _write_uc_fixtures(tmp_pq_dir)
