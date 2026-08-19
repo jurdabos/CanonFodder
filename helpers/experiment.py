@@ -48,8 +48,23 @@ def log_artifact(path: str | Path) -> None:
 
 
 def log_model(model: Any, artifact_path: str = "model") -> None:
-    """Logs an sklearn-compatible model to the active run."""
-    mlflow.sklearn.log_model(model, name=artifact_path)
+    """Logs an sklearn-compatible model to the active run.
+
+    MLflow's default sklearn serialiser is skops, which audits every type in the
+    object graph and rejects anything not on an allow-list. LightGBM pipelines
+    carry Booster / LGBMClassifier (and OrderedDict from nested params), so those
+    types are declared trusted here — they are first-party training artefacts,
+    not untrusted downloads.
+    """
+    mlflow.sklearn.log_model(
+        model,
+        name=artifact_path,
+        skops_trusted_types=[
+            "collections.OrderedDict",
+            "lightgbm.basic.Booster",
+            "lightgbm.sklearn.LGBMClassifier",
+        ],
+    )
 
 
 def log_cv_fold(

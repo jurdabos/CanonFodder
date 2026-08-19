@@ -57,12 +57,20 @@ class TestInitAndBasicOps:
 
     @patch("helpers.experiment.mlflow")
     def test_log_model(self, mock_mlflow):
-        """Delegates to mlflow.sklearn.log_model."""
+        """Delegates to mlflow.sklearn.log_model with LightGBM skops allow-list."""
         from helpers.experiment import log_model
 
         model = MagicMock()
         log_model(model, artifact_path="my_model")
-        mock_mlflow.sklearn.log_model.assert_called_once_with(model, name="my_model")
+        mock_mlflow.sklearn.log_model.assert_called_once_with(
+            model,
+            name="my_model",
+            skops_trusted_types=[
+                "collections.OrderedDict",
+                "lightgbm.basic.Booster",
+                "lightgbm.sklearn.LGBMClassifier",
+            ],
+        )
 
     @patch("helpers.experiment.mlflow")
     def test_log_cv_fold(self, mock_mlflow):
