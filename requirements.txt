@@ -1088,9 +1088,9 @@ opentelemetry-api==1.39.1 \
     #   opentelemetry-semantic-conventions
     #   prefect
     #   pydocket
-opentelemetry-proto==1.39.1 \
-    --hash=sha256:22cdc78efd3b3765d09e68bfbd010d4fc254c9818afd0b6b423387d9dee46007 \
-    --hash=sha256:6c8e05144fc0d3ed4d22c2289c6b126e03bcd0e6a7da0f16cedd2e1c2772e2c8
+opentelemetry-proto==1.44.0 \
+    --hash=sha256:898b155a0e1557afd867478fb6158e8122a46329ca0bb8dc53cc55e98f017f56 \
+    --hash=sha256:c547a79c2f8c0c515d31509154682e5921c7cfd5ca67b70e1f9266e2c3e103f3
     # via
     #   mlflow-skinny
     #   mlflow-tracing
