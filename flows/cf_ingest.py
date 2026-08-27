@@ -385,5 +385,5 @@ def weekly_ingest_flow(*, full: bool = False, source: str | None = None) -> dict
 if __name__ == "__main__":
     weekly_ingest_flow.serve(
         name="c9r-weekly-ingest",
-        cron="0 3 * * 1",  # to run every Monday at 03:00 UTC
+        cron="58 3 * * 1",  # to run every Monday at 03:00 UTC
     )
