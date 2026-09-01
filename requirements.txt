@@ -463,9 +463,9 @@ cyclopts==4.16.1 \
     --hash=sha256:617795392c4113a2c2cc7af716f20244900e87f23daa05442d1268d81472a592 \
     --hash=sha256:8aa47bf92a5fb33abca5af05e576eecdb0d2f79893ad29238046df78370fc4a8
     # via prefect
-databricks-sdk==0.92.0 \
-    --hash=sha256:50cbd3fa3757b98779ca28c4c885c671486bf2be8a493cc1e5c44d27c80eba41 \
-    --hash=sha256:6d45bd9e6ee21a639c31239e095ad55215cb2f8c51092950c083693f709c013b
+databricks-sdk==0.133.0 \
+    --hash=sha256:00e99cd3aa31807d4c4835268eb9f5fbef8f4286f81b1c2b56cf13ac17cacc95 \
+    --hash=sha256:3733a0f2b45c6da5c628755df0d0d10a438cc7e1465546f641690561fd97bc9e
     # via
     #   mlflow-skinny
     #   mlflow-tracing
