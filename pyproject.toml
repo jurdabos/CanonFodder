@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "c9r"
-version = "0.9"
+version = "0.9.1"
 description = "Reproducible pipeline for music scrobble ingestion, artist-name record linkage, and interactive analytics."
 # Upper-bound excludes 3.14: ruamel-yaml-clib 0.2.12 (transitive via prefect) uses
 # `from ast import Str`, which was removed in Python 3.12+ and never reinstated.

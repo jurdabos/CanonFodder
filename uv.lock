@@ -282,7 +282,7 @@ wheels = [
 
 [[package]]
 name = "c9r"
-version = "0.9"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
