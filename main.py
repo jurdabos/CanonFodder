@@ -19,8 +19,10 @@ from dotenv import load_dotenv
 try:
     from acidbase.cli_utils import group
     from acidbase.push import push_command
+    from acidbase.versioning import bump_command
 except ImportError:  # to keep the CLI usable when acidbase is absent
     group = click.group  # plain click help formatting as the fallback
+    bump_command = None
     push_command = None
 
 load_dotenv()
@@ -1658,6 +1660,11 @@ def flow(source: str, full: bool) -> None:
 
 
 # ── push ─────────────────────────────────────────────────────────────────────
+if bump_command is not None:
+    cli.add_command(bump_command)
+else:
+    log.debug("acidbase not installed — `c9r bump` is unavailable.")
+
 if push_command is not None:
     # Attaching the shared acidbase commit-and-push workflow as `c9r push`.
     cli.add_command(push_command)
