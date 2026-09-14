@@ -385,9 +385,9 @@ cycler==0.12.1 \
     --hash=sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30 \
     --hash=sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c
     # via matplotlib
-cyclopts==4.16.1 \
-    --hash=sha256:617795392c4113a2c2cc7af716f20244900e87f23daa05442d1268d81472a592 \
-    --hash=sha256:8aa47bf92a5fb33abca5af05e576eecdb0d2f79893ad29238046df78370fc4a8
+cyclopts==4.25.2 \
+    --hash=sha256:0776bc1fa796cd351646c345b7420279e58d6c2c4a8f5d5dd54dea85bdb2de8f \
+    --hash=sha256:51b42513eea5e4ba6a08b68acf187b81f1191032cf77b9631086cfa2c88fa7a4
     # via prefect
 databricks-sdk==0.92.0 \
     --hash=sha256:50cbd3fa3757b98779ca28c4c885c671486bf2be8a493cc1e5c44d27c80eba41 \
