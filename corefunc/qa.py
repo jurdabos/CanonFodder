@@ -40,7 +40,7 @@ ALBUM_NULL_THRESHOLD = 0.30  # up to 30 % album missingness is normal for LB
 DUPLICATE_RATE_THRESHOLD = 0.05  # > 5 % duplicates warrants a warning
 MIN_PLAUSIBLE_YEAR = 2000
 # Matching Unicode replacement char or C0/C1 control chars (except \n \r \t)
-_BAD_CHAR_RE = re.compile(r"[\uFFFD\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]")
+_BAD_CHAR_RE = re.compile("[\ufffd\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 
 def _null_and_empty(series: pd.Series) -> dict[str, Any]:

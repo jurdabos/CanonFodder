@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 # ── Encoding-repair constants ─────────────────────────────────────────────────
 # Matching Unicode replacement char or C0/C1 control chars (except \n \r \t)
-_BAD_CHAR_RE = re.compile(r"[\uFFFD\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]")
+_BAD_CHAR_RE = re.compile("[\ufffd\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _SCROBBLE_TEXT_COLS = ["artist_name", "album_title", "track_title"]
 _ARTIST_INFO_TEXT_COLS = ["artist_name", "disambiguation_comment", "aliases"]
 # CP1252 bytes 0x80–0x9F → proper Unicode (0x81/0x8D/0x8F/0x90/0x9D undefined)

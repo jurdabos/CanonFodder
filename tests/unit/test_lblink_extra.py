@@ -4,6 +4,7 @@ Additional unit tests for HTTP.lblink — LBClient facade and _cli helper.
 
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from HTTP.lblink import LBClient, _cli, _RequestsBackend
@@ -187,7 +188,7 @@ class TestFetchScrobblesSince:
         assert list(df.columns) == ["Artist", "Song", "Album", "uts", "artist_mbid"]
         assert df.iloc[0]["Artist"] == "Artist A"
         assert df.iloc[0]["artist_mbid"] == "abc-123"
-        assert df.iloc[1]["artist_mbid"] is None
+        assert pd.isna(df.iloc[1]["artist_mbid"])
 
     @patch("HTTP.lblink.requests.Session")
     def test_empty_result(self, mock_sess_cls):
@@ -282,7 +283,7 @@ class TestFetchScrobblesSince:
         mock_sess_cls.return_value.get.return_value = mock_resp
         df = fetch_scrobbles_since("testuser")
         assert len(df) == 1
-        assert df.iloc[0]["artist_mbid"] is None
+        assert pd.isna(df.iloc[0]["artist_mbid"])
 
 
 class TestCli:
