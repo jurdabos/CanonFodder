@@ -771,7 +771,7 @@ def run_tcn_training(
     print(f"{'=' * 100}")
     y_pred_opt = (test_probs >= opt_thr).astype(int)
     print(f"\n=== {model_label} (optimal thr={opt_thr:.3f}) ===")
-    print(classification_report(y_test, y_pred_opt, target_names=["no link", "link"]))
+    print(classification_report(y_test, y_pred_opt, target_names=["no link", "link"], zero_division=0))
     c9r_score = 0.4 * best_hi["precision"] + 0.3 * best_hi["f1"] + 0.3 * auc
     print(f"c9r score: {c9r_score:.4f}")
     print(

@@ -86,6 +86,10 @@ addopts = "-v --cov=. --cov-report=term-missing -m 'not integration'"
 markers = [
     "integration: marks tests that hit real services or need external deps (deselected by default)",
 ]
+filterwarnings = [
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["."]

@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `corefunc/canon/trainer.py`: replace iterative column-by-column DataFrame assignments in feature generation with batch `pd.concat([df, ...], axis=1)`, eliminating 160 pandas `PerformanceWarning: DataFrame is highly fragmented` warnings.
+- `corefunc/canon/model.py`, `corefunc/canon/trainer.py`, `corefunc/canon/tuner.py`, `corefunc/canon/experiment_runner.py`, `corefunc/canon/tcn_trainer.py`, `helpers/stats.py`: pass `zero_division=0` in `precision_score`, `recall_score`, `f1_score`, and `classification_report`, eliminating 40 scikit-learn `UndefinedMetricWarning: Precision is ill-defined` warnings on test splits with zero predicted positives.
+- `corefunc/model_server.py`: migrate from deprecated `@app.on_event("startup")` decorator to standard ASGI `lifespan` context manager, while keeping `_startup()` callable for unit testing.
+- `pyproject.toml`: add pytest `filterwarnings` configuration for upstream Starlette testclient and AnyIO deprecation warnings.
 - `tests/unit/test_lblink_extra.py`: assert `pd.isna(...)` for missing `artist_mbid` rather than identity check `is None`, matching pandas' string/object series representation of missing values.
 - `corefunc/data_cleaning.py`, `corefunc/qa.py`: compile `_BAD_CHAR_RE` with a standard string literal rather than a raw string (`r"..."`). The raw string left literal `\u` in the pattern string forwarded to PyArrow during `Series.str.contains` over Arrow-backed strings, causing PyArrow's RE2 regex engine to fail with `ArrowInvalid: Invalid regular expression: invalid escape sequence: \u`.
 

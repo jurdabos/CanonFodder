@@ -11,6 +11,7 @@ POST /predict_batch   – batch prediction
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from importlib.metadata import version as pkg_version
 from typing import Dict, List, Optional, Union
 
@@ -21,12 +22,10 @@ from pydantic import BaseModel
 from helpers.inference import MODEL_PATH, load_model
 
 logger = logging.getLogger(__name__)
-app = FastAPI(title="c9r model server", version=pkg_version("c9r"))
 _model = None
 _columns: Optional[List[str]] = None
 
 
-@app.on_event("startup")
 def _startup() -> None:
     """Loads the LightGBM pipeline when the server starts."""
     global _model, _columns
@@ -36,6 +35,16 @@ def _startup() -> None:
         logger.info("Model loaded: %d features.", len(_columns))
     except FileNotFoundError as exc:
         logger.warning("Model not available at startup: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manages model server lifespan (startup / shutdown)."""
+    _startup()
+    yield
+
+
+app = FastAPI(title="c9r model server", version=pkg_version("c9r"), lifespan=lifespan)
 
 
 def _preprocess(data: Dict[str, Union[float, int]]) -> pd.DataFrame:

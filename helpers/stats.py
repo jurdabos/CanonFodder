@@ -114,7 +114,7 @@ def show_cm_and_report(y_true, y_pred, title: str = "") -> None:
     if title:
         print(f"\n{title}")
     print(cm_df.to_string())
-    print(classification_report(y_true, y_pred, target_names=["no link", "link"]))
+    print(classification_report(y_true, y_pred, target_names=["no link", "link"], zero_division=0))
 
 
 def variance_testing(dframe: pd.DataFrame, varthresh: float):

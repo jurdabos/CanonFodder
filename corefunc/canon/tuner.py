@@ -370,6 +370,7 @@ def _retrain_best(
                 y_test,
                 y_pred_opt,
                 target_names=["no link", "link"],
+                zero_division=0,
             )
         )
         # Logging artefacts

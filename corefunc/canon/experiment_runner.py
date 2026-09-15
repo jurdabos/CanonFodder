@@ -346,7 +346,7 @@ def run_experiment(
                 # Printing classification report
                 y_pred = final_pipeline.predict(X_test)
                 print(f"\n=== {model_name} (held-out) ===")
-                print(classification_report(y_test, y_pred, target_names=["no link", "link"]))
+                print(classification_report(y_test, y_pred, target_names=["no link", "link"], zero_division=0))
                 print(f"AUC: {test_metrics['auc']:.4f}")
                 # Logging artefacts
                 experiment.log_confusion_matrix(y_test, y_pred)
@@ -465,7 +465,7 @@ def run_holdout_experiment(
                 results[model_name] = test_metrics
                 y_pred = final_pipeline.predict(X_test)
                 print(f"\n=== {model_name} (avc holdout) ===")
-                print(classification_report(y_test, y_pred, target_names=["no link", "link"]))
+                print(classification_report(y_test, y_pred, target_names=["no link", "link"], zero_division=0))
                 print(f"AUC: {test_metrics['auc']:.4f}")
                 experiment.log_confusion_matrix(y_test, y_pred)
                 experiment.log_feature_importance(final_pipeline, num_cols)

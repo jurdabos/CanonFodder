@@ -164,12 +164,12 @@ def evaluate(model: Pipeline, X_test: pd.DataFrame, y_test: pd.Series) -> dict[s
     y_prob = model.predict_proba(X_test)[:, 1]
     auc = roc_auc_score(y_test, y_prob)
     metrics = {
-        "precision": precision_score(y_test, y_pred),
-        "recall": recall_score(y_test, y_pred),
-        "f1": f1_score(y_test, y_pred),
+        "precision": precision_score(y_test, y_pred, zero_division=0),
+        "recall": recall_score(y_test, y_pred, zero_division=0),
+        "f1": f1_score(y_test, y_pred, zero_division=0),
         "auc": auc,
     }
     print("\n=== LightGBM report (held-out) ===")
-    print(classification_report(y_test, y_pred, target_names=["no link", "link"]))
+    print(classification_report(y_test, y_pred, target_names=["no link", "link"], zero_division=0))
     print(f"AUC: {auc:.3f}")
     return metrics

@@ -348,8 +348,9 @@ def _add_catalogue_features(
         if (i + 1) % 200 == 0:
             log.info("  Catalogue features: %d/%d (%.0f%%)", i + 1, n, 100 * (i + 1) / n)
     cat_df = pd.DataFrame(feat_rows, index=df.index)
-    for col in cat_df.columns:
-        df[col] = cat_df[col]
+    new_cols = [col for col in cat_df.columns if col not in df.columns]
+    if new_cols:
+        df = pd.concat([df, cat_df[new_cols]], axis=1)
     return df
 
 
@@ -379,14 +380,14 @@ def _add_base_features(df: pd.DataFrame) -> pd.DataFrame:
         if (i + 1) % 200 == 0:
             log.info("  Base features: %d/%d (%.0f%%)", i + 1, n, 100 * (i + 1) / n)
     feat_df = pd.DataFrame(feat_rows, index=df.index)
-    for col in feat_df.columns:
-        if col not in df.columns:
-            df[col] = feat_df[col]
+    new_cols = [col for col in feat_df.columns if col not in df.columns]
+    if new_cols:
+        df = pd.concat([df, feat_df[new_cols]], axis=1)
     log.info("Computing interaction features...")
     interaction_df = _compute_interaction_features(feat_df)
-    for col in interaction_df.columns:
-        if col not in df.columns:
-            df[col] = interaction_df[col]
+    new_int_cols = [col for col in interaction_df.columns if col not in df.columns]
+    if new_int_cols:
+        df = pd.concat([df, interaction_df[new_int_cols]], axis=1)
     return df
 
 
@@ -553,8 +554,9 @@ def _add_proportional_catalogue_features(
         if (i + 1) % 200 == 0:
             log.info("  Proportional catalogue: %d/%d (%.0f%%)", i + 1, n, 100 * (i + 1) / n)
     cat_df = pd.DataFrame(feat_rows, index=df.index)
-    for col in cat_df.columns:
-        df[col] = cat_df[col]
+    new_cols = [col for col in cat_df.columns if col not in df.columns]
+    if new_cols:
+        df = pd.concat([df, cat_df[new_cols]], axis=1)
     return df
 
 
@@ -1220,9 +1222,9 @@ def _add_separated_features(df: pd.DataFrame) -> pd.DataFrame:
         if (i + 1) % 200 == 0:
             log.info("  Separated base features: %d/%d (%.0f%%)", i + 1, n, 100 * (i + 1) / n)
     base_df = pd.DataFrame(base_rows, index=df.index)
-    for col in base_df.columns:
-        if col not in df.columns:
-            df[col] = base_df[col]
+    new_base_cols = [col for col in base_df.columns if col not in df.columns]
+    if new_base_cols:
+        df = pd.concat([df, base_df[new_base_cols]], axis=1)
     # Computing cross-tier + non-WS interactions
     log.info("Computing cross-tier and non-WS interaction features...")
     interaction_rows: list[dict] = []
@@ -1230,9 +1232,9 @@ def _add_separated_features(df: pd.DataFrame) -> pd.DataFrame:
         feats = compute_pair_features(str(row["variant_a"]), str(row["variant_b"]))
         interaction_rows.append(_compute_cross_tier_interactions(feats))
     interaction_df = pd.DataFrame(interaction_rows, index=df.index)
-    for col in interaction_df.columns:
-        if col not in df.columns:
-            df[col] = interaction_df[col]
+    new_int_cols = [col for col in interaction_df.columns if col not in df.columns]
+    if new_int_cols:
+        df = pd.concat([df, interaction_df[new_int_cols]], axis=1)
     return df
 
 
@@ -1285,9 +1287,9 @@ def _add_base_features_only(df: pd.DataFrame) -> pd.DataFrame:
         if (i + 1) % 200 == 0:
             log.info("  Base features: %d/%d (%.0f%%)", i + 1, n, 100 * (i + 1) / n)
     feat_df = pd.DataFrame(feat_rows, index=df.index)
-    for col in feat_df.columns:
-        if col not in df.columns:
-            df[col] = feat_df[col]
+    new_cols = [col for col in feat_df.columns if col not in df.columns]
+    if new_cols:
+        df = pd.concat([df, feat_df[new_cols]], axis=1)
     return df
 
 
@@ -1726,6 +1728,7 @@ def run_training(
                         y_test,
                         y_pred_opt,
                         target_names=["no link", "link"],
+                        zero_division=0,
                     )
                 )
                 # Logging artefacts
