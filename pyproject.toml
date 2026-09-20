@@ -177,6 +177,7 @@ dev = [
     "fpdf2>=2.8.7",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
+    "ruff>=0.16",
 ]
 # CUDA-13 build from PyPI (default index) — local development default.
 gpu = ["torch>=2.13.0"]
