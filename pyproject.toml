@@ -13,7 +13,6 @@ license = "MIT"
 authors = [{name = "Torda Bal\u00e1zs", email = "balazs.torda@iu-study.org"}]
 dependencies = [
   "aiohttp>=3.14.3",
-  "apache-airflow>=3.3.0",
   "certifi>=2026.10.18",
   "click>=8.1",
   "cryptography>=50.0.0",

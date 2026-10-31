@@ -4,6 +4,14 @@ All notable changes to c9r (CanonFodder) in reverse chronological order.
 
 ---
 
+## 2026-10-31: Airflow dependency removed again (regression of 2026-06-12)
+- pyproject.toml — dropped `apache-airflow>=3.3.0`. It had been re-added in 41f4099 ("security: update apache-airflow to 3.3.0 to fix CVE-2026-33264"), where a CVE fix bumped the version of a package the project no longer uses instead of removing it. No module imports `airflow`; Prefect is the sole orchestrator.
+- uv.lock, requirements.txt — re-locked via `uv remove apache-airflow` and re-exported with `uv export --frozen --output-file=requirements.txt` (hashed format kept); Airflow core, task SDK and all providers are gone from the dependency tree.
+- GitHub — Dependabot alerts on the long-deleted `requirements-airflow.txt` manifest (removed in ed02f93) are still open and must be dismissed manually; alerts on `uv.lock`/`requirements.txt` close as fixed once this change is pushed.
+- Notes / clarifications — when acting on an apache-airflow (or other unused-package) security alert, remove the dependency rather than bumping it; check `git grep -il airflow` returns only this changelog.
+
+---
+
 ## 2026-06-14: Raise `profile variants` default threshold to 91
 - main.py — the `c9r profile variants` `-t/--threshold` default changed from 85 to 91, so the near-duplicate scan surfaces only high-confidence pairs by default (lower thresholds still available explicitly).
 
