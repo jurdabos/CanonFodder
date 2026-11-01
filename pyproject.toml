@@ -26,6 +26,7 @@ dependencies = [
   "mako>=1.4.2",
   "matplotlib>=3.9",
   "mlflow>=3.17.0",
+  "multidict>=6.9.1",
   "musicbrainzngs>=0.7.1",
   "numpy>=2.0",
   "optuna>=4.0",
