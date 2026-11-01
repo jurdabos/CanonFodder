@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adopted the canonical non-truncating CLI help from acidbase: the top-level command group is now built with `acidbase.cli_utils.group` (a `click.Group` subclass) instead of `click.group`. Click's default group listing truncates each command's short help at 45 characters, so longer descriptions ended in `...`; the shared group wraps the full first paragraph onto aligned continuation lines instead. `RichGroup.main` also routes output through `ensure_unicode_safe_streams()`, so non-ASCII help (em dashes, accented words) survives on Windows consoles using a legacy code page. `uv.lock` pins acidbase at the commit providing `cli_utils`.
 
 ### Fixed
+- `.python-version` (3.12), `.gitignore`, `.github/workflows/lint.yml`: CI now runs on a deliberately
+  pinned Python. `.gitignore` no longer ignores `.python-version` (a rule inherited from the old acidbase
+  template), so the pin is tracked; without it the lint job's bare `uv python install` picked the newest CPython
+  (3.15 broke bpmfinder via numba). The lint job now fails with a clear annotation when the file is missing, and
+  syncs with plain `uv sync --frozen` instead of the always-failing `--extra dev` fallback.
 
 - `corefunc/canon/trainer.py`: replace iterative column-by-column DataFrame assignments in feature generation with batch `pd.concat([df, ...], axis=1)`, eliminating 160 pandas `PerformanceWarning: DataFrame is highly fragmented` warnings.
 - `corefunc/canon/model.py`, `corefunc/canon/trainer.py`, `corefunc/canon/tuner.py`, `corefunc/canon/experiment_runner.py`, `corefunc/canon/tcn_trainer.py`, `helpers/stats.py`: pass `zero_division=0` in `precision_score`, `recall_score`, `f1_score`, and `classification_report`, eliminating 40 scikit-learn `UndefinedMetricWarning: Precision is ill-defined` warnings on test splits with zero predicted positives.
