@@ -29,6 +29,7 @@ dependencies = [
   "multidict>=6.9.1",
   "musicbrainzngs>=0.7.1",
   "numpy>=2.0",
+  "oauthlib>=4.0.0",
   "optuna>=4.0",
   "orjson>=3.11.4",
   "pandas>=2.2",
