@@ -54,6 +54,7 @@ dependencies = [
   "tenacity>=9.1",
   "urllib3>=2.8.0",
   "uvicorn>=0.34",
+  "werkzeug>=3.1.9",
   "xgboost>=3.0",
 ]
 
