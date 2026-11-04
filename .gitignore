@@ -150,3 +150,13 @@ test_output.*
 *.pot
 webdrivers/
 .wdm/
+
+# --- appended by acidbase scaffold ---
+*.npy
+.env.*
+.serena/
+/.quarto/
+/_site/
+/Backup.egg-info/
+/backup.log
+!.env.example
