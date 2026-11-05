@@ -119,6 +119,10 @@ exclude_lines = [
 ]
 
 # Canonical ruff configuration for the a6a ecosystem (mirrors acidbase templates/pyproject.lint.toml).
+[tool.acidbase.brand]
+# Build output that must embed literal values.
+exempt = ["pics/*"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"
