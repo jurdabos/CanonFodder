@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- `.dockerignore`: excludes `.env` and `.env.*`, keeping `.env.example`. The Dockerfile copies the whole build context, so any image built here would have contained the local secrets. A real build confirmed both the problem and the fix.
 - `pyproject.toml`, `uv.lock`, `requirements.txt`: bumped `cryptography` `>=48.0.1` → `>=50.0.0` (locked `48.0.1` → `50.0.0`) to remediate CVE-2026-69247. The `acidbase patch` `uv add` failed with `UVADDFAIL` because every published mlflow (<= 3.15.1, pre-releases included) caps `cryptography < 50`; appended `"cryptography>=50.0.0"` to the existing `[tool.uv] override-dependencies` to lift the transitive cap — drop it once an mlflow release allows `cryptography >= 50`.
 
 ### Notes / clarifications
