@@ -44,7 +44,6 @@ checkpoints/
 logs/
 *.db
 *.sqlite
-*.sql
 *.parquet
 *.zip
 *.tar
